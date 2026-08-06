@@ -1,0 +1,29 @@
+{
+  "task_id": "task-example-001",
+  "project_id": "jobslayer",
+  "version": 1,
+  "title": "为示例模块补充回归测试",
+  "objective": "复现已知缺陷并以最小修改修复，现有行为保持不变",
+  "repository": "https://example.invalid/owner/repository.git",
+  "base_commit": "0123456789abcdef0123456789abcdef01234567",
+  "allowed_paths": [
+    "src/example/",
+    "tests/example/"
+  ],
+  "forbidden_paths": [
+    ".github/workflows/",
+    "secrets/"
+  ],
+  "required_capabilities": [
+    "python_bugfix",
+    "unit_test"
+  ],
+  "acceptance_criteria": [
+    "新增测试在修复前失败、修复后通过",
+    "完整单元测试套件通过",
+    "没有修改允许路径之外的文件"
+  ],
+  "validation_profile": "python_patch_v1",
+  "risk": "low",
+  "max_cost_usd": 2.0
+}
