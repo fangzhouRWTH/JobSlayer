@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "task_id": "bnw-filter-demo-001",
+  "project_id": "brave-new-world",
+  "version": 1,
+  "title": "增加确定性含噪信号与低通滤波教学主题",
+  "objective": "在不增加运行时依赖的前提下，为 BraveNewWorld 增加可无头验证且与交互 UI 共用同一内核的含噪正弦信号、一阶低通滤波、真实量化指标和极简教学可视化。",
+  "repository": "https://github.com/fangzhouRWTH/BraveNewWorld.git",
+  "base_commit": "fb43878c9f0164deef272e55969c0fc134a6d6a3",
+  "allowed_paths": [
+    "src/brave_new_world/",
+    "tests/",
+    "scenarios/",
+    "docs/",
+    "README.md"
+  ],
+  "forbidden_paths": [
+    ".github/",
+    "AGENTS.md",
+    "bnw",
+    "pyproject.toml"
+  ],
+  "required_capabilities": [
+    "deterministic_signal_generation",
+    "first_order_low_pass_filter",
+    "quantitative_filter_metrics",
+    "headless_scenario",
+    "modular_visualization",
+    "build_and_test"
+  ],
+  "acceptance_criteria": [
+    "同一版本、请求与整数 seed 必须产生完全相同的轨迹哈希，且不得依赖全局随机状态",
+    "滤波演示返回 clean、noisy、filtered 三条真实轨迹以及原始和滤波 RMS 误差、改善比例、理论衰减与相位延迟指标",
+    "一阶低通更新使用由截止频率和固定采样步长导出的稳定离散形式，并校验所有输入为有限且处于教学边界内",
+    "新增 scenarios/noisy-low-pass.json 且可由 ./bnw run-scenario 无头执行",
+    "现有一阶阶跃演示与 API 保持兼容，UI 能明确切换两个真实 demo 并只显示实际实现的参数、曲线与指标",
+    "新增契约、确定性、数值行为、CLI 场景和 HTTP API 测试，完整 ./bnw check 通过",
+    "README、架构文档和开发日志准确记录实现、公式、限制和验证结果",
+    "没有修改任务允许范围之外的路径，也没有新增运行时依赖"
+  ],
+  "validation_profile": "brave-new-world-filter-v1",
+  "risk": "low"
+}

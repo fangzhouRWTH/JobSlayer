@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""Repository launcher for the same entry used by installed JobSlayer."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+import sys
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parent
+SOURCE_ROOT = REPOSITORY_ROOT / "src"
+
+
+def _preferred_python() -> Path | None:
+    configured = os.environ.get("JOBSLAYER_PYTHON")
+    if configured:
+        return Path(configured).expanduser().absolute()
+    repository_python = REPOSITORY_ROOT / ".venv" / "bin" / "python"
+    return repository_python if repository_python.is_file() else None
+
+
+def _relaunch_in_project_environment() -> None:
+    preferred = _preferred_python()
+    if preferred is None:
+        return
+    if not preferred.is_file():
+        raise SystemExit(f"configured JobSlayer Python does not exist: {preferred}")
+    if Path(sys.executable).absolute() == preferred.absolute():
+        return
+    os.execv(
+        str(preferred),
+        (str(preferred), str(Path(__file__).resolve()), *sys.argv[1:]),
+    )
+
+
+_relaunch_in_project_environment()
+sys.path.insert(0, str(SOURCE_ROOT))
+
+from jobslayer.launcher import main  # noqa: E402 - source path bootstrap
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

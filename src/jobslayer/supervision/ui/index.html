@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>JobSlayer · 本地决策审查</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">JOBSLAYER / LOCAL REVIEW</p>
+        <h1>工程决策审查</h1>
+      </div>
+      <span id="connection-status" class="badge neutral">读取中</span>
+    </header>
+
+    <main id="app" class="layout" aria-live="polite">
+      <section class="panel loading-panel">
+        <p>正在读取经过校验的决策卡与审计状态……</p>
+      </section>
+    </main>
+
+    <template id="review-template">
+      <div class="main-column">
+        <section class="panel hero-panel">
+          <div class="status-row">
+            <span id="risk-badge" class="badge"></span>
+            <span id="workflow-badge" class="badge"></span>
+            <span id="identity-badge" class="badge warning">身份未认证</span>
+          </div>
+          <p id="card-kind" class="eyebrow"></p>
+          <h2 id="card-title"></h2>
+          <p id="decision-required" class="lead"></p>
+          <dl class="facts">
+            <div><dt>任务</dt><dd id="task-id"></dd></div>
+            <div><dt>卡片</dt><dd id="card-id"></dd></div>
+            <div><dt>评审者</dt><dd id="actor-id"></dd></div>
+            <div><dt>卡片哈希</dt><dd id="card-hash" class="hash"></dd></div>
+          </dl>
+          <div class="why-box">
+            <h3>为什么是现在</h3>
+            <p id="why-now"></p>
+          </div>
+          <div id="integration-boundary" class="why-box" hidden>
+            <h3>批准后的真实边界</h3>
+            <p id="integration-boundary-text"></p>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <div><p class="eyebrow">EVIDENCE</p><h2>可核对证据</h2></div>
+            <span id="evidence-count" class="count"></span>
+          </div>
+          <div id="evidence-list" class="evidence-list"></div>
+        </section>
+
+        <section class="panel">
+          <p class="eyebrow">DECISION</p>
+          <h2>选择处理方式</h2>
+          <form id="decision-form">
+            <fieldset id="option-list"></fieldset>
+            <label for="rationale">决定理由</label>
+            <textarea id="rationale" name="rationale" rows="5" required
+              placeholder="说明你核对了什么，以及为何选择该项。"></textarea>
+            <p class="field-note">决定将写入本地 JSON，但不会自动应用、集成、push 或部署。</p>
+            <button id="submit-button" type="submit">记录决定</button>
+          </form>
+          <div id="decision-result" class="result" hidden></div>
+        </section>
+      </div>
+
+      <aside class="side-column">
+        <section class="panel compact-panel">
+          <p class="eyebrow">WORKFLOW</p>
+          <h2>审计状态</h2>
+          <p id="journal-notice" class="muted"></p>
+          <ol id="timeline" class="timeline"></ol>
+        </section>
+
+        <section class="panel compact-panel boundary-panel">
+          <p class="eyebrow">BOUNDARY</p>
+          <h2>当前能力边界</h2>
+          <ul id="capability-list" class="capability-list"></ul>
+        </section>
+
+        <section class="panel compact-panel">
+          <p class="eyebrow">ARTIFACTS</p>
+          <h2>受影响制品</h2>
+          <ul id="artifact-list" class="plain-list"></ul>
+        </section>
+      </aside>
+    </template>
+  </body>
+</html>

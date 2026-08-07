@@ -13,8 +13,10 @@ dependencies = [
 ]
 
 [project.scripts]
-jobslayer = "jobslayer.cli:main"
+jobslayer = "jobslayer.launcher:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"jobslayer.supervision.ui" = ["*.html", "*.css", "*.js"]

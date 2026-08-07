@@ -4,6 +4,7 @@ from collections.abc import Mapping
 
 from jobslayer.domain.models import (
     ActorType,
+    SourceIntegrationResult,
     TaskState,
     TransitionRecord,
     VerificationReport,
@@ -33,7 +34,7 @@ ALLOWED_TRANSITIONS: Mapping[TaskState, frozenset[TaskState]] = {
         {TaskState.PLAN_REVIEW, TaskState.IMPLEMENTING}
     ),
     TaskState.PLAN_REVIEW: frozenset(
-        {TaskState.IMPLEMENTING, TaskState.CANCELLED}
+        {TaskState.PLANNED, TaskState.IMPLEMENTING, TaskState.CANCELLED}
     ),
     TaskState.IMPLEMENTING: frozenset(
         {TaskState.VERIFYING, TaskState.BLOCKED, TaskState.FAILED}
@@ -52,6 +53,9 @@ ALLOWED_TRANSITIONS: Mapping[TaskState, frozenset[TaskState]] = {
         {TaskState.REPAIRING, TaskState.MERGE_REVIEW}
     ),
     TaskState.MERGE_REVIEW: frozenset(
+        {TaskState.REPAIRING, TaskState.INTEGRATING, TaskState.CANCELLED}
+    ),
+    TaskState.INTEGRATING: frozenset(
         {TaskState.COMPLETED, TaskState.CANCELLED}
     ),
     TaskState.COMPLETED: frozenset(),
@@ -81,6 +85,7 @@ class WorkflowKernel:
         actor_id: str,
         reason: str,
         verification_report: VerificationReport | None = None,
+        integration_result: SourceIntegrationResult | None = None,
         evidence_ids: tuple[str, ...] = (),
     ) -> TransitionRecord:
         from_state = self.current_state(task_id)
@@ -88,12 +93,17 @@ class WorkflowKernel:
             raise IllegalTransitionError(
                 f"transition {from_state.value} -> {to_state.value} is not allowed"
             )
-        self._authorize(actor_type=actor_type, to_state=to_state)
+        self._authorize(
+            actor_type=actor_type,
+            from_state=from_state,
+            to_state=to_state,
+        )
         evidence_ids = self._enforce_verification(
             task_id=task_id,
             from_state=from_state,
             to_state=to_state,
             report=verification_report,
+            integration_result=integration_result,
             evidence_ids=evidence_ids,
         )
         return self.journal.append_transition(
@@ -107,7 +117,19 @@ class WorkflowKernel:
         )
 
     @staticmethod
-    def _authorize(*, actor_type: ActorType, to_state: TaskState) -> None:
+    def _authorize(
+        *,
+        actor_type: ActorType,
+        from_state: TaskState,
+        to_state: TaskState,
+    ) -> None:
+        if from_state in {TaskState.PLAN_REVIEW, TaskState.MERGE_REVIEW} and actor_type not in {
+            ActorType.HUMAN,
+            ActorType.POLICY,
+        }:
+            raise AuthorizationError(
+                f"leaving {from_state.value} requires a human or policy actor"
+            )
         if to_state in {TaskState.COMPLETED, TaskState.CANCELLED} and actor_type not in {
             ActorType.HUMAN,
             ActorType.POLICY,
@@ -127,9 +149,14 @@ class WorkflowKernel:
         from_state: TaskState,
         to_state: TaskState,
         report: VerificationReport | None,
+        integration_result: SourceIntegrationResult | None,
         evidence_ids: tuple[str, ...],
     ) -> tuple[str, ...]:
-        if to_state in {TaskState.REVIEWING, TaskState.COMPLETED}:
+        if to_state in {
+            TaskState.REVIEWING,
+            TaskState.INTEGRATING,
+            TaskState.COMPLETED,
+        }:
             if report is None:
                 raise VerificationGateError(
                     f"{to_state.value} requires a verification report"
@@ -144,6 +171,32 @@ class WorkflowKernel:
                 )
             evidence_ids = tuple(dict.fromkeys((*evidence_ids, report.report_id)))
 
+        if to_state is TaskState.COMPLETED:
+            if from_state is not TaskState.INTEGRATING:
+                raise VerificationGateError(
+                    "completion requires the integrating state"
+                )
+            if integration_result is None:
+                raise VerificationGateError(
+                    "completion requires a source integration result"
+                )
+            if integration_result.task_id != task_id:
+                raise VerificationGateError(
+                    "source integration result belongs to a different task"
+                )
+            assert report is not None
+            if (
+                report.source_patch_sha256 is None
+                or report.source_patch_sha256
+                != integration_result.source_patch_sha256
+            ):
+                raise VerificationGateError(
+                    "source integration result does not match the verified patch"
+                )
+            evidence_ids = tuple(
+                dict.fromkeys((*evidence_ids, integration_result.integration_id))
+            )
+
         if from_state is TaskState.VERIFYING and to_state is TaskState.REPAIRING:
             if report is None or report.passes_gate:
                 raise VerificationGateError(
@@ -155,4 +208,3 @@ class WorkflowKernel:
                 )
             evidence_ids = tuple(dict.fromkeys((*evidence_ids, report.report_id)))
         return evidence_ids
-

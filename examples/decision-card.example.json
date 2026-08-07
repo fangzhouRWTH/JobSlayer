@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "card_id": "card-example-merge-001",
+  "task_id": "task-example-001",
+  "decision_kind": "merge_review",
+  "title": "是否允许示例补丁进入合并提案",
+  "decision_required": "选择批准、要求修改或拒绝当前补丁",
+  "why_now": "实现和全部必需验证已经结束，工作流需要人工合并门禁",
+  "risk": "medium",
+  "reversible": true,
+  "affected_artifact_ids": [
+    "patch-example-001"
+  ],
+  "evidence": [
+    {
+      "evidence_id": "verification-example-001",
+      "evidence_type": "verification_report",
+      "summary": "全部必需检查通过，未发现回归或未解决风险",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "evidence_id": "review-example-001",
+      "evidence_type": "independent_review",
+      "summary": "独立评审认为修改范围与任务一致"
+    }
+  ],
+  "options": [
+    {
+      "option_id": "approve",
+      "label": "批准合并提案",
+      "description": "允许控制器进入 Completed 前的最终政策检查",
+      "consequences": "记录人工批准；控制器仍须验证卡片、证据和合法状态转换",
+      "recommended": true
+    },
+    {
+      "option_id": "request_changes",
+      "label": "要求修改",
+      "description": "将任务退回修复并保留当前证据",
+      "consequences": "产生新的修复与验证轮次，不覆盖现有失败或评审记录"
+    },
+    {
+      "option_id": "reject",
+      "label": "拒绝",
+      "description": "不接受当前补丁",
+      "consequences": "控制器根据任务政策决定取消或保持等待状态"
+    }
+  ],
+  "default_option_id": "approve",
+  "created_at": "2026-08-07T00:00:00Z"
+}

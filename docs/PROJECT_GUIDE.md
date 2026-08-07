@@ -88,7 +88,10 @@ flowchart LR
 | `AgentRunSpec` | 某执行器的一次受控运行 | 固定上下文包、工作区、权限、时限和输出模式 |
 | `RunEvent` | 统一的运行事件 | 同一运行内顺序号唯一且递增 |
 | `ArtifactManifest` | 制品及其来源 | 记录类型、URI、内容哈希和生产者 |
+| `ValidationProfile` | 版本化验证输入 | 每项检查必须命中可信命令规则并服从超时上限 |
 | `VerificationReport` | 检查结果集合 | 区分必需检查、失败、回归和未解决风险 |
+| `TaskExecutionAuthorization` | 单次执行授权 | 绑定任务、human/policy、风险上限和有效窗口 |
+| `ReviewReport` | 实现审查结果 | 绑定任务和补丁哈希，接受时引用验证报告 |
 | `TransitionRecord` | 工作流审计记录 | 记录前后状态、行为者、理由、证据与哈希链 |
 
 契约演进规则：
@@ -110,6 +113,7 @@ stateDiagram-v2
     Planned --> PlanReview
     Planned --> Implementing
     PlanReview --> Implementing
+    PlanReview --> Planned
     PlanReview --> Cancelled
     Implementing --> Verifying
     Implementing --> Blocked
@@ -121,16 +125,21 @@ stateDiagram-v2
     Repairing --> Verifying
     Reviewing --> Repairing
     Reviewing --> MergeReview
-    MergeReview --> Completed
+    MergeReview --> Integrating
+    MergeReview --> Repairing
     MergeReview --> Cancelled
+    Integrating --> Completed
+    Integrating --> Cancelled
 ```
 
 强制规则：
 
 - 每次转换记录行为者、理由、时间和证据引用；
 - 进入 `Reviewing` 必须附带通过的 `VerificationReport`；
-- 进入 `Completed` 必须由 `human` 或获准的 `policy` 行为者执行，并再次引用通过的验证报告；
+- 进入 `Integrating` 必须由 `human` 或获准的 `policy` 行为者执行，并引用通过的验证报告；
+- 进入 `Completed` 必须来自 `Integrating`，由有权行为者执行，并同时引用通过的验证报告及同一 patch 的 `SourceIntegrationResult`；
 - `agent` 无权完成或取消任务；
+- 离开 `PlanReview` 或 `MergeReview` 必须由 `human` 或获准 `policy` 行为者执行；
 - 非法转换不写入日志；
 - 后续重试创建新证据，不修改旧证据。
 
@@ -169,8 +178,16 @@ stateDiagram-v2
 ```text
 src/jobslayer/domain/      提供方无关的契约
 src/jobslayer/workflow/    状态机、政策和审计日志
-src/jobslayer/adapters/    外部 Agent、作业和存储适配器（后续）
-src/jobslayer/verification/验证配置和执行（后续）
+src/jobslayer/workspace/   工作区生命周期协议
+src/jobslayer/integration/ 源码集成协议与完成证据边界
+src/jobslayer/agents/      AgentExecutor 与统一事件缓冲
+src/jobslayer/artifacts/   制品注册和读取协议
+src/jobslayer/application/ 跨组件应用控制器
+src/jobslayer/adapters/    Git、命令、制品和外部 Agent 适配器
+src/jobslayer/execution/   命令执行协议
+src/jobslayer/supervision/ 决策卡、review session、CLI/Web 展示与决定协议
+src/jobslayer/verification/版本化配置的确定性验证引擎
+src/jobslayer/development/统一开发完成门禁编排
 docs/adr/                  架构决策记录
 examples/                  可复制、无敏感信息的输入示例
 tests/                     确定性单元和集成测试
@@ -186,4 +203,4 @@ tests/                     确定性单元和集成测试
 
 ## 11. 当前实施基线
 
-当前代码已建立 Phase 0 的三项地基：类型化契约、确定性状态机、可校验追加日志。下一步不是增加更多角色，而是接入一个真实 Git worktree、一个受限 Codex CLI 执行器，以及一个仓库中可重复运行的验证命令，完成首个真实闭环。详细顺序见 [ROADMAP.md](ROADMAP.md)。
+当前代码已建立 Phase 0 的初步完整框架：类型化契约、确定性状态机、双追加哈希链、任务级 Git worktree、受政策治理的本地 runner、内容寻址制品、版本化验证、结构化人工决策及授权应用、Codex CLI adapter、应用控制器、证据门禁的本地 fast-forward 集成，以及只反映真实能力的 loopback 极简审查页。源码、UI、完整开发验证和安装后 CLI 已统一到 `jobslayer.launcher`。临时 Git 仓库测试已闭合 `MergeReview → Integrating → Completed → cleanup`；BraveNewWorld 的真实 Codex 滤波候选仍停在 `MergeReview`，主分支、人类决定和远端均未被自动修改。下一步先进行人工体验测试，再处理执行前预算、有界修复、认证身份和真实 Codex 外层隔离。完整操作与边界见 [MINIMUM_DEVELOPMENT_LOOP.md](MINIMUM_DEVELOPMENT_LOOP.md)。

@@ -8,6 +8,7 @@ from jobslayer.domain.models import (
     ActorType,
     CheckResult,
     CheckStatus,
+    SourceIntegrationResult,
     TaskState,
     VerificationReport,
 )
@@ -26,6 +27,7 @@ def report(task_id: str, *, passed: bool = True) -> VerificationReport:
         report_id=f"report-{task_id}-{'pass' if passed else 'fail'}",
         task_id=task_id,
         source_commit="0123456789abcdef",
+        source_patch_sha256=hashlib.sha256(b"patch").hexdigest(),
         checks=(
             CheckResult(
                 check_id="tests",
@@ -78,13 +80,47 @@ class WorkflowKernelTests(unittest.TestCase):
 
     def test_happy_path_requires_evidence_and_authorized_completion(self) -> None:
         passing = self.reach_merge_review()
-        self.transition(TaskState.COMPLETED, ActorType.HUMAN, passing)
+        self.transition(TaskState.INTEGRATING, ActorType.HUMAN, passing)
+        integration = SourceIntegrationResult(
+            integration_id="integration-task-1",
+            task_id=self.task_id,
+            workspace_id="workspace-task-1",
+            repository_root="/fixture",
+            source_ref="jobslayer/workspace-task-1",
+            target_ref="main",
+            base_commit="0" * 40,
+            commit="1" * 40,
+            target_previous_commit="0" * 40,
+            target_commit="1" * 40,
+            source_patch_sha256=passing.source_patch_sha256,
+            changed_paths=("src/value.py",),
+            approved_by="test-human",
+        )
+        self.kernel.transition(
+            task_id=self.task_id,
+            to_state=TaskState.COMPLETED,
+            actor_type=ActorType.HUMAN,
+            actor_id="test-human",
+            reason="verified patch was integrated",
+            verification_report=passing,
+            integration_result=integration,
+        )
 
         self.assertEqual(self.kernel.current_state(self.task_id), TaskState.COMPLETED)
         history = self.kernel.history(self.task_id)
-        self.assertEqual(len(history), 6)
+        self.assertEqual(len(history), 7)
         self.assertIn(passing.report_id, history[-1].evidence_ids)
-        self.assertEqual(len(self.journal.read_all()), 6)
+        self.assertIn(integration.integration_id, history[-1].evidence_ids)
+        self.assertEqual(len(self.journal.read_all()), 7)
+
+    def test_completion_rejects_missing_integration_evidence(self) -> None:
+        passing = self.reach_merge_review()
+        self.transition(TaskState.INTEGRATING, ActorType.HUMAN, passing)
+
+        with self.assertRaises(VerificationGateError):
+            self.transition(TaskState.COMPLETED, ActorType.HUMAN, passing)
+
+        self.assertEqual(self.kernel.current_state(self.task_id), TaskState.INTEGRATING)
 
     def test_illegal_transition_is_not_written(self) -> None:
         with self.assertRaises(IllegalTransitionError):
@@ -99,8 +135,20 @@ class WorkflowKernelTests(unittest.TestCase):
 
     def test_agent_cannot_complete(self) -> None:
         passing = self.reach_merge_review()
+        self.transition(TaskState.INTEGRATING, ActorType.HUMAN, passing)
         with self.assertRaises(AuthorizationError):
             self.transition(TaskState.COMPLETED, ActorType.AGENT, passing)
+        self.assertEqual(self.kernel.current_state(self.task_id), TaskState.INTEGRATING)
+
+    def test_human_can_return_merge_review_to_repair(self) -> None:
+        self.reach_merge_review()
+        self.transition(TaskState.REPAIRING, ActorType.HUMAN)
+        self.assertEqual(self.kernel.current_state(self.task_id), TaskState.REPAIRING)
+
+    def test_agent_cannot_return_merge_review_to_repair(self) -> None:
+        self.reach_merge_review()
+        with self.assertRaises(AuthorizationError):
+            self.transition(TaskState.REPAIRING, ActorType.AGENT)
         self.assertEqual(self.kernel.current_state(self.task_id), TaskState.MERGE_REVIEW)
 
     def test_passing_report_is_required_for_review(self) -> None:
@@ -129,4 +177,3 @@ class WorkflowKernelTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
