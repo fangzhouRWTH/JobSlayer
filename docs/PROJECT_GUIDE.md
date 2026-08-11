@@ -184,7 +184,8 @@ src/jobslayer/agents/      AgentExecutor 与统一事件缓冲
 src/jobslayer/artifacts/   制品注册和读取协议
 src/jobslayer/application/ 跨组件应用控制器
 src/jobslayer/adapters/    Git、命令、制品和外部 Agent 适配器
-src/jobslayer/execution/   命令执行协议
+src/jobslayer/execution/   命令执行协议、ProcessSupervisor 与平台实现
+src/jobslayer/recovery/    提供方无关的恢复状态、assessment 与恢复管理协议
 src/jobslayer/supervision/ 决策卡、review session、CLI/Web 展示与决定协议
 src/jobslayer/verification/版本化配置的确定性验证引擎
 src/jobslayer/development/统一开发完成门禁编排

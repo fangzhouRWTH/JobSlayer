@@ -25,10 +25,13 @@
 - [~] 提供最小人工计划/合并审批入口（决策卡、CLI、授权应用和控制器闭环已完成；外部身份认证待实现）；
 - [~] 提供极简可视化监督入口（真实 run 生成的 merge card、状态时间线和决定记录已接通；多任务/认证/远程界面待 Phase 1）；
 - [x] 固化 `./jobslayer` 统一入口，使 UI、完整开发验证、模块运行和安装后 CLI 共用同一 launcher；
+- [x] 提供原生 Windows 仓库入口、平台化进程监督和字节稳定的 Git/制品路径，使控制平面完整开发门禁不依赖 WSL；
 - [x] 用应用控制器串联一次任务、工作区、Agent、补丁、验证、审查和合并决策卡；
 - [x] 区分批准与完成，并用审核 patch/tree、固定 base 和本地 fast-forward 证据闭合成功路径；
+- [x] 提供只读 `inspect-readiness`，用经过完整性校验的运行语料量化自动退出条件，同时保留人工复盘门禁；
+- [~] 定义证据约束的本地 run 恢复协议并接通首个缺失决策卡投影恢复；其余跨文件提交窗口和进程级 crash harness 待完成；
 
-退出条件进展：临时仓库已完整验证到 `Completed` 和 cleanup；真实 BNW 滤波任务已由 Codex 产生补丁并经确定性测试、独立 Agent 审查形成可审计 `MergeReview` 提案。真实人类决定尚未记录，因此 Phase 0 仍差一段实际人工体验与复盘。
+退出条件进展：临时仓库已完整验证到 `Completed` 和 cleanup；真实 BNW 滤波任务已由 Codex 产生补丁并经确定性测试、独立 Agent 审查形成可审计 `MergeReview` 提案。真实人类决定尚未记录，20 个内部 reviewed run 语料尚未建立，因此 Phase 0 仍差实际人工体验与复盘。短期执行顺序见 [短期基础设施开发计划](SHORT_TERM_INFRASTRUCTURE_PLAN.md)。
 
 ## Phase 1 — 工程 MVP
 

@@ -381,33 +381,37 @@ class LocalGitIntegrator:
     ) -> subprocess.CompletedProcess[str]:
         command = self._command(repository, arguments)
         try:
-            result = subprocess.run(
+            binary_result = subprocess.run(
                 command,
                 check=False,
                 capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
                 timeout=self.command_timeout_seconds,
                 env=environment,
-                input=input_text,
+                input=input_text.encode("utf-8") if input_text is not None else None,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise LocalGitIntegrationError(
                 f"Git command could not complete: {command}"
             ) from exc
-        if result.returncode != 0:
+        stdout = binary_result.stdout.decode("utf-8", errors="replace")
+        stderr = binary_result.stderr.decode("utf-8", errors="replace")
+        if binary_result.returncode != 0:
             raise LocalGitIntegrationError(
-                f"reviewed patch cannot produce a Git tree: {result.stderr.strip()}"
+                f"reviewed patch cannot produce a Git tree: {stderr.strip()}"
             )
-        return result
+        return subprocess.CompletedProcess(
+            args=binary_result.args,
+            returncode=binary_result.returncode,
+            stdout=stdout,
+            stderr=stderr,
+        )
 
     @staticmethod
     def _command(repository: Path, arguments: tuple[str, ...]) -> tuple[str, ...]:
         return (
             "git",
             "-c",
-            "core.hooksPath=/dev/null",
+            f"core.hooksPath={os.devnull}",
             "-C",
             str(repository),
             *arguments,

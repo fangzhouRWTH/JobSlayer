@@ -1,6 +1,7 @@
 import hashlib
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -18,10 +19,25 @@ from jobslayer.domain.models import (
     AgentRunStatus,
     WorkspaceSpec,
 )
+from jobslayer.execution import ProcessSupervisor, native_process_supervisor
 
 
-FAKE_CODEX = """#!/usr/bin/env python3
-import json
+class RecordingProcessSupervisor:
+    def __init__(self, delegate: ProcessSupervisor):
+        self.delegate = delegate
+        self.launch_count = 0
+        self.termination_count = 0
+
+    def popen_kwargs(self):
+        self.launch_count += 1
+        return self.delegate.popen_kwargs()
+
+    def terminate(self, process, *, timeout_seconds: float = 0.5) -> None:
+        self.termination_count += 1
+        self.delegate.terminate(process, timeout_seconds=timeout_seconds)
+
+
+FAKE_CODEX = """import json
 import os
 import sys
 import time
@@ -87,9 +103,8 @@ class CodexCliExecutorTests(unittest.TestCase):
         self._git("commit", "-m", "baseline")
         base_commit = self._git("rev-parse", "HEAD").strip()
 
-        fake_codex = root / "fake-codex"
+        fake_codex = root / "fake_codex.py"
         fake_codex.write_text(FAKE_CODEX, encoding="utf-8")
-        fake_codex.chmod(0o755)
 
         self.manager = GitWorktreeManager(self.repository, root / "worktrees")
         self.manifest = self.manager.create(
@@ -99,10 +114,14 @@ class CodexCliExecutorTests(unittest.TestCase):
                 base_commit=base_commit,
             )
         )
+        self.process_supervisor = RecordingProcessSupervisor(
+            native_process_supervisor()
+        )
         self.executor = CodexCliExecutor(
             self.manager,
             root / "artifacts",
-            codex_binary=str(fake_codex),
+            codex_binary=(sys.executable, str(fake_codex)),
+            process_supervisor=self.process_supervisor,
         )
 
     def tearDown(self) -> None:
@@ -170,6 +189,7 @@ class CodexCliExecutorTests(unittest.TestCase):
         self.assertEqual(event_types[-1], "run.completed")
         sequences = tuple(event.sequence for event in self.executor.events(handle.run_id))
         self.assertEqual(sequences, tuple(range(1, len(sequences) + 1)))
+        self.assertEqual(self.process_supervisor.launch_count, 1)
 
         raw_path = Path(result.raw_event_log_path)
         stderr_path = Path(result.stderr_log_path)
@@ -215,6 +235,7 @@ class CodexCliExecutorTests(unittest.TestCase):
             self.executor.events(handle.run_id)[-1].event_type,
             "run.cancelled",
         )
+        self.assertGreaterEqual(self.process_supervisor.termination_count, 1)
 
     def test_invalid_json_makes_the_run_fail_even_with_zero_exit(self) -> None:
         handle = self.executor.start(
@@ -237,6 +258,17 @@ class CodexCliExecutorTests(unittest.TestCase):
                 self.manager,
                 Path(self.temporary_directory.name) / "unsafe-artifacts",
                 permission_profiles={"unsafe": "danger-full-access"},
+            )
+
+    def test_rejects_an_empty_executable_command(self) -> None:
+        with self.assertRaisesRegex(
+            CodexConfigurationError,
+            "must contain non-empty arguments",
+        ):
+            CodexCliExecutor(
+                self.manager,
+                Path(self.temporary_directory.name) / "empty-command-artifacts",
+                codex_binary=(),
             )
 
     def test_rejects_an_unknown_permission_profile_before_launch(self) -> None:

@@ -24,6 +24,12 @@ Run the complete local suite before reporting completion:
 ./jobslayer check
 ```
 
+On native Windows, run the equivalent unified entrypoint:
+
+```powershell
+.\jobslayer.cmd check
+```
+
 The unified launcher owns the development sequence. Do not replace it with a
 partial command when reporting completion; `check` includes the full unittest
 suite, compilation, dependency consistency, testbed validation, and Git diff

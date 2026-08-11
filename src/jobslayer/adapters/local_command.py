@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import signal
 import subprocess
 import tempfile
 import threading
@@ -20,6 +19,11 @@ from jobslayer.domain.models import (
     WorkspaceManifest,
 )
 from jobslayer.execution.runner import CommandExecutionError
+from jobslayer.execution.processes import (
+    ProcessGroupTerminationError,
+    ProcessSupervisor,
+    native_process_supervisor,
+)
 from jobslayer.workspace.manager import WorkspaceManager
 
 
@@ -81,8 +85,14 @@ class GovernedLocalCommandRunner:
     implementation of the same CommandRunner protocol.
     """
 
-    def __init__(self, workspace_manager: WorkspaceManager):
+    def __init__(
+        self,
+        workspace_manager: WorkspaceManager,
+        *,
+        process_supervisor: ProcessSupervisor | None = None,
+    ):
         self.workspace_manager = workspace_manager
+        self.process_supervisor = process_supervisor or native_process_supervisor()
 
     def run(
         self,
@@ -130,7 +140,7 @@ class GovernedLocalCommandRunner:
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    start_new_session=True,
+                    **self.process_supervisor.popen_kwargs(),
                 )
             except OSError as exc:
                 raise CommandLaunchError(
@@ -227,7 +237,7 @@ class GovernedLocalCommandRunner:
 
     @staticmethod
     def _minimal_environment(runtime_home: Path) -> dict[str, str]:
-        return {
+        environment = {
             "PATH": os.defpath,
             "HOME": str(runtime_home),
             "TMPDIR": str(runtime_home),
@@ -236,23 +246,22 @@ class GovernedLocalCommandRunner:
             "GIT_TERMINAL_PROMPT": "0",
             "PYTHONNOUSERSITE": "1",
         }
+        if os.name == "nt":
+            environment.update(
+                {
+                    "USERPROFILE": str(runtime_home),
+                    "TEMP": str(runtime_home),
+                    "TMP": str(runtime_home),
+                }
+            )
+            for name in ("SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT"):
+                value = os.environ.get(name)
+                if value:
+                    environment[name] = value
+        return environment
 
-    @staticmethod
-    def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    def _terminate_process_group(self, process: subprocess.Popen[bytes]) -> None:
         try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=0.5)
-        except subprocess.TimeoutExpired:
-            pass
-        # The group can still contain descendants after its leader exits.
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=0.5)
-        except subprocess.TimeoutExpired as exc:
+            self.process_supervisor.terminate(process)
+        except ProcessGroupTerminationError as exc:
             raise CommandRunnerError("process group did not terminate") from exc

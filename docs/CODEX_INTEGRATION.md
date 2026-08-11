@@ -26,7 +26,7 @@ AgentInvocation + WorkspaceManifest
     -> AgentRunResult + log hashes
 ```
 
-`start` 非阻塞返回 `AgentRunHandle`；`events(after_sequence=N)` 支持增量轮询；`cancel` 终止进程组；`collect` 只在终态返回，否则明确报运行中。
+`start` 非阻塞返回 `AgentRunHandle`；`events(after_sequence=N)` 支持增量轮询；`cancel` 通过可注入的 `ProcessSupervisor` 协议终止 POSIX process group 或 Windows process tree；`collect` 只在终态返回，否则明确报运行中。该清理能力不是 OCI/VM 安全隔离。
 
 ## 事件映射
 

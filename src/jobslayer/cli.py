@@ -17,6 +17,11 @@ from jobslayer.adapters.local_decisions import (
 )
 from jobslayer.adapters.local_testbed import LocalGitTestbedInspector
 from jobslayer.application.local_run import LocalRunCoordinator, LocalRunError
+from jobslayer.application.readiness import (
+    Phase0ReadinessEvaluator,
+    ReadinessInspectionError,
+)
+from jobslayer.adapters.local_recovery import LocalRunRecoveryManager
 from jobslayer.application.runbook import LocalRunbookLoader, RunbookError
 from jobslayer.development.checks import (
     DevelopmentCheckConfigurationError,
@@ -44,6 +49,7 @@ from jobslayer.supervision.decision import (
 from jobslayer.supervision.session import ReviewSession, ReviewSessionError
 from jobslayer.supervision.web import ReviewServerError, create_review_server
 from jobslayer.testbeds.inspection import TestbedInspectionError
+from jobslayer.recovery import RecoveryError, RecoveryStatus
 
 
 def _digest(text: str) -> str:
@@ -311,6 +317,72 @@ def _cmd_inspect_run(
         and summary["artifacts_valid"]
     )
     return 0 if integrity else 1
+
+
+def _cmd_inspect_readiness(
+    *,
+    root: Path | None,
+    state_root: Path | None,
+    required_reviewed_tasks: int,
+) -> int:
+    try:
+        coordinator = _local_run_coordinator(root=root, state_root=state_root)
+        report = Phase0ReadinessEvaluator(
+            coordinator,
+            state_root=coordinator.state_root,
+            required_reviewed_tasks=required_reviewed_tasks,
+        ).evaluate()
+    except (
+        DevelopmentCheckConfigurationError,
+        ReadinessInspectionError,
+        OSError,
+        ValueError,
+    ) as exc:
+        print(f"readiness inspection failed: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+    return 0 if report.automated_gate_passes else 1
+
+
+def _cmd_inspect_recovery(
+    path: Path,
+    *,
+    root: Path | None,
+    state_root: Path | None,
+) -> int:
+    try:
+        manager = LocalRunRecoveryManager(
+            _local_run_coordinator(root=root, state_root=state_root)
+        )
+        assessment = manager.assess(path)
+    except (DevelopmentCheckConfigurationError, OSError, ValueError) as exc:
+        print(f"recovery inspection failed: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(assessment.to_dict(), ensure_ascii=False, indent=2))
+    return 0 if assessment.status is RecoveryStatus.CONSISTENT else 1
+
+
+def _cmd_recover_run(
+    path: Path,
+    *,
+    root: Path | None,
+    state_root: Path | None,
+) -> int:
+    try:
+        manager = LocalRunRecoveryManager(
+            _local_run_coordinator(root=root, state_root=state_root)
+        )
+        assessment = manager.recover(path)
+    except (
+        DevelopmentCheckConfigurationError,
+        RecoveryError,
+        OSError,
+        ValueError,
+    ) as exc:
+        print(f"run recovery failed: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(assessment.to_dict(), ensure_ascii=False, indent=2))
+    return 0 if assessment.status is RecoveryStatus.CONSISTENT else 1
 
 
 def _cmd_review_run(
@@ -603,6 +675,35 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_run.add_argument("--root", type=Path)
     inspect_run.add_argument("--state-root", type=Path)
 
+    inspect_readiness = commands.add_parser(
+        "inspect-readiness",
+        help="inspect the evidence-backed Phase 0 run-corpus readiness gate",
+    )
+    inspect_readiness.add_argument("--root", type=Path)
+    inspect_readiness.add_argument("--state-root", type=Path)
+    inspect_readiness.add_argument(
+        "--required-reviewed-tasks",
+        type=int,
+        default=20,
+        help="minimum number of distinct integrity-verified reviewed tasks (default: 20)",
+    )
+
+    inspect_recovery = commands.add_parser(
+        "inspect-recovery",
+        help="classify one persisted run without changing workflow state",
+    )
+    inspect_recovery.add_argument("path", type=Path)
+    inspect_recovery.add_argument("--root", type=Path)
+    inspect_recovery.add_argument("--state-root", type=Path)
+
+    recover_run = commands.add_parser(
+        "recover-run",
+        help="apply one supported evidence-backed idempotent run repair",
+    )
+    recover_run.add_argument("path", type=Path)
+    recover_run.add_argument("--root", type=Path)
+    recover_run.add_argument("--state-root", type=Path)
+
     review_run = commands.add_parser(
         "review-run",
         help="record an agent or human implementation review for a verified run",
@@ -718,6 +819,24 @@ def main(argv: list[str] | None = None) -> int:
         )
     if arguments.command == "inspect-run":
         return _cmd_inspect_run(
+            arguments.path,
+            root=arguments.root,
+            state_root=arguments.state_root,
+        )
+    if arguments.command == "inspect-readiness":
+        return _cmd_inspect_readiness(
+            root=arguments.root,
+            state_root=arguments.state_root,
+            required_reviewed_tasks=arguments.required_reviewed_tasks,
+        )
+    if arguments.command == "inspect-recovery":
+        return _cmd_inspect_recovery(
+            arguments.path,
+            root=arguments.root,
+            state_root=arguments.state_root,
+        )
+    if arguments.command == "recover-run":
+        return _cmd_recover_run(
             arguments.path,
             root=arguments.root,
             state_root=arguments.state_root,

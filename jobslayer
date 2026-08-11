@@ -16,7 +16,10 @@ def _preferred_python() -> Path | None:
     configured = os.environ.get("JOBSLAYER_PYTHON")
     if configured:
         return Path(configured).expanduser().absolute()
-    repository_python = REPOSITORY_ROOT / ".venv" / "bin" / "python"
+    if os.name == "nt":
+        repository_python = REPOSITORY_ROOT / ".venv" / "Scripts" / "python.exe"
+    else:
+        repository_python = REPOSITORY_ROOT / ".venv" / "bin" / "python"
     return repository_python if repository_python.is_file() else None
 
 

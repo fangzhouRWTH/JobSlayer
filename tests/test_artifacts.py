@@ -2,6 +2,8 @@ import hashlib
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
+from urllib.request import url2pathname
 
 from jobslayer.adapters.local_artifacts import (
     ArtifactIntegrityError,
@@ -55,7 +57,9 @@ class LocalArtifactRegistryTests(unittest.TestCase):
             producer="unit-test",
             content=b"original",
         )
-        artifact_path = Path(manifest.uri.removeprefix("file://"))
+        artifact_path = Path(
+            url2pathname(unquote(urlsplit(manifest.uri).path))
+        )
         artifact_path.chmod(0o600)
         artifact_path.write_bytes(b"tampered")
 

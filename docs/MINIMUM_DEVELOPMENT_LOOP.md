@@ -18,6 +18,7 @@ Draft → Planned → Implementing → Verifying → Reviewing → MergeReview
 ```bash
 ./jobslayer check
 ./jobslayer inspect-run RUN_DIR
+./jobslayer inspect-recovery RUN_DIR
 ./jobslayer review-run RUN_DIR --actor-type agent --actor-id REVIEWER \
   --status accepted --summary "实现与验证证据一致"
 ./jobslayer run-ui RUN_DIR --actor-id HUMAN --open-browser
@@ -25,6 +26,15 @@ Draft → Planned → Implementing → Verifying → Reviewing → MergeReview
 ./jobslayer integrate-run RUN_DIR
 ./jobslayer cleanup-run RUN_DIR
 ```
+
+若 `inspect-recovery` 报告 `recoverable` 且动作为
+`restore_decision_card`，可执行 `./jobslayer recover-run RUN_DIR`。当前恢复器
+只重建由权威 review ledger 可证明的缺失决策卡投影；其他状态会拒绝并要求人工
+处理，不会覆盖文件或重复执行 Agent、验证、审查、状态转换和 Git 集成。
+
+Windows PowerShell 使用 `.\jobslayer.cmd` 替换上述 `./jobslayer`。控制平面、
+临时 Git 仓库闭环和完整开发检查可原生运行；本节现成 BraveNewWorld runbook
+仍调用测试床的 `./bnw`，实际执行它时需要 POSIX 兼容环境。
 
 每一步后都可再次运行 `inspect-run`。摘要中的 capability 只反映当时真实可执行的下一步：`decision_recording`、`decision_application`、`source_integration` 或 `workspace_cleanup`。
 

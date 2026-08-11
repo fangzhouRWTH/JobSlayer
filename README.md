@@ -15,7 +15,7 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
 - 基于同一结构化决策卡的人工监督 CLI 和 loopback 极简可视化界面；
 - 带事件序列、取消和原始日志证据的 `AgentExecutor`/Codex CLI adapter；
 - 串联工作区、Agent、补丁、验证与合并决策卡的应用控制器；
-- 统一源码、UI、完整开发验证与安装后 CLI 的根入口脚本；
+- 统一源码、UI、完整开发验证与安装后 CLI 的 POSIX/Windows 根入口；
 - 由版本化 task/profile/runbook 驱动的本地真实运行协调器；
 - 必须由外部显式授权、且仍服从相同工作树/验证/审查门禁的真实 Codex runbook；
 - append-only 运行记录链、确定性补丁重放 adapter 和 run 级监督入口；
@@ -25,7 +25,19 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
 
 ## 快速开始
 
-需要 Python 3.11 或更高版本。
+需要 Python 3.11 或更高版本。安装并激活项目环境后，Windows 与 POSIX 使用
+完全相同的公共接口：
+
+```text
+jobslayer <子命令> [参数]
+python -m jobslayer <子命令> [参数]
+```
+
+例如两端均可运行 `jobslayer check` 或 `python -m jobslayer check`。前者是
+安装包生成的 console script，后者是源码/模块入口；两者进入同一个 launcher。
+平台脚本只用于尚未激活环境时的 bootstrap。
+
+POSIX（Linux/macOS/WSL）初始化使用：
 
 ```bash
 python3 -m venv .venv
@@ -36,6 +48,8 @@ python3 -m venv .venv
 ./jobslayer validate-runbook runbooks/bnw-scenario-slow-001.json
 ./jobslayer validate-runbook runbooks/bnw-filter-demo-001-codex.json
 ./jobslayer inspect-run .jobslayer/runs/bnw-scenario-slow-001-run-01
+./jobslayer inspect-readiness --state-root .jobslayer --required-reviewed-tasks 20
+./jobslayer inspect-recovery .jobslayer/runs/RUN_ID
 ./jobslayer demo --journal .jobslayer/demo.jsonl
 ./jobslayer review-decision examples/decision-card.example.json \
   --actor-id local-reviewer --output .jobslayer/example-decision.json
@@ -44,6 +58,20 @@ python3 -m venv .venv
   --output .jobslayer/example-visual-decision.json \
   --open-browser
 ```
+
+Windows PowerShell 使用原生 Python，不要求 WSL：
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .
+.\jobslayer.cmd check
+.\jobslayer.cmd validate-testbed testbeds/brave-new-world.json
+```
+
+下文的 `./jobslayer` 在 Windows 上均对应 `.\jobslayer.cmd`。JobSlayer
+控制平面和完整开发门禁可原生运行；当前 BraveNewWorld 源控 runbook 仍绑定
+测试床自身的 `./bnw` POSIX 验证入口，因此实际执行这些 BNW runbook 时仍需
+兼容该命令的环境，直到测试床另行提供 Windows 验证入口。
 
 演示会依次经过：
 
@@ -58,6 +86,7 @@ Draft -> Planned -> Implementing -> Verifying -> Reviewing
 
 - [项目开发指导](docs/PROJECT_GUIDE.md)
 - [初步实施路线图](docs/ROADMAP.md)
+- [短期基础设施开发计划](docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md)
 - [开发决策与落实日志](docs/DEVELOPMENT_LOG.md)
 - [架构决策索引](docs/adr/README.md)
 - [人工监督 CLI 使用说明](docs/HUMAN_SUPERVISION.md)

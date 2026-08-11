@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
+from urllib.request import url2pathname
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -61,7 +62,8 @@ class LocalArtifactRegistry:
                     stream.write(content)
                     stream.flush()
                     os.fsync(stream.fileno())
-                temporary.chmod(0o400)
+                if os.name != "nt":
+                    temporary.chmod(0o400)
                 try:
                     os.link(temporary, destination)
                 except FileExistsError:
@@ -163,7 +165,8 @@ class LocalArtifactRegistry:
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
-            temporary.chmod(0o400)
+            if os.name != "nt":
+                temporary.chmod(0o400)
             try:
                 os.link(temporary, destination)
             except FileExistsError as exc:
@@ -175,7 +178,7 @@ class LocalArtifactRegistry:
         parsed = urlsplit(manifest.uri)
         if parsed.scheme != "file" or parsed.netloc not in {"", "localhost"}:
             raise ArtifactIntegrityError("artifact URI is not a local file URI")
-        candidate = Path(unquote(parsed.path))
+        candidate = Path(url2pathname(unquote(parsed.path)))
         expected = self._path_for(manifest.sha256)
         if candidate != expected:
             raise ArtifactIntegrityError("artifact URI does not match its content hash")

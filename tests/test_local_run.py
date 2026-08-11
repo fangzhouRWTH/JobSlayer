@@ -3,9 +3,12 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
+from jobslayer.adapters.local_recovery import LocalRunRecoveryManager
 from jobslayer.application.local_run import LocalRunCoordinator, LocalRunError
 from jobslayer.application.run_records import LocalRunLedger
 from jobslayer.domain.models import (
@@ -16,6 +19,7 @@ from jobslayer.domain.models import (
     ReviewStatus,
 )
 from jobslayer.supervision.decision import create_human_decision
+from jobslayer.recovery import RecoveryError, RecoveryStatus
 
 
 class LocalRunCoordinatorTests(unittest.TestCase):
@@ -32,16 +36,14 @@ class LocalRunCoordinatorTests(unittest.TestCase):
         self._git("config", "user.name", "JobSlayer Test")
         self._git("config", "user.email", "jobslayer@example.invalid")
         (self.external / "value.txt").write_text("base\n", encoding="utf-8")
-        verifier = self.external / "verify"
+        verifier = self.external / "verify.py"
         verifier.write_text(
-            "#!/usr/bin/env python3\n"
             "from pathlib import Path\n"
             "if Path('value.txt').read_text() != 'changed\\n':\n"
             "    raise SystemExit(7)\n"
             "print('verified')\n",
             encoding="utf-8",
         )
-        verifier.chmod(0o755)
         self._git("add", ".")
         self._git("commit", "-m", "baseline")
         self.commit = self._git("rev-parse", "HEAD")
@@ -89,7 +91,7 @@ class LocalRunCoordinatorTests(unittest.TestCase):
                 "commit": self.commit,
                 "tag": "fixture-0",
                 "published": False,
-                "verification_command": ["./verify"],
+                "verification_command": [sys.executable, "verify.py"],
             },
             "local_checkout_hint": "../external",
             "architecture_areas": ["fixture"],
@@ -119,7 +121,7 @@ class LocalRunCoordinatorTests(unittest.TestCase):
                 "rules": [
                     {
                         "rule_id": "verify",
-                        "argv_prefix": ["./verify"],
+                        "argv_prefix": [sys.executable, "verify.py"],
                         "max_timeout_seconds": 3,
                     }
                 ],
@@ -129,7 +131,7 @@ class LocalRunCoordinatorTests(unittest.TestCase):
                 {
                     "check_id": "verify",
                     "title": "Verify fixture",
-                    "argv": ["./verify"],
+                    "argv": [sys.executable, "verify.py"],
                     "timeout_seconds": 2,
                 }
             ],
@@ -170,6 +172,17 @@ class LocalRunCoordinatorTests(unittest.TestCase):
             (self.control_root / "runbooks" / "fixture.json", runbook),
         ):
             path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def _create_reviewed_run(self) -> Path:
+        execution = self.coordinator.execute("runbooks/fixture.json")
+        reviewed = self.coordinator.review(
+            execution["run_directory"],
+            actor_type=ActorType.AGENT,
+            actor_id="fixture-review-agent",
+            status=ReviewStatus.ACCEPTED,
+            summary="The scoped patch and verification evidence agree.",
+        )
+        return Path(reviewed["run_directory"])
 
     def test_executes_persists_reviews_and_exposes_a_real_decision_card(self) -> None:
         execution = self.coordinator.execute("runbooks/fixture.json")
@@ -281,10 +294,85 @@ class LocalRunCoordinatorTests(unittest.TestCase):
             (self.control_root / ".state" / "runs" / "fixture-run").exists()
         )
 
+    def test_recovery_restores_a_missing_decision_card_projection_idempotently(self) -> None:
+        run_directory = self._create_reviewed_run()
+        card_path = run_directory / "decision-card.json"
+        expected = DecisionCard.model_validate_json(
+            card_path.read_text(encoding="utf-8")
+        )
+        card_path.unlink()
+        manager = LocalRunRecoveryManager(self.coordinator)
+
+        assessment = manager.assess(run_directory)
+
+        self.assertEqual(assessment.status, RecoveryStatus.RECOVERABLE)
+        self.assertEqual(assessment.repair_action, "restore_decision_card")
+        recovered = manager.recover(run_directory)
+        repeated = manager.recover(run_directory)
+        self.assertEqual(recovered.status, RecoveryStatus.CONSISTENT)
+        self.assertEqual(repeated.status, RecoveryStatus.CONSISTENT)
+        self.assertEqual(
+            DecisionCard.model_validate_json(card_path.read_text(encoding="utf-8")),
+            expected,
+        )
+
+    def test_recovery_refuses_to_overwrite_a_tampered_projection(self) -> None:
+        run_directory = self._create_reviewed_run()
+        card_path = run_directory / "decision-card.json"
+        card_path.write_text("{}\n", encoding="utf-8")
+        manager = LocalRunRecoveryManager(self.coordinator)
+
+        assessment = manager.assess(run_directory)
+
+        self.assertEqual(assessment.status, RecoveryStatus.INVALID_EVIDENCE)
+        with self.assertRaisesRegex(RecoveryError, "cannot be repaired automatically"):
+            manager.recover(run_directory)
+        self.assertEqual(card_path.read_text(encoding="utf-8"), "{}\n")
+
+    def test_recovery_removes_its_partial_projection_after_a_write_fault(self) -> None:
+        run_directory = self._create_reviewed_run()
+        card_path = run_directory / "decision-card.json"
+        card_path.unlink()
+        manager = LocalRunRecoveryManager(self.coordinator)
+
+        with (
+            patch(
+                "jobslayer.adapters.local_recovery.os.write",
+                side_effect=OSError("injected projection write fault"),
+            ),
+            self.assertRaisesRegex(RecoveryError, "incomplete file was removed"),
+        ):
+            manager.recover(run_directory)
+
+        self.assertFalse(card_path.exists())
+        self.assertEqual(
+            manager.assess(run_directory).status,
+            RecoveryStatus.RECOVERABLE,
+        )
+
+    def test_recovery_escalates_a_journal_ledger_commit_gap(self) -> None:
+        run_directory = self._create_reviewed_run()
+        records_path = run_directory / "records.jsonl"
+        first_record = records_path.read_bytes().splitlines(keepends=True)[0]
+        records_path.write_bytes(first_record)
+
+        assessment = LocalRunRecoveryManager(self.coordinator).assess(run_directory)
+
+        self.assertEqual(assessment.status, RecoveryStatus.MANUAL_INTERVENTION)
+        self.assertIn("do not form a consistent", assessment.reason)
+
+    def test_recovery_reports_an_untouched_reviewed_run_as_consistent(self) -> None:
+        run_directory = self._create_reviewed_run()
+
+        assessment = LocalRunRecoveryManager(self.coordinator).assess(run_directory)
+
+        self.assertEqual(assessment.status, RecoveryStatus.CONSISTENT)
+        self.assertEqual(assessment.run_stage, "implementation_review")
+        self.assertEqual(assessment.workflow_state, "merge_review")
+
     def test_codex_run_requires_human_authorization_and_uses_the_real_adapter(self) -> None:
-        fake_codex = self.control_root / "fake-codex"
+        fake_codex = self.control_root / "fake_codex.py"
         fake_codex.write_text(
-            "#!/usr/bin/env python3\n"
             "import json\n"
             "from pathlib import Path\n"
             "import sys\n"
@@ -303,7 +391,6 @@ class LocalRunCoordinatorTests(unittest.TestCase):
             "    print(json.dumps(event), flush=True)\n",
             encoding="utf-8",
         )
-        fake_codex.chmod(0o755)
         runbook_path = self.control_root / "runbooks" / "fixture-codex.json"
         payload = json.loads(
             (self.control_root / "runbooks" / "fixture.json").read_text(
@@ -325,7 +412,7 @@ class LocalRunCoordinatorTests(unittest.TestCase):
         coordinator = LocalRunCoordinator(
             self.control_root,
             state_root=self.control_root / ".codex-state",
-            codex_binary=fake_codex,
+            codex_binary=(sys.executable, str(fake_codex)),
         )
 
         with self.assertRaisesRegex(LocalRunError, "authorized_by"):

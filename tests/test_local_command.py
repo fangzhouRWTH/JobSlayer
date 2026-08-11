@@ -19,6 +19,22 @@ from jobslayer.domain.models import (
     CommandStatus,
     WorkspaceSpec,
 )
+from jobslayer.execution import ProcessSupervisor, native_process_supervisor
+
+
+class RecordingProcessSupervisor:
+    def __init__(self, delegate: ProcessSupervisor):
+        self.delegate = delegate
+        self.launch_count = 0
+        self.termination_count = 0
+
+    def popen_kwargs(self):
+        self.launch_count += 1
+        return self.delegate.popen_kwargs()
+
+    def terminate(self, process, *, timeout_seconds: float = 0.5) -> None:
+        self.termination_count += 1
+        self.delegate.terminate(process, timeout_seconds=timeout_seconds)
 
 
 class GovernedLocalCommandRunnerTests(unittest.TestCase):
@@ -46,7 +62,13 @@ class GovernedLocalCommandRunnerTests(unittest.TestCase):
                 base_commit=base_commit,
             )
         )
-        self.runner = GovernedLocalCommandRunner(self.manager)
+        self.process_supervisor = RecordingProcessSupervisor(
+            native_process_supervisor()
+        )
+        self.runner = GovernedLocalCommandRunner(
+            self.manager,
+            process_supervisor=self.process_supervisor,
+        )
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
@@ -102,6 +124,7 @@ class GovernedLocalCommandRunnerTests(unittest.TestCase):
 
     def test_runs_an_exact_approved_command_with_structured_evidence(self) -> None:
         argv = (sys.executable, "verify.py")
+        expected_output = f"verification passed{os.linesep}".encode()
 
         result = self.runner.run(
             self.manifest,
@@ -111,12 +134,13 @@ class GovernedLocalCommandRunnerTests(unittest.TestCase):
 
         self.assertEqual(result.status, CommandStatus.PASSED)
         self.assertEqual(result.exit_code, 0)
-        self.assertEqual(result.stdout, "verification passed\n")
+        self.assertEqual(result.stdout, expected_output.decode())
         self.assertEqual(
             result.stdout_sha256,
-            hashlib.sha256(b"verification passed\n").hexdigest(),
+            hashlib.sha256(expected_output).hexdigest(),
         )
         self.assertFalse(result.stdout_truncated)
+        self.assertEqual(self.process_supervisor.launch_count, 1)
 
     def test_rejects_unapproved_additional_arguments(self) -> None:
         allowed = (sys.executable, "verify.py")
@@ -151,6 +175,7 @@ class GovernedLocalCommandRunnerTests(unittest.TestCase):
         self.assertEqual(result.status, CommandStatus.TIMED_OUT)
         self.assertIsNone(result.exit_code)
         self.assertLess(result.duration_ms, 2_000)
+        self.assertGreaterEqual(self.process_supervisor.termination_count, 1)
 
     def test_cleans_up_a_child_that_outlives_its_parent(self) -> None:
         code = (
@@ -170,7 +195,7 @@ class GovernedLocalCommandRunnerTests(unittest.TestCase):
 
     def test_truncates_stored_output_but_hashes_the_complete_stream(self) -> None:
         argv = (sys.executable, "-c", "print('x' * 200)")
-        complete_output = ("x" * 200 + "\n").encode()
+        complete_output = ("x" * 200 + os.linesep).encode()
 
         result = self.runner.run(
             self.manifest,
@@ -207,7 +232,7 @@ class GovernedLocalCommandRunnerTests(unittest.TestCase):
             else:
                 os.environ[variable] = previous
 
-        self.assertEqual(result.stdout, "missing\n")
+        self.assertEqual(result.stdout, f"missing{os.linesep}")
 
     def test_reports_a_non_accepted_exit_code_as_failed(self) -> None:
         argv = (sys.executable, "-c", "import sys; sys.exit(7)")
@@ -225,7 +250,10 @@ class GovernedLocalCommandRunnerTests(unittest.TestCase):
         workspace = Path(self.manifest.path)
         outside = Path(self.temporary_directory.name) / "outside"
         outside.mkdir()
-        (workspace / "escape").symlink_to(outside, target_is_directory=True)
+        try:
+            (workspace / "escape").symlink_to(outside, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"directory symlinks are unavailable: {exc}")
         argv = (sys.executable, "verify.py")
 
         with self.assertRaises(CommandWorkingDirectoryError):

@@ -388,4 +388,4 @@ class GitWorktreeManager:
 
     @staticmethod
     def _git_command(arguments: tuple[str, ...]) -> list[str]:
-        return ["git", "-c", "core.hooksPath=/dev/null", *arguments]
+        return ["git", "-c", f"core.hooksPath={os.devnull}", *arguments]

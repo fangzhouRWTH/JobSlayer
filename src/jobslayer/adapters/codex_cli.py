@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import signal
 import subprocess
 import threading
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +25,11 @@ from jobslayer.domain.models import (
     AgentRunStatus,
     RunEvent,
     WorkspaceManifest,
+)
+from jobslayer.execution.processes import (
+    ProcessGroupTerminationError,
+    ProcessSupervisor,
+    native_process_supervisor,
 )
 from jobslayer.workspace.manager import WorkspaceManager
 
@@ -72,15 +77,27 @@ class CodexCliExecutor:
         workspace_manager: WorkspaceManager,
         artifact_root: str | Path,
         *,
-        codex_binary: str = "codex",
+        codex_binary: str | os.PathLike[str] | Sequence[str] = "codex",
         model_profiles: Mapping[str, str | None] | None = None,
         permission_profiles: Mapping[str, str] | None = None,
         output_schemas: Mapping[str, str | Path | None] | None = None,
+        process_supervisor: ProcessSupervisor | None = None,
     ):
         self.workspace_manager = workspace_manager
         self.artifact_root = Path(artifact_root).resolve(strict=False)
         self.artifact_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.codex_binary = codex_binary
+        if isinstance(codex_binary, (str, os.PathLike)):
+            codex_command = (os.fspath(codex_binary),)
+        else:
+            codex_command = tuple(str(argument) for argument in codex_binary)
+        if not codex_command or any(
+            not argument or "\x00" in argument for argument in codex_command
+        ):
+            raise CodexConfigurationError(
+                "Codex executable command must contain non-empty arguments"
+            )
+        self.codex_command = codex_command
+        self.process_supervisor = process_supervisor or native_process_supervisor()
         self.model_profiles = dict(model_profiles or {"default": None})
         self.permission_profiles = dict(
             permission_profiles
@@ -147,7 +164,7 @@ class CodexCliExecutor:
                 encoding="utf-8",
                 errors="replace",
                 bufsize=1,
-                start_new_session=True,
+                **self.process_supervisor.popen_kwargs(),
             )
         except OSError as exc:
             raise CodexExecutorError("failed to launch Codex CLI") from exc
@@ -267,7 +284,7 @@ class CodexCliExecutor:
             )
 
         command = [
-            self.codex_binary,
+            *self.codex_command,
             "exec",
             "--json",
             "--ephemeral",
@@ -485,6 +502,15 @@ class CodexCliExecutor:
         environment = {"PATH": os.environ.get("PATH", os.defpath)}
         for name in (
             "HOME",
+            "USERPROFILE",
+            "APPDATA",
+            "LOCALAPPDATA",
+            "SYSTEMROOT",
+            "WINDIR",
+            "COMSPEC",
+            "PATHEXT",
+            "TEMP",
+            "TMP",
             "CODEX_HOME",
             "SSL_CERT_FILE",
             "SSL_CERT_DIR",
@@ -508,21 +534,8 @@ class CodexCliExecutor:
         )
         return environment
 
-    @staticmethod
-    def _terminate_process_group(process: subprocess.Popen[str]) -> None:
+    def _terminate_process_group(self, process: subprocess.Popen[str]) -> None:
         try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            return
-        try:
-            process.wait(timeout=0.5)
-        except subprocess.TimeoutExpired:
-            pass
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        try:
-            process.wait(timeout=0.5)
-        except subprocess.TimeoutExpired as exc:
+            self.process_supervisor.terminate(process)
+        except ProcessGroupTerminationError as exc:
             raise CodexExecutorError("Codex process group did not terminate") from exc

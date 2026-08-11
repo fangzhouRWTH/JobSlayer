@@ -115,7 +115,7 @@ class ScriptedPatchExecutor:
             command = [
                 self.git_executable,
                 "-c",
-                "core.hooksPath=/dev/null",
+                f"core.hooksPath={os.devnull}",
                 "-C",
                 workspace.path,
                 "apply",

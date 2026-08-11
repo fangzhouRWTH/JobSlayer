@@ -639,3 +639,290 @@ JobSlayer 需要在调用真实编码执行器前保证并发任务不共享可�
 - 本地 actor/authority 尚未接入认证身份；生产环境不能依赖声明式字符串。
 - 跨 workflow journal、run ledger、artifact registry 和 Git 的完整事务仍未实现；当前只对主要中断点提供可核验恢复。
 - 无外层网络/系统调用/CPU/内存强隔离，无执行前 token/cost 强制，无远端 push/PR 与部署能力。
+
+---
+
+## DEV-2026-08-10-01 — 原生 Windows 与 POSIX 跨平台开发基线
+
+- 状态：完成（JobSlayer 控制平面与完整开发门禁已在原生 Windows 验证）
+- 类型：开发入口、进程监督、证据字节、Git 集成、制品路径、测试与文档
+
+### 背景与完成口径
+
+用户询问项目是否必须在 WSL 中运行，并要求调整为跨平台兼容。只读审计发现
+领域契约、工作流 kernel 和应用控制器没有平台绑定，实际阻点集中在 Unix
+shebang、`.venv/bin/python`、`os.killpg`、文本模式 patch stdin、`/dev/null`、
+Windows 文件 URI/只读属性和依赖可执行 shebang 的测试夹具。
+
+本轮完成口径是：不改变领域状态、权限或完成门禁，不增加运行时依赖，使
+JobSlayer 源码入口、完整 `check`、临时 Git 闭环、本地 runner 和 Codex adapter
+生命周期可在原生 Windows 运行，同时保留 POSIX 行为和证据哈希。外部
+BraveNewWorld 自身的 `./bnw` 命令不被 JobSlayer 隐式改写。
+
+详细决策见 [ADR-0013](adr/0013-cross-platform-local-control-plane.md)。
+
+### 落实步骤
+
+1. 新增 `jobslayer.cmd`，正确发现 Windows `.venv`/`py`/`python`、尊重
+   `JOBSLAYER_PYTHON` 并透传失败退出码；POSIX `jobslayer` 同时识别 Windows
+   和 POSIX venv（只选择当前宿主对应的布局），`.gitattributes` 固定 launcher 与源码行尾并保护 `.diff`
+   原始字节。
+2. 新增 `jobslayer.execution.processes`，集中选择 POSIX session/process group
+   或 Windows process group、`CTRL_BREAK`、`taskkill /T /F`；本地 command
+   runner 与 Codex adapter 不再直接调用 POSIX-only API。
+3. Codex executable 扩展为受控非空 argv 前缀，测试可用
+   `sys.executable fake_codex.py`，默认正式命令仍是 `codex`；Windows 所需的
+   非敏感系统环境键加入显式允许集。
+4. Git integration 用二进制 stdin 重放审核 patch，避免 Windows 文本层注入
+   CRLF；所有 Git adapter 用 `os.devnull` 禁用 hooks。固定 replay diff 恢复为
+   SHA-256 `1aaa600263532446a2890b26a2fc4183b75a817ec6f165420a7c82966ec67068`。
+5. 本地制品 URI 用平台标准转换；POSIX 保留 `0400` 加固，Windows 不再把
+   硬链接共享的只读属性用于临时文件，内容地址和读取时哈希仍是完整性真相。
+6. 测试夹具不再直接执行 shebang 文件，原始 stdout/hash 断言使用宿主换行；
+   Windows 无符号链接权限时只跳过该环境能力测试，其余安全拒绝路径不变。
+7. 更新仓库指令、README、统一入口、最小闭环、Codex、项目指南、路线图、
+   ADR 索引和本开发日志，明确控制平面跨平台与外部测试床命令平台性的边界。
+
+### Changed files
+
+- `.gitattributes`
+- `AGENTS.md`
+- `README.md`
+- `docs/CODEX_INTEGRATION.md`
+- `docs/DEVELOPMENT_LOG.md`
+- `docs/MINIMUM_DEVELOPMENT_LOOP.md`
+- `docs/PROJECT_GUIDE.md`
+- `docs/ROADMAP.md`
+- `docs/UNIFIED_ENTRYPOINT.md`
+- `docs/adr/0013-cross-platform-local-control-plane.md`
+- `docs/adr/README.md`
+- `fixtures/patches/bnw-scenario-slow-001.diff`
+- `jobslayer`
+- `jobslayer.cmd`
+- `src/jobslayer/adapters/codex_cli.py`
+- `src/jobslayer/adapters/git_workspace.py`
+- `src/jobslayer/adapters/local_artifacts.py`
+- `src/jobslayer/adapters/local_command.py`
+- `src/jobslayer/adapters/local_git_integration.py`
+- `src/jobslayer/adapters/scripted_patch.py`
+- `src/jobslayer/application/local_run.py`
+- `src/jobslayer/execution/processes.py`
+- `tests/test_artifacts.py`
+- `tests/test_codex_cli.py`
+- `tests/test_local_command.py`
+- `tests/test_local_run.py`
+- `tests/test_processes.py`
+- `tests/test_unified_entrypoint.py`
+
+`JobSlayer.code-workspace` 是本轮开始前已存在的用户未跟踪文件，未读取或修改，
+不属于上述变更。
+
+### 验证命令与结果
+
+1. `winget install --id Python.Python.3.12 --exact --scope user --silent
+   --accept-source-agreements --accept-package-agreements --disable-interactivity`
+   成功安装用户级 Python `3.12.10`。
+2. 原生 Python 执行 `python -m venv --clear .venv`，随后
+   `.venv\Scripts\python.exe -m pip install -e .` 成功；安装
+   `jobslayer 0.1.0`、`pydantic 2.13.4` 及其依赖。
+3. 首次 `.\jobslayer.cmd check` 为 `5/7`，111 项测试出现 6 failures、14 errors、
+   1 skip；失败证据对应 Windows 只读硬链接、CRLF patch stdin、原生换行和
+   `.cmd` 退出码，未被当作通过。
+4. 定向复测命令
+   `.venv\Scripts\python.exe -m unittest tests.test_artifacts
+   tests.test_local_command tests.test_local_git_integration tests.test_local_run
+   tests.test_verification tests.test_unified_entrypoint -v` 在最后一个文件 URI
+   夹具修正前为 30 项中 1 error、1 skip；该错误随后修复。
+5. 修复后通过统一 Windows 入口运行 `.\jobslayer.cmd check`：`7/7` 全部通过；
+   完整 unittest 为 111 项 `OK`，1 项因 Windows 当前未授予创建目录符号链接
+   权限而 skip；compileall、pip check、测试床、两套 runbook 绑定和
+   `git diff --check` 均通过。
+
+### 限制与下一步
+
+- 原生 Windows 的进程树终止是本地监督，不是对恶意代码的安全沙箱；网络、
+  CPU、内存与系统调用强隔离仍未实现。
+- Windows `chmod` 不承担制品不可变保证；拥有文件系统写权限的主体仍能改写
+  本地存储，读取时哈希会检测内容变化。
+- BraveNewWorld profile 仍登记 `./bnw`。要让真实 BNW runbook 原生 Windows
+  执行，下一步应先在测试床提供等价 Windows 入口，再设计显式版本化的平台
+  命令选择；不得在 adapter 内静默替换验证规则。
+- 建议下一步在 Windows Developer Mode/具备 symlink 权限的 CI 与一个 POSIX
+  CI job 中各运行统一 `check`，把当前本地双路径验证固化为持续集成矩阵。
+
+---
+
+## DEV-2026-08-10-02 — Windows/Linux 统一公共接口
+
+- 状态：完成
+- 类型：公共 CLI、进程生命周期协议、adapter 注入、测试与架构文档
+
+### 背景与完成口径
+
+用户进一步要求为 Windows 和 Linux 设定通用接口。审计确认 packaging 已生成
+跨平台 `jobslayer` console script，`python -m jobslayer` 也已共享同一 launcher；
+但文档仍突出平台 bootstrap，进程监督则只是集中函数，adapter 不能通过明确
+协议注入其他实现。
+
+本轮完成口径是：对外明确同一 CLI grammar，对内形成提供方无关、可注入、
+可测试的进程生命周期协议，同时不把平台字段加入领域模型，不改变工作流、
+验证、权限或完成语义。详细决定见
+[ADR-0014](adr/0014-unified-cli-and-process-supervisor-interface.md)。
+
+### 落实步骤
+
+1. 把安装后的 `jobslayer <command>` 和源码环境的
+   `python -m jobslayer <command>` 定为 Windows/POSIX 公共接口；两个根脚本
+   明确降为未激活环境的 bootstrap。
+2. `jobslayer.execution` 公开 runtime-checkable `ProcessSupervisor` Protocol、
+   `PosixProcessSupervisor`、`WindowsProcessSupervisor` 与
+   `native_process_supervisor()`。
+3. 原模块级 launch/terminate 函数保留为兼容 facade；native supervisor 继续
+   执行 ADR-0013 已验证的 POSIX/Windows 行为。
+4. `GovernedLocalCommandRunner` 和 `CodexCliExecutor` 新增可选
+   `process_supervisor` 构造参数，默认 native 实现；启动和终止均只经过接口。
+5. recording supervisor 测试确认两个 adapter 调用统一 launch/terminate
+   契约；当前宿主实现另行通过 runtime Protocol 检查和真实睡眠进程终止测试。
+
+### Changed files
+
+- `README.md`
+- `docs/CODEX_INTEGRATION.md`
+- `docs/DEVELOPMENT_LOG.md`
+- `docs/PROJECT_GUIDE.md`
+- `docs/UNIFIED_ENTRYPOINT.md`
+- `docs/adr/0014-unified-cli-and-process-supervisor-interface.md`
+- `docs/adr/README.md`
+- `src/jobslayer/adapters/codex_cli.py`
+- `src/jobslayer/adapters/local_command.py`
+- `src/jobslayer/execution/__init__.py`
+- `src/jobslayer/execution/processes.py`
+- `tests/test_codex_cli.py`
+- `tests/test_local_command.py`
+- `tests/test_processes.py`
+
+### 验证命令、结果与限制
+
+- 定向运行
+  `.venv\Scripts\python.exe -m unittest tests.test_processes
+  tests.test_local_command tests.test_codex_cli -v`：19 项全部通过，1 项因当前
+  Windows 未授予目录 symlink 权限而 skip。
+- 通过统一 Windows bootstrap 运行 `.\jobslayer.cmd check`：`7/7` 全部通过；
+  完整 unittest 为 112 项 `OK`，1 项因当前 Windows 未授予目录 symlink 权限
+  而 skip；compileall、pip check、测试床、两套 runbook 绑定和
+  `git diff --check` 均通过。
+- 通用接口统一的是 JobSlayer CLI 与已授权进程树生命周期，不负责替换外部
+  测试床命令。BraveNewWorld 仍需自身提供 `bnw` 跨平台 console script，之后
+  才能把 profile 中的 `./bnw` 升级为两端相同的 `bnw`。
+- 下一步建议在 BraveNewWorld 仓库提供 packaging console script `bnw`，并在
+  Windows/Linux CI 各验证 `bnw check`，再通过新 ADR 更新固定基线和 profile。
+
+---
+
+## DEV-2026-08-11-01 — 短期基础设施计划与 Phase 0 证据门禁
+
+- 状态：完成（ST-00 门禁实现完成；真实语料积累和人工复盘继续执行）
+- 类型：基础设施规划、阶段门禁、只读运行语料检查、CLI 与测试
+
+### 背景与决策
+
+用户要求先把高优先级基础设施写入短期开发计划，再逐项执行。Phase 1 依赖
+Phase 0 稳定闭环和至少 20 个内部样例复盘，但此前没有机器可执行的语料门禁；
+直接引入 PostgreSQL 或分布式依赖会违反路线图退出条件。
+
+本轮先新增 `docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md`，按 ST-00 至 ST-07 排列
+证据语料、恢复、事务存储、身份、沙箱、预算/上下文、管理视图和双执行器评测。
+首个实现切片依据 ADR-0015 提供只读 `inspect-readiness`，复用现有 run
+inspection，不改变任务状态，也不替代人工阶段确认。
+
+### 当前落实
+
+1. 新增提供方无关 `RunInspector` 和 `Phase0ReadinessEvaluator`。
+2. 自动门禁检查 run 双哈希链、制品、不同 task 的审查数量、决定应用后的完成路径和负路径。
+3. 新增 `jobslayer inspect-readiness` 公共命令；证据不足返回非零结构化报告。
+4. 新增接受完整语料、拒绝空语料、拒绝损坏 run 和拒绝非法阈值的确定性测试。
+5. 更新 README、路线图、统一入口、ADR 索引和短期计划链接。
+
+### 验证、限制与下一步
+
+- 本切片变更文件：`README.md`、`docs/DEVELOPMENT_LOG.md`、
+  `docs/ROADMAP.md`、`docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md`、
+  `docs/UNIFIED_ENTRYPOINT.md`、`docs/adr/README.md`、
+  `docs/adr/0015-evidence-backed-phase0-readiness-gate.md`、
+  `src/jobslayer/application/__init__.py`、
+  `src/jobslayer/application/readiness.py`、`src/jobslayer/cli.py`、
+  `tests/test_readiness.py`、`tests/test_unified_entrypoint.py`。
+- 定向命令 `.venv\Scripts\python.exe -m unittest tests.test_readiness
+  tests.test_unified_entrypoint -v`：11 项全部通过。正反路径包括完整的 20 个
+  不同 task 语料、空语料、一个损坏 run、重复执行同一 task 试图满足计数、
+  非法阈值和公共 CLI 非零退出。
+- 当前 checkout 实测 `.\jobslayer.cmd inspect-readiness --state-root
+  .jobslayer --required-reviewed-tasks 20`：按设计退出 1；发现 0 个 run，报告
+  `automated_gate_passes: false`、`manual_confirmation_required: true`，并明确列出
+  0/20 不同 task、缺少决定应用后的完成路径和缺少负路径证据。
+- 最终通过统一 Windows 入口运行 `.\jobslayer.cmd check`：7/7 全部通过；
+  完整 unittest 为 118 项 `OK`，1 项因当前 Windows 未授予目录 symlink 权限
+  而 skip；compileall、pip check、测试床、两套 runbook 绑定和
+  `git diff --check` 均通过。
+- readiness 只量化已有本地证据，不能修复跨文件提交窗口，也不能认证人工身份。
+- 自动门禁按不同 `task_id` 计数，重复运行同一 task 不能满足 20 个样例要求；
+  但真实人工计划复盘仍由人工确认，不由该计数器代替。
+- 下一切片 ST-01 将定义持久化/恢复端口、幂等键和故障注入，不直接引入数据库。
+
+---
+
+## DEV-2026-08-11-02 — ST-01 证据约束的本地恢复首切片
+
+- 状态：完成（首个恢复窗口已闭合；ST-01 其余提交窗口继续执行）
+- 类型：恢复协议、派生投影、故障注入、CLI 与架构文档
+
+### 背景与决策
+
+ST-00 门禁实现完成后，继续执行 ST-01。审计确认 accepted implementation
+review 的落盘顺序是：注册 review/card 制品并经 kernel 进入 `MergeReview`、
+追加 run ledger、最后 create-only 写出 `decision-card.json`。最后一步前崩溃时
+权威证据完整但 UI 投影缺失；重跑 review 会重复业务动作，手工复制又缺少绑定
+验证。
+
+依据 ADR-0016，本轮定义 provider-neutral recovery contract 和本地 adapter。
+自动恢复只重建 ledger 中严格 `DecisionCard` 可证明的缺失投影；篡改文件、
+journal/ledger 不一致或无权威执行记录全部停止并升级，不改变工作流状态。
+
+### 当前落实
+
+1. 新增 `RecoveryAssessment`、`RecoveryStatus`、`RunRecoveryManager` 和
+   `LocalRunRecoveryManager`。
+2. `inspect-recovery` 提供只读分类；`recover-run` 执行唯一受支持的 create-only
+   决策卡恢复，健康 run 重复调用保持幂等。
+3. 恢复前复用 `LocalRunCoordinator.inspect` 验证双链、制品和状态，不建立第二
+   套工作流真相。
+4. 已存在但无效、不匹配或为 symlink 的卡片不覆盖；journal/ledger 提交缺口
+   分类为 `manual_intervention`。
+5. 投影写入循环处理 partial write 并 `fsync`；注入写入故障后删除本次创建的
+   不完整文件，恢复条件仍然成立。
+
+### 验证、限制与下一步
+
+- 本切片变更文件：`README.md`、`docs/DEVELOPMENT_LOG.md`、
+  `docs/MINIMUM_DEVELOPMENT_LOOP.md`、`docs/PROJECT_GUIDE.md`、
+  `docs/ROADMAP.md`、`docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md`、
+  `docs/UNIFIED_ENTRYPOINT.md`、`docs/adr/README.md`、
+  `docs/adr/0016-evidence-bounded-local-run-recovery.md`、
+  `src/jobslayer/adapters/local_recovery.py`、`src/jobslayer/cli.py`、
+  `src/jobslayer/recovery/__init__.py`、`tests/test_local_run.py`、
+  `tests/test_unified_entrypoint.py`。
+- 定向命令 `.venv\Scripts\python.exe -m unittest tests.test_local_run
+  tests.test_readiness tests.test_unified_entrypoint -v`：20 项全部通过。
+  恢复路径覆盖健康 run、缺失投影、重复恢复；拒绝路径覆盖被篡改投影和
+  journal/ledger 提交缺口；故障注入覆盖 partial write 后清理本次不完整文件。
+- `.\jobslayer.cmd inspect-recovery --help` 与
+  `.\jobslayer.cmd recover-run --help` 均通过统一 Windows 入口返回 0，命令已进入
+  公共 parser；`git diff --check` 通过。
+- 通过统一 Windows 入口运行 `.\jobslayer.cmd check`：7/7 全部通过；完整
+  unittest 为 123 项 `OK`，1 项因当前 Windows 未授予目录 symlink 权限而
+  skip；compileall、pip check、测试床、两套 runbook 绑定和 Git diff 门禁
+  均通过。
+- 当前只闭合 review ledger 已提交、decision-card 投影未创建这一窗口；其他阶段
+  仍只会保守升级人工处理。
+- 下一切片需要为 execution、decision application、source integration 和
+  cleanup 定义幂等键和可恢复提交事实，并增加真实子进程 crash harness。

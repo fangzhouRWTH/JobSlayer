@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from collections.abc import Sequence
 import hashlib
 import json
 import os
@@ -79,14 +80,24 @@ class LocalRunCoordinator:
         repository_root: str | Path,
         *,
         state_root: str | Path | None = None,
-        codex_binary: str | Path = "codex",
+        codex_binary: str | os.PathLike[str] | Sequence[str] = "codex",
     ):
         self.repository_root = Path(repository_root).resolve(strict=True)
         requested_state = Path(state_root) if state_root is not None else Path(".jobslayer")
         if not requested_state.is_absolute():
             requested_state = self.repository_root / requested_state
         self.state_root = requested_state.resolve(strict=False)
-        self.codex_binary = str(codex_binary)
+        if isinstance(codex_binary, (str, os.PathLike)):
+            codex_command = (os.fspath(codex_binary),)
+        else:
+            codex_command = tuple(str(argument) for argument in codex_binary)
+        if not codex_command or any(
+            not argument or "\x00" in argument for argument in codex_command
+        ):
+            raise LocalRunError(
+                "Codex executable command must contain non-empty arguments"
+            )
+        self.codex_command = codex_command
         if self.state_root == self.repository_root:
             raise LocalRunError("state root must not be the JobSlayer repository root")
 
@@ -181,8 +192,10 @@ class LocalRunCoordinator:
             raise LocalRunError(
                 "codex_cli execution requires an explicit non-empty authorized_by actor"
             )
-        if shutil.which(self.codex_binary) is None:
-            raise LocalRunError(f"Codex executable is unavailable: {self.codex_binary}")
+        if shutil.which(self.codex_command[0]) is None:
+            raise LocalRunError(
+                f"Codex executable is unavailable: {self.codex_command[0]}"
+            )
 
     @staticmethod
     def _execution_authorization(
@@ -237,7 +250,7 @@ class LocalRunCoordinator:
             return CodexCliExecutor(
                 workspace_manager,
                 artifact_root,
-                codex_binary=self.codex_binary,
+                codex_binary=self.codex_command,
             )
         raise LocalRunError(f"unsupported executor adapter: {config.adapter}")
 

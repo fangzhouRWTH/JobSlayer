@@ -1,0 +1,10 @@
+jobslayer text eol=lf
+*.cmd text eol=crlf
+*.py text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.js text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.diff -text
