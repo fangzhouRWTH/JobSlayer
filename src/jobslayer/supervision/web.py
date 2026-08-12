@@ -16,6 +16,7 @@ from jobslayer.adapters.local_decisions import (
 from jobslayer.supervision.decision import DecisionError
 from jobslayer.supervision.session import (
     DecisionAlreadyRecordedError,
+    ReviewAuthorizationError,
     ReviewSession,
     ReviewSessionError,
     StaleDecisionCardError,
@@ -127,6 +128,9 @@ class ReviewRequestHandler(BaseHTTPRequestHandler):
             StaleDecisionCardError,
         ) as exc:
             self._send_error_json(HTTPStatus.CONFLICT, str(exc))
+            return
+        except ReviewAuthorizationError as exc:
+            self._send_error_json(HTTPStatus.FORBIDDEN, str(exc))
             return
         except (ReviewSessionError, DecisionStoreError) as exc:
             self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))

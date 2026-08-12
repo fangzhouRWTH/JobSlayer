@@ -146,8 +146,102 @@ class LocalGitIntegrator:
                 "integration finished with a dirty target or source workspace"
             )
 
+        return self._result(
+            task=task,
+            workspace=workspace,
+            reviewed_patch=reviewed_patch,
+            target_ref=target_ref,
+            approved_by=approved_by,
+            commit=workspace_head,
+            final_target=final_target,
+        )
+
+    def verify_existing_integration(
+        self,
+        *,
+        task: TaskSpec,
+        workspace: WorkspaceManifest,
+        reviewed_patch: WorkspacePatch,
+        target_ref: str,
+        approved_by: str,
+        commit_message: str,
+        result: SourceIntegrationResult,
+    ) -> None:
+        """Attest persisted integration evidence without changing Git state."""
+
+        self._validate_bindings(task, workspace, reviewed_patch)
+        target_ref = self._validated_ref(target_ref)
+        approved_by = self._single_line(approved_by, field="approved_by")
+        commit_message = self._single_line(commit_message, field="commit_message")
+        workspace_path = Path(workspace.path)
+
+        target_branch = self._git(self.repository, "branch", "--show-current")
+        if target_branch != target_ref:
+            raise LocalGitIntegrationError(
+                f"target checkout is on {target_branch or 'detached HEAD'}, not {target_ref}"
+            )
+        if self._status(self.repository):
+            raise LocalGitIntegrationError("target checkout has uncommitted changes")
+
+        base_commit = workspace.resolved_base_commit
+        target_head = self._git(self.repository, "rev-parse", "HEAD")
+        workspace_head = self._git(workspace_path, "rev-parse", "HEAD")
+        if workspace_head == base_commit:
+            raise LocalGitIntegrationError("source integration commit is missing")
+        expected_message = self._commit_message(
+            commit_message=commit_message,
+            task_id=task.task_id,
+            patch_sha256=reviewed_patch.sha256,
+            approved_by=approved_by,
+        )
+        expected_tree = self._expected_tree(
+            reviewed_patch=reviewed_patch,
+            base_commit=base_commit,
+        )
+        self._validate_recoverable_commit(
+            workspace_path=workspace_path,
+            commit=workspace_head,
+            base_commit=base_commit,
+            expected_message=expected_message,
+            expected_paths=reviewed_patch.changed_paths,
+            expected_tree=expected_tree,
+        )
+        if target_head != workspace_head:
+            raise LocalGitIntegrationError(
+                "target branch does not contain the attested source commit"
+            )
+        if self._status(workspace_path):
+            raise LocalGitIntegrationError("source workspace has uncommitted changes")
+
+        expected_result = self._result(
+            task=task,
+            workspace=workspace,
+            reviewed_patch=reviewed_patch,
+            target_ref=target_ref,
+            approved_by=approved_by,
+            commit=workspace_head,
+            final_target=target_head,
+        )
+        if result.model_dump(exclude={"integrated_at"}) != expected_result.model_dump(
+            exclude={"integrated_at"}
+        ):
+            raise LocalGitIntegrationError(
+                "persisted integration result does not match current Git facts"
+            )
+
+    def _result(
+        self,
+        *,
+        task: TaskSpec,
+        workspace: WorkspaceManifest,
+        reviewed_patch: WorkspacePatch,
+        target_ref: str,
+        approved_by: str,
+        commit: str,
+        final_target: str,
+    ) -> SourceIntegrationResult:
         identity = hashlib.sha256(
-            f"{task.task_id}\0{target_ref}\0{workspace_head}".encode("utf-8")
+            f"{task.task_id}\0{target_ref}\0{commit}".encode("utf-8")
         ).hexdigest()[:32]
         return SourceIntegrationResult(
             integration_id=f"integration-{identity}",
@@ -156,9 +250,9 @@ class LocalGitIntegrator:
             repository_root=str(self.repository),
             source_ref=workspace.branch_name,
             target_ref=target_ref,
-            base_commit=base_commit,
-            commit=workspace_head,
-            target_previous_commit=base_commit,
+            base_commit=workspace.resolved_base_commit,
+            commit=commit,
+            target_previous_commit=workspace.resolved_base_commit,
             target_commit=final_target,
             source_patch_sha256=reviewed_patch.sha256,
             changed_paths=reviewed_patch.changed_paths,

@@ -67,6 +67,37 @@ class LocalArtifactRegistryTests(unittest.TestCase):
         with self.assertRaises(ArtifactIntegrityError):
             self.registry.read(manifest)
 
+    def test_lists_only_verified_manifests_matching_metadata_filters(self) -> None:
+        selected = self.registry.register_bytes(
+            task_id="task-1",
+            run_id="run-1",
+            artifact_type="task-execution-intent",
+            producer="unit-test",
+            content=b"intent",
+        )
+        self.registry.register_bytes(
+            task_id="task-1",
+            run_id="run-2",
+            artifact_type="task-execution-intent",
+            producer="unit-test",
+            content=b"other run",
+        )
+        self.registry.register_bytes(
+            task_id="task-1",
+            run_id="run-1",
+            artifact_type="task-execution-outcome",
+            producer="unit-test",
+            content=b"outcome",
+        )
+
+        manifests = self.registry.list_manifests(
+            artifact_type="task-execution-intent",
+            task_id="task-1",
+            run_id="run-1",
+        )
+
+        self.assertEqual(manifests, (selected,))
+
 
 if __name__ == "__main__":
     unittest.main()

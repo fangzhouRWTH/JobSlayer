@@ -31,17 +31,60 @@ CLI 业务逻辑。
 
 ## 主命令
 
+### 本地认证准备
+
+所有会改变决定、运行或 Git 状态的公共命令都要求短期签名 session，不再接受自由文本
+`actor_id`/`authorized_by`。本地开发首次创建一个受保护的签名 key，再按最小角色签发
+最长 24 小时的 session：
+
+```bash
+./jobslayer create-local-identity-key .jobslayer/identity/key.json
+./jobslayer issue-local-identity-session \
+  --key .jobslayer/identity/key.json \
+  --subject-id local-approver --display-name "Local approver" \
+  --role approver --output .jobslayer/identity/approver.json
+```
+
+`observer` 只读 Dashboard，`executor` 启动任务，`reviewer` 提交实现审查，`approver`
+记录/应用决定并执行集成和清理，`worker-admin` 管理 worker；`operator-admin` 仅用于确需
+全部本地权限的受控运维。key/session 不得提交、交给 Agent 或写入日志/制品。
+
 ### 可视化交互
 
 ```bash
 ./jobslayer ui \
   examples/decision-card.example.json \
-  --actor-id local-reviewer \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json \
   --output .jobslayer/decisions/example.json \
   --open-browser
 ```
 
 `ui` 是 `serve-review` 的稳定短别名，两者进入同一实现。界面仍遵守 [可视化审查边界](VISUAL_REVIEW_UI.md)：只记录决定，不应用工作流、合并或部署。
+
+Agent 开发管理 Dashboard 的脚本入口是：
+
+```bash
+./jobslayer serve-dashboard \
+  --state-root .jobslayer/phase0-corpus/state \
+  --identity-session .jobslayer/identity/observer.json \
+  --identity-key .jobslayer/identity/key.json \
+  --open-browser
+```
+
+`dashboard` 是短别名。读取 Phase 1 事务真相时，改用一对已有且经过迁移的路径：
+
+```bash
+./jobslayer dashboard \
+  --control-plane-db .jobslayer/control-plane.sqlite3 \
+  --artifact-root .jobslayer/artifacts \
+  --identity-session .jobslayer/identity/observer.json \
+  --identity-key .jobslayer/identity/key.json \
+  --open-browser
+```
+
+Dashboard 仅绑定 loopback、只读且要求 `view_control_plane` 权限；不会自动创建或迁移
+传入数据库，也没有写状态、审批、合并或部署 API。
 
 ### 完整开发验证
 
@@ -57,7 +100,7 @@ CLI 业务逻辑。
 4. 通过统一模块入口校验 BraveNewWorld 测试床登记；
 5. 校验 BraveNewWorld scripted task/profile/runbook/patch 的交叉绑定；
 6. 校验真实 Codex task/profile/runbook 的交叉绑定；
-7. `git diff --check`。
+7. `git -c core.autocrlf=true diff --check`，先按跨平台 checkout 规则规范化文本再检查空白与冲突标记。
 
 `check` 只能在 JobSlayer 源码 checkout 中使用。通常会自动查找根目录；从其他工作目录运行时可以传 `--root /path/to/JobSlayer`。任何一步失败都会使最终退出码非零，但其他步骤仍继续执行，便于一次看到完整问题列表。
 
@@ -73,25 +116,47 @@ CLI 业务逻辑。
 ./jobslayer run-task runbooks/bnw-scenario-slow-001.json
 ./jobslayer validate-runbook runbooks/bnw-filter-demo-001-codex.json
 ./jobslayer run-task runbooks/bnw-filter-demo-001-codex.json \
-  --authorized-by local-human-operator
+  --identity-session .jobslayer/identity/executor.json \
+  --identity-key .jobslayer/identity/key.json
 ./jobslayer inspect-run .jobslayer/runs/bnw-scenario-slow-001-run-01
 ./jobslayer inspect-readiness --state-root .jobslayer --required-reviewed-tasks 20
+./jobslayer build-phase0-corpus
+./jobslayer inspect-readiness --state-root .jobslayer/phase0-corpus/state --required-reviewed-tasks 20
 ./jobslayer inspect-recovery RUN_DIR
-./jobslayer recover-run RUN_DIR
-./jobslayer review-run RUN_DIR --actor-type agent --actor-id reviewer \
+./jobslayer recover-run RUN_DIR \
+  --identity-session .jobslayer/identity/operator-admin.json \
+  --identity-key .jobslayer/identity/key.json
+./jobslayer review-run RUN_DIR \
+  --identity-session .jobslayer/identity/reviewer.json \
+  --identity-key .jobslayer/identity/key.json \
   --status accepted --summary "审查结论"
-./jobslayer run-ui RUN_DIR --actor-id local-supervisor --open-browser
-./jobslayer apply-run-decision RUN_DIR --authority AUTHORITY.json
-./jobslayer integrate-run RUN_DIR
-./jobslayer cleanup-run RUN_DIR
+./jobslayer run-ui RUN_DIR \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json --open-browser
+./jobslayer issue-approval-authority \
+  --key .jobslayer/identity/key.json \
+  --identity-session .jobslayer/identity/approver.json \
+  --decision-kind merge_review --output .jobslayer/identity/authority.json
+./jobslayer apply-run-decision RUN_DIR \
+  --authority .jobslayer/identity/authority.json \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json
+./jobslayer integrate-run RUN_DIR \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json
+./jobslayer cleanup-run RUN_DIR \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json
 ./jobslayer verify-journal .jobslayer/audit.jsonl
-./jobslayer review-decision card.json --actor-id reviewer --output decision.json
+./jobslayer review-decision card.json \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json --output decision.json
 ./jobslayer demo --journal .jobslayer/demo.jsonl
 ```
 
 `inspect-testbed` 从登记的本地 checkout 提示读取 Git 事实，检查工作树、HEAD、标签和 origin，并明确输出基线是否已发布。它不会执行、提交、fetch 或 push；其他目录可用 `--checkout` 覆盖本地提示。
 
-`run-task` 到 `cleanup-run` 构成可恢复的本地最小成功路径，详见[最小开发闭环与体验测试手册](MINIMUM_DEVELOPMENT_LOOP.md)。`inspect-recovery` 只读分类 run；当前 `recover-run` 只会从权威 review ledger create-only 重建缺失的决策卡投影，不补写工作流、不覆盖可疑文件，也不重跑 Agent。scripted replay 使用登记 policy；真实 `codex_cli` 必须额外提供声明式 `--authorized-by`，且当前只允许 low-risk、`workspace_write` 和一次尝试。`apply-run-decision` 只进入 `Integrating`；`integrate-run` 必须由操作员另行显式调用，并且只在审核补丁、提交 tree、固定基线、目标分支和干净状态都匹配时执行本地 fast-forward。没有子命令会 push 或部署。
+`run-task` 到 `cleanup-run` 构成可恢复的本地最小成功路径，详见[最小开发闭环与体验测试手册](MINIMUM_DEVELOPMENT_LOOP.md)。`inspect-recovery` 只读分类 run；`recover-run` 可在严格 outcome 已持久化时补写 execution 首记录、重建缺失决策卡，也可在原转换、制品及 Git 后置事实一致时只补写 decision application、source integration 或 cleanup 记录。只有 execution intent 而没有 outcome 时会明确要求人工处理，绝不重跑 Agent；其他恢复也不补写工作流、不覆盖可疑文件或重放决定转换、Git 集成和 worktree remove。scripted replay 使用登记 policy；真实 `codex_cli` 需要绑定 task/run 的签名 execution authority，且 runbook 必须显式给出 token、费用、上下文、attempt/repair 上限。`apply-run-decision` 只进入 `Integrating`；`integrate-run` 必须由有权限的操作员另行显式调用，并且只在审核补丁、提交 tree、固定基线、目标分支和干净状态都匹配时执行本地 fast-forward。没有子命令会 push 或部署。
 
 ## 开发环境选择
 
@@ -138,8 +203,11 @@ $env:JOBSLAYER_PYTHON = 'C:\Python312\python.exe'
 本地命令 runner 和 Codex adapter 只依赖公共 `ProcessSupervisor` 协议。默认
 native factory 在 POSIX 返回 session/process-group 实现，在 Windows 返回
 process-group/`taskkill` 实现；测试、容器或未来 worker 可注入其他实现而无需
-修改领域模型或应用控制器。这只提供超时与取消所需的进程树清理，不升级为
-网络、资源或系统调用安全隔离。固定 patch 通过二进制 stdin 进入 Git，避免
+修改领域模型或应用控制器。Linux 强治理任务还通过 `SandboxLauncher` 进入从空 root
+启动的 bubblewrap namespace，只暴露只读运行时和一个可写 workspace，并限制网络、
+CPU、内存、进程数、wall timeout 与进程树。原生 Windows 目前没有等价强沙箱 adapter；
+需要这些能力的任务会失败关闭，可由同一接口调度到 WSL/Linux worker，不会静默降级。
+固定 patch 通过二进制 stdin 进入 Git，避免
 Windows 文本模式改写证据字节；源控 patch 文件也禁止行尾转换。
 
 外部测试床的验证 argv 是受治理输入，JobSlayer 不按操作系统偷偷改写。当前

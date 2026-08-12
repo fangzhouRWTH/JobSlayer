@@ -1,6 +1,6 @@
 """Deterministic workflow kernel and audit storage."""
 
-from jobslayer.workflow.journal import AuditIntegrityError, JsonlAuditJournal
+from jobslayer.workflow.journal import AuditIntegrityError, AuditJournal, JsonlAuditJournal
 from jobslayer.workflow.kernel import (
     AuthorizationError,
     IllegalTransitionError,
@@ -10,6 +10,7 @@ from jobslayer.workflow.kernel import (
 
 __all__ = [
     "AuditIntegrityError",
+    "AuditJournal",
     "AuthorizationError",
     "IllegalTransitionError",
     "JsonlAuditJournal",

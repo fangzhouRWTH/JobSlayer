@@ -20,6 +20,42 @@ from jobslayer.domain.models import (
     WorkspaceSpec,
 )
 from jobslayer.execution import ProcessSupervisor, native_process_supervisor
+from jobslayer.workers import (
+    NetworkPolicy,
+    SandboxCapabilities,
+    SandboxLaunchPlan,
+    SandboxPolicy,
+)
+
+
+class _SandboxLauncher:
+    def __init__(self):
+        self.request = None
+        self._capabilities = SandboxCapabilities(
+            adapter="fixture-launcher",
+            network_isolation=True,
+            mount_isolation=True,
+            cpu_limit=True,
+            memory_limit=True,
+            process_limit=True,
+            process_tree_termination=True,
+            wall_timeout=True,
+        )
+
+    def capabilities(self):
+        return self._capabilities
+
+    def prepare(self, request):
+        self.request = request
+        return SandboxLaunchPlan(
+            request_id=request.request_id,
+            run_id=request.run_id,
+            adapter=self._capabilities.adapter,
+            argv=request.argv,
+            cwd=request.workspace,
+            environment={"PATH": os.defpath},
+            capabilities=self._capabilities,
+        )
 
 
 class RecordingProcessSupervisor:
@@ -105,6 +141,7 @@ class CodexCliExecutorTests(unittest.TestCase):
 
         fake_codex = root / "fake_codex.py"
         fake_codex.write_text(FAKE_CODEX, encoding="utf-8")
+        self.fake_codex = fake_codex
 
         self.manager = GitWorktreeManager(self.repository, root / "worktrees")
         self.manifest = self.manager.create(
@@ -283,6 +320,37 @@ class CodexCliExecutorTests(unittest.TestCase):
 
         with self.assertRaises(CodexConfigurationError):
             self.executor.start(invocation, self.manifest)
+
+    def test_prepares_codex_through_the_enforcement_backed_sandbox_launcher(self) -> None:
+        launcher = _SandboxLauncher()
+        policy = SandboxPolicy(
+            policy_id="codex-strict-v1",
+            network=NetworkPolicy.DENY,
+            cpu_seconds=5,
+            memory_bytes=64 * 1024 * 1024,
+            process_limit=16,
+            timeout_seconds=5,
+        )
+        executor = CodexCliExecutor(
+            self.manager,
+            Path(self.temporary_directory.name) / "sandboxed-artifacts",
+            codex_binary=(sys.executable, str(self.fake_codex)),
+            sandbox_launcher=launcher,
+            sandbox_policy=policy,
+            credential_grant_id="grant-1",
+        )
+
+        command, cwd, environment = executor._launch_for(
+            self.invocation("run-sandboxed", "fake task"), self.manifest
+        )
+
+        self.assertEqual(executor.credential_grant_id(), "grant-1")
+        self.assertEqual(executor.sandbox_capabilities().adapter, "fixture-launcher")
+        self.assertEqual(launcher.request.run_id, "run-sandboxed")
+        cd_index = command.index("--cd") + 1
+        self.assertEqual(command[cd_index], "/workspace")
+        self.assertEqual(cwd, Path(self.manifest.path))
+        self.assertEqual(environment, {"PATH": os.defpath})
 
 
 if __name__ == "__main__":

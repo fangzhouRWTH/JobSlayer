@@ -2,21 +2,22 @@
 
 ## 目标与边界
 
-当前界面是 Phase 0 的本地“薄控制面”，不是项目管理后台。它只呈现并调用已经存在的真实能力：
+单决定页是本地“薄控制面”；多运行 Agent 管理另有只读 Dashboard。决定页只呈现并调用已经存在的真实能力：
 
 - 严格校验后的 `DecisionCard`；
 - 可选的、经过哈希链验证且仅属于当前 task 的状态历史；
 - 决策证据、风险、选项、后果和受影响制品 ID；
-- 一次 create-only 的 `HumanDecision` JSON 记录。
+- 经签名 session 认证的一次 create-only `HumanDecision` JSON 记录。
 
-界面不会声称身份已认证，不会应用决定，不会执行 Git 集成、push 或部署。对 merge review，页面固定显示当前运行时边界：批准应用后只进入 `Integrating`，只有操作员另行显式执行且证据复核通过的 `integrate-run` 才能本地快进并进入 `Completed`。这也让框架升级前已经持久化的旧卡片在展示时不会掩盖当前真实状态语义。提供审计日志时，如果卡片要求的 `PlanReview`/`MergeReview` 与任务当前状态不一致，前后端都会禁止提交。
+服务启动前验证签名身份、有效期和 `record_decision` 权限；它不会应用决定，不会执行 Git 集成、push 或部署。对 merge review，页面固定显示当前运行时边界：批准应用后只进入 `Integrating`，只有操作员另行显式执行且证据复核通过的 `integrate-run` 才能本地快进并进入 `Completed`。这也让框架升级前已经持久化的旧卡片在展示时不会掩盖当前真实状态语义。提供审计日志时，如果卡片要求的 `PlanReview`/`MergeReview` 与任务当前状态不一致，前后端都会禁止提交。
 
 ## 启动
 
 ```bash
 ./jobslayer ui \
   examples/decision-card.example.json \
-  --actor-id local-reviewer \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json \
   --output .jobslayer/decisions/task-example-001.json \
   --port 8765 \
   --open-browser
@@ -30,13 +31,14 @@
 
 服务只允许绑定 `127.0.0.1`/`localhost`。不使用 `--open-browser` 时，命令会打印本地 URL；按 `Ctrl+C` 停止。输出文件已存在时界面进入只读状态，不覆盖原决定。
 
-`actor_id` 当前只是本地身份声明。决定文件仍需由 `DecisionApplicationService` 结合真实授权、当前状态和原验证报告重新核验后才能推进工作流。
+`actor_id` 由已经验证的 session 注入，页面不能覆盖。决定文件仍需由 `DecisionApplicationService` 结合签名 approval authority、当前状态和原验证报告重新核验后才能推进工作流。
 
 真实 run 到达 `MergeReview` 后，可以直接接入它生成的 card 和 journal：
 
 ```bash
 ./jobslayer run-ui .jobslayer/runs/RUN_ID \
-  --actor-id local-supervisor \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json \
   --open-browser
 ```
 
@@ -67,12 +69,26 @@
 
 ## 本地 API
 
-- `GET /api/session`：返回卡片、卡片哈希、身份声明、状态历史、现有决定和能力边界；同时返回本进程随机提交令牌。
+- `GET /api/session`：返回卡片、卡片哈希、已认证主体、状态历史、现有决定和能力边界；同时返回本进程随机提交令牌。
 - `POST /api/decisions`：只接受 `selected_option_id` 和 `rationale`，并要求 `X-JobSlayer-Session`。成功返回 `201 recorded_not_applied`。
 - `409`：卡片状态过期、已经存在决定或并发创建冲突。
 - `403`：缺少或错误的本地会话令牌。
 
-服务不设置 CORS，POST 使用自定义会话头，并设置 `default-src 'self'` CSP、`frame-ancestors 'none'`、`no-store`、`nosniff` 和 `DENY` frame header。这些措施只保护本地 Phase 0 操作，不等同于用户认证或远程部署安全。
+服务不设置 CORS，POST 使用自定义会话头，并设置 `default-src 'self'` CSP、`frame-ancestors 'none'`、`no-store`、`nosniff` 和 `DENY` frame header。签名 session 解决本地身份/RBAC，不把 loopback 服务升级为远程或多租户部署。
+
+## Agent 管理 Dashboard
+
+```bash
+./jobslayer dashboard \
+  --state-root .jobslayer/phase0-corpus/state \
+  --identity-session .jobslayer/identity/observer.json \
+  --identity-key .jobslayer/identity/key.json \
+  --open-browser
+```
+
+Dashboard 汇总 run 状态、executor、usage/cost、审查和决定，详情展示 workflow、run
+records、持久事件与制品。传入 `--control-plane-db` 和 `--artifact-root` 可只读查询
+Phase 1 SQLite 事务真相。它不提供 POST 写 API；认证主体只有查看权限也足够。
 
 ## 调试顺序
 

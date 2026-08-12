@@ -7,6 +7,7 @@ from jobslayer.domain.models import (
     WorkspaceInspection,
     WorkspaceManifest,
     WorkspacePatch,
+    WorkspaceRemovalInspection,
     WorkspaceSpec,
 )
 
@@ -31,3 +32,11 @@ class WorkspaceManager(Protocol):
 
     def remove(self, manifest: WorkspaceManifest) -> None:
         """Remove a clean registered worktree while preserving its branch."""
+
+    def inspect_removal(
+        self,
+        manifest: WorkspaceManifest,
+        *,
+        expected_commit: str,
+    ) -> WorkspaceRemovalInspection:
+        """Attest path/registration absence and the preserved source revision."""

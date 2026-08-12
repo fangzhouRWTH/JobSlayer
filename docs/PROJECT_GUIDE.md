@@ -143,7 +143,7 @@ stateDiagram-v2
 - 非法转换不写入日志；
 - 后续重试创建新证据，不修改旧证据。
 
-当前 JSONL 日志是单进程研究实现：哈希链可以发现内容改写或链断裂，但不能抵抗拥有文件系统权限的攻击者重写整条链或删除尾部。进入多控制器或生产阶段前，必须迁移到具备事务序列、访问控制、备份和外部锚定/保留策略的存储；不能把本地文件称为密码学不可变账本。
+当前 JSONL 日志是单进程研究实现：前缀保持的原子 generation 发布可避免进程崩溃暴露 partial JSON，哈希链可以发现内容改写或链断裂，但不能抵抗拥有文件系统权限的攻击者重写整条链或删除尾部。进入多控制器或生产阶段前，必须迁移到具备事务序列、访问控制、备份和外部锚定/保留策略的存储；不能把本地文件称为密码学不可变账本。
 
 ## 7. 安全与工作区规则
 
@@ -204,4 +204,4 @@ tests/                     确定性单元和集成测试
 
 ## 11. 当前实施基线
 
-当前代码已建立 Phase 0 的初步完整框架：类型化契约、确定性状态机、双追加哈希链、任务级 Git worktree、受政策治理的本地 runner、内容寻址制品、版本化验证、结构化人工决策及授权应用、Codex CLI adapter、应用控制器、证据门禁的本地 fast-forward 集成，以及只反映真实能力的 loopback 极简审查页。源码、UI、完整开发验证和安装后 CLI 已统一到 `jobslayer.launcher`。临时 Git 仓库测试已闭合 `MergeReview → Integrating → Completed → cleanup`；BraveNewWorld 的真实 Codex 滤波候选仍停在 `MergeReview`，主分支、人类决定和远端均未被自动修改。下一步先进行人工体验测试，再处理执行前预算、有界修复、认证身份和真实 Codex 外层隔离。完整操作与边界见 [MINIMUM_DEVELOPMENT_LOOP.md](MINIMUM_DEVELOPMENT_LOOP.md)。
+当前代码已闭合 Phase 0 证据门禁，并建立 Phase 1 必要基础架构：类型化契约、确定性状态机、双追加哈希链、任务级 Git worktree、受政策治理的 runner、内容寻址制品、版本化验证、签名本地身份/RBAC、结构化人工决策及 authority、Codex CLI adapter、预算/上下文/worker lease、Linux 强沙箱、SQLite/PostgreSQL 事务真相与 outbox，以及认证只读 Agent 管理 Dashboard。源码、UI、完整开发验证和安装后 CLI 统一到 `jobslayer.launcher`。Phase 0 execution 以 intent/outcome 划分保守恢复边界；Phase 1 协调器在长 Agent 之前提交 intent，结束后把 Kernel 转换、run、制品 metadata 和 outbox 原子提交。临时 Git 仓库测试已闭合 `MergeReview → Integrating → Completed → cleanup`；BraveNewWorld 的真实 Codex 滤波候选仍停在 `MergeReview`，主分支、人类决定和远端均未被自动修改。完整操作与边界见 [短期基础设施计划](SHORT_TERM_INFRASTRUCTURE_PLAN.md)和 [MINIMUM_DEVELOPMENT_LOOP.md](MINIMUM_DEVELOPMENT_LOOP.md)。

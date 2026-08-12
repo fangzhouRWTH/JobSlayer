@@ -926,3 +926,731 @@ journal/ledger 不一致或无权威执行记录全部停止并升级，不改�
   仍只会保守升级人工处理。
 - 下一切片需要为 execution、decision application、source integration 和
   cleanup 定义幂等键和可恢复提交事实，并增加真实子进程 crash harness。
+
+---
+
+## DEV-2026-08-12-01 — ST-01 源码集成记录的只读证明恢复
+
+- 状态：完成（第二个恢复窗口已闭合；ST-01 继续执行）
+- 类型：Git 事实证明、Completed 重试语义、集成记录恢复、故障回放与 ADR
+
+### 背景与决策
+
+继续审计 `integrate-run` 的提交顺序后确认，进程可在本地目标分支已经
+fast-forward、集成结果制品已经注册、kernel 已追加 `Completed`，但
+`source_integration` run record 尚未追加时退出。此前恢复器会把该状态统一升级
+为人工处理；直接重跑协调器虽然 Git adapter 通常幂等，却会创建新的集成制品
+manifest，并可能使补写记录引用的 artifact id 与原完成转换不一致。
+
+依据新增 ADR-0017，本轮把首次集成与完成后恢复分开：首次路径仍由受控 adapter
+创建提交和 fast-forward；`Completed` 路径只能读取原转换引用的集成制品，并用
+Git commit/message/tree/paths/base/HEAD 的只读证明验证该结果。只有前三条 ledger、
+journal、全部原制品、批准人和五项完成证据引用均一致时，恢复器才允许追加缺失
+记录。它不调用 `WorkflowKernel.transition`，不重新执行 Agent，也不重复 Git
+集成。
+
+### 当前落实
+
+1. `LocalGitIntegrator.verify_existing_integration` 只读验证目标分支和 source
+   worktree 均干净、source 是固定 base 之上的唯一批准提交、提交消息/路径/tree
+   与 reviewed patch 相同、目标 HEAD 精确等于 source commit，并复核持久化
+   `SourceIntegrationResult` 的稳定字段。
+2. `LocalRunCoordinator.integrate` 在状态已经为 `Completed` 时，不再调用 mutating
+   `integrate` 或注册替代制品；它读取完成转换引用的唯一原始集成制品，验证
+   decision、authority、verification、artifact 和 integration id 后，仅恢复缺失
+   run record。
+3. `LocalRunRecoveryManager` 新增 `resume_source_integration_record` assessment/action。
+   它先验证 run ledger 与 journal 链、决定转换、所有历史制品、完成转换绑定和
+   当前 Git 事实，再允许调用上述 completed resume 路径。
+4. 目标分支在崩溃后继续前进、集成 artifact 绑定改变、journal/ledger 输入无法
+   重构时均返回 `invalid_evidence`，不会补账或改变 Git。
+5. 文件级崩溃回放先完整执行集成，再只保留前三条 run record。正向测试通过 mock
+   明确禁止恢复调用 mutating Git 方法，同时断言目标/worktree HEAD 和 workflow
+   journal 不变、第四条记录只追加一次、重复恢复保持一致。
+
+### 验证、限制与下一步
+
+- 本切片变更文件：`README.md`、`docs/DEVELOPMENT_LOG.md`、
+  `docs/MINIMUM_DEVELOPMENT_LOOP.md`、`docs/PROJECT_GUIDE.md`、
+  `docs/ROADMAP.md`、`docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md`、
+  `docs/UNIFIED_ENTRYPOINT.md`、`docs/adr/README.md`、
+  `docs/adr/0017-read-only-git-attestation-before-integration-record-recovery.md`、
+  `src/jobslayer/adapters/local_git_integration.py`、
+  `src/jobslayer/adapters/local_recovery.py`、
+  `src/jobslayer/application/local_run.py`、`tests/test_local_run.py`。
+- 定向命令 `.venv\Scripts\python.exe -m unittest tests.test_local_run`：12 项全部
+  通过，用时 33.983 秒。新增正向覆盖缺失集成记录恢复及重复幂等；拒绝覆盖目标
+  HEAD 漂移和原集成 artifact 绑定改变。
+- 通过统一 Windows 入口运行 `\.jobslayer.cmd check` 的实际命令为
+  `.\jobslayer.cmd check`：7/7 全部通过；完整 unittest 为 126 项 `OK`，1 项因
+  当前 Windows 未授予目录 symlink 权限而 skip；compileall、pip check、
+  BraveNewWorld 测试床、scripted/Codex 两套 runbook 绑定与 `git diff --check`
+  均通过。完整门禁用时 74.1 秒，测试用时 71.103 秒。
+- 本轮仍是文件级崩溃窗口回放，没有在独立进程的精确指令边界执行强制退出；run
+  ledger 自身若发生 partial append 仍可能需要人工处理。
+- execution、decision application 和 cleanup 提交窗口尚未闭合；目标分支在完成
+  后继续前进也会保守拒绝自动恢复，不推断“提交仍在历史中”即可接受。
+- 下一步优先建立进程级 crash harness 和 run ledger 写入提交帧/partial append
+  语义，再用同一证据矩阵处理 decision application 与 cleanup；ST-01 满足退出
+  条件前不引入 PostgreSQL。
+- 更正：本条验证记录中统一 Windows 入口的精确命令是
+  `.\jobslayer.cmd check`；前文第一个反引号内多写了一个点，验证结果不受影响。
+
+---
+
+## DEV-2026-08-12-02 — ST-01 源码集成边界的真实进程崩溃验证
+
+- 状态：完成（source integration crash harness 已接通；其他阶段矩阵待扩展）
+- 类型：子进程故障注入、跨重启恢复验证、测试基础设施
+
+### 背景与落实
+
+DEV-2026-08-12-01 用删除第四条 ledger 记录回放了目标崩溃状态，但该方法没有证明
+真实进程退出时 Git、artifact registry 和 workflow journal 已经按预期持久化。为
+补足这一层，本轮在测试子进程中临时替换 `LocalRunLedger.append`，让正常
+`LocalRunCoordinator.integrate` 完成 Git fast-forward、集成制品注册和
+`Completed` journal fsync 后，在调用 source-integration append 的精确边界通过
+`os._exit(86)` 强制终止进程。故障钩子仅存在于测试脚本字符串，没有进入产品 API
+或生产代码。
+
+父进程随后重新构造协调器/恢复器，并验证真实落盘状态为三条 run record、
+`Completed` 最终转换和已前进的目标 HEAD。恢复时继续 mock 禁止 mutating
+`LocalGitIntegrator.integrate`，证明新进程只通过原始制品和只读 Git attestation
+追加第四条记录，目标 HEAD 保持不变。
+
+### 验证、限制与下一步
+
+- 本切片新增变更位于 `tests/test_local_run.py`，并同步更新
+  `docs/DEVELOPMENT_LOG.md`、`docs/ROADMAP.md` 和
+  `docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md`。
+- 定向命令 `.venv\Scripts\python.exe -m unittest
+  tests.test_local_run.LocalRunCoordinatorTests.test_subprocess_crash_after_completed_recovers_without_reintegration
+  -v`：1 项通过，用时 5.223 秒；子进程退出码严格为 86。
+- 通过统一 Windows 入口运行 `.\jobslayer.cmd check`：7/7 全部通过；完整
+  unittest 为 127 项 `OK`，1 项因当前 Windows 未授予目录 symlink 权限而 skip；
+  compileall、pip check、BraveNewWorld 测试床、scripted/Codex 两套 runbook 绑定
+  与 `git diff --check` 均通过。完整门禁用时 79.8 秒，测试用时 77.488 秒。
+- 该 harness 目前只覆盖“完成转换已提交、ledger append 尚未调用”，尚未在
+  `os.write` 中途退出，也未覆盖 execution、decision application 和 cleanup。
+- 下一步应先定义 LocalRunLedger 的 durable append/partial-tail 语义和对应崩溃
+  注入点；否则扩大业务阶段恢复仍会共享一个未明确定义的底层写入风险。
+
+---
+
+## DEV-2026-08-12-03 — ST-01 workflow/run 追加链的原子 generation 发布
+
+- 状态：完成（partial JSON 风险已从本地双链提交原语移除）
+- 类型：持久化原语、崩溃一致性、跨平台文件发布与 ADR
+
+### 背景与决策
+
+源码集成业务边界恢复接通后，继续下钻发现 `records.jsonl` 和更关键的
+`workflow.jsonl` 都直接使用一次 `O_APPEND/os.write` 写最终文件。任意长度 write
+不具备跨崩溃完整性保证；若进程退出时只写入半条 JSON，恢复器无法证明尾部是未
+提交临时内容，自动 truncate 又会破坏 append-only 证据边界。
+
+依据 ADR-0018，本轮保留全部 JSONL schema、sequence 和 hash-chain 规则，但把
+物理提交改为前缀保持的 atomic generation publication：验证旧链后，在目标同
+目录临时文件循环写入完整旧字节前缀和一条新记录，fsync 文件，再 `os.replace`
+发布；POSIX 额外 fsync 父目录。逻辑证据只能追加，物理路径在 replace 前后只会
+指向完整旧 generation 或完整新 generation。
+
+### 当前落实
+
+1. `LocalRunLedger.append` 和 `JsonlAuditJournal.append_transition` 均拒绝从无效旧
+   链生成新版本，使用完整写入循环、文件 fsync、同目录 replace 和正常异常路径
+   临时文件清理。
+2. Windows 使用原生 `os.replace`；POSIX 在 replace 后打开父目录并 fsync。没有
+   添加第三方依赖，也没有改变公共领域模型或工作流状态规则。
+3. 两条链都增加 partial-generation-write 故障注入：临时文件写入一半后抛错，
+   最终权威路径字节保持完全不变，旧链继续可读，正常异常路径无残留临时文件。
+4. 两条链都增加真实子进程 crash harness：replace 前通过 `os._exit` 退出只看到
+   旧链；replace 执行后立即退出只看到完整新链，sequence、previous hash 与 record
+   hash 均有效。
+5. 强制退出在 replace 前可能留下隐藏临时文件；reader 明确只读取权威路径，因此
+   未提交临时文件不参与工程真相。
+
+### 验证、限制与下一步
+
+- 本切片变更文件：`README.md`、`docs/DEVELOPMENT_LOG.md`、
+  `docs/PROJECT_GUIDE.md`、`docs/ROADMAP.md`、
+  `docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md`、`docs/adr/README.md`、
+  `docs/adr/0018-prefix-preserving-atomic-jsonl-publication.md`、
+  `src/jobslayer/application/run_records.py`、
+  `src/jobslayer/workflow/journal.py`、`tests/test_run_records.py`、
+  `tests/test_workflow.py`。
+- 定向命令 `.venv\Scripts\python.exe -m unittest tests.test_workflow
+  tests.test_run_records -v`：17 项全部通过，用时 1.236 秒；覆盖两条链的允许写入、
+  篡改拒绝、partial write、replace 前退出和 replace 后退出。
+- 通过统一 Windows 入口运行 `.\jobslayer.cmd check`：7/7 全部通过；完整
+  unittest 为 131 项 `OK`，1 项因当前 Windows 未授予目录 symlink 权限而 skip；
+  compileall、pip check、BraveNewWorld 测试床、scripted/Codex 两套 runbook 绑定
+  与 `git diff --check` 均通过。完整门禁用时 63.1 秒，测试用时 61.316 秒。
+- 当前仍是单控制器语义：thread lock 不能替代多进程 CAS/租约/事务隔离；全文件
+  generation 发布成本随链长度增长。ST-02 仍需事务存储 adapter，不能把本实现
+  宣称为生产级并发账本。
+- 下一步按 ST-01 顺序闭合 cleanup（外部 worktree 删除、ledger 未追加）与
+  decision application（转换已追加、ledger 未追加）业务窗口；execution 首记录
+  缺失需要先补充可重构的 execution intent/outcome 持久边界。
+
+---
+
+## DEV-2026-08-12-04 — ST-01 决定应用与 cleanup 的无重放恢复
+
+- 状态：完成（decision application 与 cleanup 提交窗口已闭合）
+- 类型：授权证据绑定、workspace removal contract、进程崩溃恢复与 ADR
+
+### 背景与决策
+
+decision application 会先注册决定/authority 制品并经 kernel 转换，再追加第三条
+run record；cleanup 会先移除 Git worktree，再追加第五条记录。两者在最后一步前
+崩溃时，重复调用原命令分别会尝试第二次状态转换，或把“路径不存在”误当作完整
+清理证明。
+
+依据 ADR-0019，本轮将恢复建立在原副作用证据上：决定转换必须引用带 task/run
+binding 的原 decision/authority artifact，并由 provider-neutral validator 只读
+验证已应用转换；workspace manager 提供结构化 removal inspection，证明路径和 Git
+注册均消失、source branch 仍精确指向 integrated commit。恢复只追加缺失 run
+record，不重放 kernel transition 或 worktree remove。
+
+### 当前落实
+
+1. `DecisionApplicationService.apply` 接受 application 层追加的 evidence ids；本地
+   协调器把 decision/authority artifact ids 写入同一次决定转换。
+2. 新增 `validate_applied_transition`，重新校验 card hash、decision evidence、
+   authority actor/kind/转换时有效窗口、option-state 映射、actor/from/to 与制品引用，
+   但不调用 kernel transition。
+3. 恢复器新增 `resume_decision_application_record`：从 transition 引用的唯一两个
+   制品恢复严格模型，验证全部历史制品及 producer/run/task binding 后补写原记录。
+4. 新增 provider-neutral `WorkspaceRemovalInspection` 和 `WorkspaceManager.inspect_removal`；
+   Git adapter 验证 path absence、worktree registration absence、source branch 和
+   expected commit。
+5. cleanup 正常路径在 remove 后必须通过 `safely_removed`，新记录持久化结构化
+   removal evidence；reader 兼容此前没有该字段的 Phase 0 旧记录。
+6. 恢复器新增 `resume_workspace_cleanup_record`。真实子进程在 remove 完成、ledger
+   append 前退出后，新进程验证保留分支再补写记录；测试明确禁止再次调用 remove。
+
+### 验证、限制与下一步
+
+- 本切片变更文件：`README.md`、`docs/DEVELOPMENT_LOG.md`、
+  `docs/MINIMUM_DEVELOPMENT_LOOP.md`、`docs/PROJECT_GUIDE.md`、
+  `docs/ROADMAP.md`、`docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md`、
+  `docs/UNIFIED_ENTRYPOINT.md`、`docs/adr/README.md`、
+  `docs/adr/0019-replay-free-decision-and-cleanup-record-recovery.md`、
+  `src/jobslayer/adapters/git_workspace.py`、
+  `src/jobslayer/adapters/local_recovery.py`、
+  `src/jobslayer/application/local_run.py`、`src/jobslayer/domain/models.py`、
+  `src/jobslayer/supervision/application.py`、
+  `src/jobslayer/workspace/manager.py`、`tests/test_decision_application.py`、
+  `tests/test_git_workspace.py`、`tests/test_local_run.py`。
+- 定向命令 `.venv\Scripts\python.exe -m unittest tests.test_git_workspace
+  tests.test_local_run -v`：26 项全部通过，用时 43.430 秒；随后
+  `.venv\Scripts\python.exe -m unittest tests.test_decision_application
+  tests.test_local_run -v`：24 项全部通过，用时 45.575 秒。
+- workflow 规则相关正反测试已成对增加：合法已应用转换携带并验证两个 artifact
+  evidence；缺失必需 artifact evidence 的转换被只读 validator 拒绝且不改变状态。
+- 恢复正向覆盖 decision/cleanup 真实子进程退出及重复幂等；拒绝覆盖 decision
+  artifact producer 篡改和保留 source branch commit 漂移。
+- 通过统一 Windows 入口运行 `.\jobslayer.cmd check`：7/7 全部通过；完整
+  unittest 为 138 项 `OK`，1 项因当前 Windows 未授予目录 symlink 权限而 skip；
+  compileall、pip check、BraveNewWorld 测试床、scripted/Codex 两套 runbook 绑定
+  与 `git diff --check` 均通过。完整门禁用时 89.3 秒，测试用时 87.192 秒。
+- 新恢复只接受显式引用 decision/authority artifacts 的决定转换；旧转换若缺少该
+  绑定会保守要求人工处理，不根据当前文件猜测。
+- ST-01 现在只剩 execution 首记录窗口。下一步需要在执行副作用之前落盘
+  provider-neutral intent，并在结束后持久化足够重构 `TaskExecutionOutcome` 的证据，
+  同时避免恢复器擅自重跑 Agent。
+
+---
+
+## DEV-2026-08-12-05 — ST-01 execution intent/outcome 恢复边界
+
+- 状态：完成（ST-01 本地单控制器退出条件已闭合）
+- 类型：执行意图契约、outcome 制品、manifest 查询、进程崩溃恢复与 ADR
+
+### 背景与决策
+
+execution 在此前实现中直到 Agent、补丁和验证全部完成后才追加首条 run record；
+中途退出只留下空 ledger，恢复器无法区分未启动、执行中和 outcome 已完成。自动
+重跑 Agent 会把 retry policy 交给恢复器并重复副作用，因此不能作为默认策略。
+
+依据 ADR-0020，本轮建立 intent/outcome 双制品边界：调用 controller/Agent 前先
+持久化完整授权输入；controller 返回严格 `TaskExecutionOutcome` 后、ledger 前再
+持久化完整 outcome。只有两者唯一、有效并与 journal/workspace/patch 一致时才能
+补写 execution record；只有 intent 时稳定升级人工处理并明确拒绝重跑。
+
+### 当前落实
+
+1. 新增 provider-neutral `TaskExecutionIntent`，模型层绑定 intent/run/task、
+   invocation、validation profile、authorization 和有效时间窗口。
+2. 新增 `LocalExecutionIntentEnvelope`，保存 source-controlled runbook path/hash、
+   testbed 及通过的 local baseline inspection，并可确定性还原 execution context。
+3. `LocalRunCoordinator.execute` 在 Agent 前注册 run-bound
+   `task-execution-intent`，在严格 outcome 返回后注册
+   `task-execution-outcome`；新 execution record 引用两份 manifest。
+4. `ArtifactRegistry` 增加 `list_manifests` provider-neutral 查询；本地 adapter 按
+   type/task/run 过滤并对每份 manifest/content 做完整验证，不跳过损坏项。
+5. 恢复器新增 `resume_execution_record`：验证 intent/outcome producer/task/run、
+   outcome 内全部制品、journal 最终状态、worktree 和 persisted patch 后补写首记录。
+6. 后续 decision/integration/cleanup 专项恢复也会验证新 execution persistence
+   artifacts；旧 Phase 0 execution record 没有新字段时仍保持兼容。
+7. 真实子进程 crash harness 覆盖两侧：outcome 已落盘、ledger 前退出可自动恢复；
+   controller 调用前退出只留下 intent，分类为 `manual_intervention` 且
+   `recover-run` 拒绝。测试通过 mock 明确证明恢复不会调用 execute/Agent。
+
+### 验证、限制与下一步
+
+- 本切片变更文件：`README.md`、`docs/DEVELOPMENT_LOG.md`、
+  `docs/MINIMUM_DEVELOPMENT_LOOP.md`、`docs/PROJECT_GUIDE.md`、
+  `docs/ROADMAP.md`、`docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md`、
+  `docs/UNIFIED_ENTRYPOINT.md`、`docs/adr/README.md`、
+  `docs/adr/0020-execution-intent-outcome-recovery-boundary.md`、
+  `src/jobslayer/adapters/local_artifacts.py`、
+  `src/jobslayer/adapters/local_recovery.py`、
+  `src/jobslayer/application/execution_intent.py`、
+  `src/jobslayer/application/local_run.py`、
+  `src/jobslayer/artifacts/registry.py`、`src/jobslayer/domain/models.py`、
+  `tests/test_artifacts.py`、`tests/test_local_run.py`。
+- 定向命令 `.venv\Scripts\python.exe -m unittest
+  tests.test_local_run.LocalRunCoordinatorTests.test_subprocess_execution_crash_recovers_persisted_outcome_without_rerun
+  tests.test_local_run.LocalRunCoordinatorTests.test_execution_intent_without_outcome_never_reruns_agent
+  -v`：2 项通过，用时 4.177 秒。
+- 定向命令 `.venv\Scripts\python.exe -m unittest tests.test_artifacts
+  tests.test_local_run -q`：24 项全部通过，用时 49.226 秒；额外拒绝路径覆盖 outcome
+  manifest producer 改写。
+- 通过统一 Windows 入口运行 `.\jobslayer.cmd check`：7/7 全部通过；完整
+  unittest 为 142 项 `OK`，1 项因当前 Windows 未授予目录 symlink 权限而 skip；
+  compileall、pip check、BraveNewWorld 测试床、scripted/Codex 两套 runbook 绑定
+  与 `git diff --check` 均通过。完整门禁用时 80.7 秒，测试用时 78.894 秒。
+- intent-only 表示“获准尝试一次”而非可重试许可；Agent 已启动但 outcome 未提交的
+  run 仍需人工调查。这是显式保守边界，不会被描述为自动恢复成功。
+- ST-01 在本地单控制器范围内已完成。ST-02 仍受 ST-00 语料/人工体验门禁阻塞；
+  下一步先建立可保留的 20-task 内部语料生成与验收流程，不提前引入 PostgreSQL。
+
+---
+
+## DEV-2026-08-12-06 — ST-00 源码定义的跨平台 21-run 语料
+
+- 状态：自动退出条件完成；真实人工决定体验仍待操作者提交
+- 类型：运行语料、跨平台回归、CI matrix、入口与 ADR
+
+### 背景与决策
+
+`inspect-readiness` 已经能够拒绝损坏 run，但本地默认 state root 没有足够样例。
+提交机器生成的绝对路径、worktree 和制品不可移植；手写通过摘要又会绕过 kernel、
+验证和审计链。依据 ADR-0021，本轮把 case matrix 作为源码，生成器创建固定 Git
+testbed 和绑定的 control inputs，并只调用真实 `LocalRunCoordinator` 服务形成证据。
+
+自动 fixture 不能冒充人类。报告显式写入 `evidence_class` 和
+`human_confirmation_claimed: false`；真实人工体验仍是独立门禁。
+
+### 当前落实
+
+1. `corpora/phase0-foundation-v1.json` 固定 21 个不同 case：20 个进入独立实现审查，
+   其中分别覆盖 approve/complete、request changes、reject/cancel 和 17 个待决定；
+   第 21 个通过真实失败验证进入 `Repairing`。
+2. `Phase0CorpusBuilder` create-only 生成 testbed/control Git 仓库、task/profile/
+   runbook/patch、run/worktree/artifacts 和最终报告；失败保留现场，既有目录拒绝覆盖。
+3. `build-phase0-corpus` 进入统一 CLI。生成结束后先内部运行 readiness，再用独立
+   `inspect-readiness` 二次复核。
+4. `.github/workflows/phase0-corpus.yml` 对 Windows/Ubuntu 使用同一定义执行完整
+   `check`、构建和二次门禁；远端状态必须等变更提交/推送后才能取得。
+5. WSL 初次复核发现 POSIX 只读 manifest 的三个篡改测试在 Windows 上被权限语义
+   掩盖；测试现在先显式 `chmod(0600)` 再注入篡改，生产 manifest 仍保持只读。
+6. WSL 读取 Windows CRLF checkout 时原 `git diff --check` 误报整库；统一门禁改为
+   `git -c core.autocrlf=true diff --check`，按 Git 文本规则规范化后仍检查普通尾随
+   空白和冲突标记。
+
+### 验证、限制与下一步
+
+- 本切片文件：`.github/workflows/phase0-corpus.yml`、
+  `corpora/phase0-foundation-v1.json`、`README.md`、
+  `docs/DEVELOPMENT_LOG.md`、`docs/MINIMUM_DEVELOPMENT_LOOP.md`、
+  `docs/ROADMAP.md`、`docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md`、
+  `docs/UNIFIED_ENTRYPOINT.md`、`docs/adr/README.md`、
+  `docs/adr/0021-source-defined-cross-platform-phase0-corpus.md`、
+  `src/jobslayer/application/phase0_corpus.py`、`src/jobslayer/cli.py`、
+  `src/jobslayer/development/checks.py`、`tests/test_development_checks.py`、
+  `tests/test_local_run.py`、`tests/test_phase0_corpus.py`、`pyproject.toml`。
+- Windows `\.\jobslayer.cmd build-phase0-corpus`：58.9 秒，生成 21 个有效 run；
+  随后 `\.\jobslayer.cmd inspect-readiness --state-root
+  .jobslayer/phase0-corpus/state --required-reviewed-tasks 20` 返回 0。计数为
+  discovered/valid 21/21、reviewed task 20、completed 1、decision-applied completed
+  1、negative 3、invalid 0。
+- Ubuntu 24.04 / WSL2 使用隔离 Python 3.12 venv 执行
+  `JOBSLAYER_PYTHON=/var/tmp/jobslayer-posix-foundation-20260812-01/venv/bin/python
+  ./jobslayer check`：7/7 通过，145 项测试 `OK`；随后用同一解释器执行
+  `./jobslayer build-phase0-corpus --output-root
+  /var/tmp/jobslayer-posix-foundation-20260812-01/phase0-corpus` 和相应
+  `inspect-readiness`，得到与 Windows 相同的 21/20/1/3/0 门禁结果。
+- 第一次 WSL `check` 暴露上述三项 POSIX 权限测试错误和 CRLF diff 误报，修复后
+  完整重跑通过；没有把失败尝试记作成功证据。
+- GitHub Actions matrix 已定义但尚未提交/推送，因此不能声称远端 CI 已绿。
+- loopback 人工页面已为 `phase0-foundation-v1-case-03-run` 启动，决定文件仍等待
+  操作者实际提交；完成前 ST-00 和 Phase 0 不标记全部完成。
+- 下一步在人工体验完成后追加实际选项、理解成本、问题和改进复盘，再取得远端
+  matrix 结果；自动 fixture 永远不替代这两项证据。
+
+---
+
+## DEV-2026-08-12-07 — ST-02 provider-neutral 事务端口与 SQLite contract adapter
+
+- 状态：完成第一契约切片；PostgreSQL 和应用切换待 ST-00 人工门禁
+- 类型：事务状态、迁移、乐观并发、append-only SQL 与 outbox
+
+### 背景与决策
+
+Phase 0 文件 backend 的各条链分别可靠，但 workflow/run/artifact metadata 还没有
+单一事务边界。直接提前引入 PostgreSQL 驱动和服务会越过路线图退出条件。依据
+ADR-0022，本轮先让 kernel 脱离具体 JSONL，并以标准库 SQLite 证明未来数据库
+adapter 必须满足的事务 contract；SQLite 不作为现有 run 的异步镜像，也不冒充
+生产 PostgreSQL。
+
+### 当前落实
+
+1. `AuditJournal` 成为 kernel 的 provider-neutral 端口；transition 构造和完整链
+   复核可由 JSONL/SQL adapter 共用。`ReviewSession` 同样不再要求具体 JSONL。
+2. operational record 契约改为 `RunRecord`，保留 `LocalRunRecord` 兼容别名，并
+   共用 hash 构造和阶段序列验证。
+3. `ControlPlaneStore`/`StateTransaction` 显式绑定 task/run expected sequence；
+   journal transition、run record、artifact manifest 和 outbox event 只能显式整批
+   commit，离开未提交事务则 rollback。
+4. truth mutation 没有同事务 outbox 时拒绝；outbox 依 commit order 查询并支持
+   幂等 publication mark。
+5. SQLite migration 是源码包资源，记录 SHA-256；WAL/FULL synchronous、
+   `BEGIN IMMEDIATE` 和数据库 trigger 提供本地跨进程顺序及 workflow/run/artifact
+   的 UPDATE/DELETE 拒绝。
+
+### 验证、限制与下一步
+
+- 本切片文件：`docs/DEVELOPMENT_LOG.md`、
+  `docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md`、`docs/adr/README.md`、
+  `docs/adr/0022-transactional-state-port-and-sqlite-contract-adapter.md`、
+  `pyproject.toml`、`src/jobslayer/adapters/sqlite_state.py`、
+  `src/jobslayer/application/run_records.py`、
+  `src/jobslayer/persistence/__init__.py`、
+  `src/jobslayer/persistence/migrations/__init__.py`、
+  `src/jobslayer/persistence/migrations/001_initial.sql`、
+  `src/jobslayer/supervision/session.py`、`src/jobslayer/workflow/__init__.py`、
+  `src/jobslayer/workflow/journal.py`、`src/jobslayer/workflow/kernel.py`、
+  `tests/test_sqlite_state.py`。
+- 定向命令 `.venv\Scripts\python.exe -m unittest tests.test_sqlite_state -v`：
+  8 项全部通过，用时 0.226 秒。正向覆盖重启持久化、并发 writer 顺序、outbox
+  投递；拒绝覆盖重复 metadata 整批回滚、无 outbox、陈旧版本、truth UPDATE/
+  DELETE 和迁移 checksum 漂移。
+- 通过统一 Windows 入口运行 `\.\jobslayer.cmd check`：7/7 全部通过；完整
+  unittest 为 153 项 `OK`，1 项因当前 Windows 未授予目录 symlink 权限而 skip；
+  compileall、pip check、测试床、两套 runbook 和 normalized Git diff 均通过。
+  完整门禁用时 121.8 秒，测试用时 119.102 秒。
+- SQLite adapter 尚未接管 `LocalRunCoordinator`，也没有 PostgreSQL adapter、
+  dispatcher、备份或跨主机测试，因此 ST-02 仍在施工中。
+- 下一步在 ST-00 人工体验确认后，为同一端口实现 PostgreSQL schema/adapter 与
+  contract suite，再把应用命令的 metadata 提交切换到唯一事务真相；禁止先做
+  文件到数据库的双真相镜像。
+
+---
+
+## DEV-2026-08-12-08 — ST-00 真实人工决定体验与退出确认
+
+- 状态：完成（ST-00 本地退出条件闭合）
+- 类型：人工监督证据、完整性复核与临时服务回收
+
+### 实际体验与证据
+
+1. 操作者在 `phase0-foundation-v1-case-03-run` 的真实 loopback 审查页查看运行、
+   验证、补丁和独立审查证据后，选择 `approve` 并填写理由“已提交”。
+2. 页面 create-only 写入 `decision.json`；运行仍停在 `MergeReview`，决定
+   `recorded=true`、`applied=false`，没有自动执行决定、Git 集成、push 或部署。
+3. 重新加载 `DecisionCard`/`HumanDecision` 后复核 card id、task id、卡片 SHA-256、
+   可见选项、非空理由和证据列表；决定全部绑定原卡片。
+4. `verify-journal` 返回 `valid=true`、5 条记录；`inspect-run` 返回 workflow/run
+   双链和全部制品有效。决定写入后现有 run 投影能够正确显示已记录但未应用。
+5. 体验完成后按精确命令行确认并关闭专用 `run-ui` 监督进程及其子进程，端口
+   `127.0.0.1:8765` 已释放；未停止其他服务。
+
+### 验证、限制与下一步
+
+- 实际命令：`.\jobslayer.cmd verify-journal
+  .jobslayer\phase0-corpus\state\runs\phase0-foundation-v1-case-03-run\workflow.jsonl`
+  返回 0；`.\jobslayer.cmd inspect-run ... --root . --state-root
+  .jobslayer\phase0-corpus\state` 返回 0。
+- 本次人工体验使用的是迁移前已启动的本地声明身份 `local-operator`。它证明卡片
+  理解、提交和“记录不应用”的交互边界，但不作为 ST-03 认证证据；后续公共 UI
+  启动入口已开始改为只接受签名会话。
+- GitHub Actions matrix 仍因本地变更尚未提交/推送而没有远端绿色状态；已取得的
+  原生 Windows 与 Ubuntu/WSL2 同语料结果继续作为本地跨平台退出证据，不能冒充
+  远端 CI。
+- ST-00 不再阻塞 PostgreSQL adapter。下一步并行闭合 ST-02 事务真相和 ST-03
+  认证身份/可验证 authority，再进入隔离、预算与管理查询底座。
+
+---
+
+## DEV-2026-08-12-09 — 完整主机权限下的长时开发安全策略
+
+- 状态：生效并贯穿后续全部短期基础设施切片
+- 类型：用户安全约束、操作边界与 ADR
+
+### 新增约束与落实
+
+用户明确要求：由于系统权限完全开放且任务长时运行，本阶段必须采用安全策略并避免
+危险操作。ADR-0023 将这一要求固化为 fail-closed 边界：主机权限不扩大授权，工作
+只限仓库和显式临时目录；不做递归广域删除、系统级安装、远端发布或凭据传播；状态、
+身份、sandbox、预算和 lease 缺少证据时均在副作用前拒绝。
+
+本要求加入时，唯一仍运行的临时基础设施是 WSL `/var/tmp/jobslayer-postgres-
+contract-20260812` 下的普通用户 PostgreSQL 16 contract 实例。已使用该目录内精确
+`pg_ctl -D ... -m fast -w stop` 停止，输出 `server stopped`；未修改系统包数据库，
+未停止其他服务。此前临时 review UI 同样已按精确父/子命令行回收并释放 8765 端口。
+
+### 持续验证要求
+
+- 后续 Linux sandbox 测试只使用 `/var/tmp/jobslayer-sandbox-20260812` 中解压的
+  bubblewrap，不进行系统安装；Windows 能力不足时必须明确拒绝，不能降级冒充强隔离。
+- PostgreSQL/CI/浏览器等外部能力不可用时保留明确证据缺口；只有取得真实结果后才
+  更新退出状态。
+- 完成各切片前继续运行统一 `\.\jobslayer.cmd check`，并在最终日志记录完整命令、
+  结果、限制和临时资源回收状态。
+
+---
+
+## DEV-2026-08-12-10 — ST-02 PostgreSQL 与事务执行主线
+
+- 状态：完成
+- 类型：PostgreSQL adapter、共享 contract、Kernel 转换缓冲与阶段事务
+
+### 背景与决策
+
+ST-00 人工门禁完成后，依据 ADR-0024 将 SQLite 固化的事务 contract 实现到
+PostgreSQL，并建立不跨越长时间 Agent/Git 的事务协调路径。Phase 0 JSONL 继续作为
+旧语料与恢复路径，不异步镜像；新的事务协调器以数据库为唯一 metadata 真相。
+
+### 当前落实
+
+1. PostgreSQL adapter 实现 checksum migration、advisory lock、expected sequence、
+   append-only trigger、同事务 artifact metadata/outbox 及幂等 publication mark，并与
+   SQLite 共用 `StateStoreContractTests`。
+2. `StateTransaction.append_transition_record` 只接纳 `WorkflowKernel` 产生的精确下一条
+   transition；重新构造、篡改 sequence/state/hash 的记录全部拒绝。
+3. `TransactionalExecutionCoordinator` 在 Agent 前单独提交 execution intent 和输入制品
+   metadata；Agent 期间只在事务外产生可验证 transition buffer；终态后把 workflow、
+   run record、artifact metadata 与 outbox 原子提交。
+4. implementation review、签名 decision application、source integration 和 cleanup 使用
+   相同阶段事务。无权限的 integration 在调用 Git 或数据库前拒绝；成功完成仍要求通过
+   verification、授权 actor 和 `SourceIntegrationResult`，并只通过 Kernel 转换状态。
+5. control-plane 查询新增 run index 和持久事件读取；intent-only 故障可见但不会自动重跑。
+
+### 变更、验证与限制
+
+- 主要文件：`src/jobslayer/persistence/`、`src/jobslayer/adapters/sqlite_state.py`、
+  `src/jobslayer/adapters/postgres_state.py`、
+  `src/jobslayer/application/transactional_execution.py`、
+  `tests/state_store_contract.py`、`tests/test_sqlite_state.py`、
+  `tests/test_postgres_state.py`、`tests/test_transactional_execution.py`、
+  `docs/adr/0024-transactional-postgres-control-plane-and-buffered-coordinator.md`。
+- 定向 `python -m unittest tests.test_transactional_execution -v`：4 项通过，覆盖重启、
+  intent-only、治理组合和完整执行至 cleanup；完整环境结果统一记录在 DEV-14。
+- PostgreSQL adapter 不包含托管服务、备份、HA 或 outbox dispatcher；这些是部署能力，
+  不影响本地事务 contract 完成。
+
+---
+
+## DEV-2026-08-12-11 — ST-03 签名身份、RBAC 与 Agent 凭据端口
+
+- 状态：完成（本地签名 adapter + provider-neutral 生产端口）
+- 类型：认证、授权、execution/approval proof 与最小凭据租约
+
+### 背景与决策
+
+自由文本 `actor_id`/`authorized_by` 不能证明身份。依据 ADR-0025，公共写入口必须在
+任何 workflow、executor 或 Git 副作用前校验主体与动作；控制面签名 key 和长期凭据
+不得交给 Agent。
+
+### 当前落实
+
+1. provider-neutral identity/RBAC 契约定义 observer、executor、reviewer、approver、
+   worker-admin、operator-admin 与默认拒绝的动作矩阵。
+2. 本地 HMAC adapter create-only 创建受保护 key，签发最长 24 小时 session；CLI/UI
+   写入口改为必需 `--identity-session/--identity-key`，自由文本身份已从公共 schema 移除。
+3. approval 和 execution authority 都包含可验证 proof；execution proof 额外绑定
+   task/run/risk/action/time。篡改、过期、错角色、错 task/run 在副作用前拒绝。
+4. `AgentCredentialBroker` 只返回无 secret 的短期 grant 证据；治理执行器要求 delegate
+   证明实际绑定相同 grant，终态后精确 revoke。
+
+### 变更、验证与限制
+
+- 主要文件：`src/jobslayer/identity/`、`src/jobslayer/adapters/local_identity.py`、
+  `src/jobslayer/domain/models.py`、`src/jobslayer/cli.py`、
+  `src/jobslayer/supervision/`、`src/jobslayer/application/local_run.py`、
+  `tests/test_identity.py`、`tests/test_review_ui.py`、`tests/test_supervision.py`、
+  `tests/test_local_run.py`、`docs/adr/0025-authenticated-control-plane-and-agent-credential-grants.md`。
+- 正反测试覆盖有效、篡改、过期、错 action/role/task/run 和越权零副作用；完整计数与统一
+  命令结果记录在 DEV-14。
+- 本地 HMAC 不冒充生产 IdP；OIDC/mTLS、撤销服务和真实短期模型 credential adapter
+  后置。没有真实 broker 时，严格外部模型治理路径 fail closed。
+
+---
+
+## DEV-2026-08-12-12 — ST-04/ST-05 强隔离、worker、预算与上下文
+
+- 状态：完成（Linux 强隔离；Windows 通用接口 fail closed）
+- 类型：sandbox composition、worker lease、执行预算、上下文完整性与治理装饰器
+
+### 背景与决策
+
+完整主机权限与 Codex `workspace-write` 都不能作为安全边界。依据 ADR-0026，把 sandbox、
+worker ownership、budget、context 和 credential 组合到 provider-neutral
+`GovernedAgentExecutor`，缺少任一能力即拒绝启动。
+
+### 当前落实
+
+1. `SandboxLauncher` 产生可审计 launch plan；Codex adapter 可经 launcher 组合启动并
+   报告 enforcement-backed capability。Linux bubblewrap 从空 root 启动，只读绑定运行时，
+   只写单个 `/workspace`，默认新建网络 namespace。
+2. `prlimit` 与进程监督器实施 CPU、内存、进程数、wall timeout 和进程树终止；真实 WSL
+   测试额外证明 workspace 外 host secret 不可见，消除原先只读绑定整个 host root 的缺陷。
+3. SQLite worker store 实现 acquire、heartbeat、cancel-requested、release 和 orphan
+   expiry；取消信号只能在持久化 cancel-requested 之后发送。
+4. budget store 在启动前 reserve/authorize attempt，按 normalized usage 增量扣减 token、
+   cost 和 duration，超限持久化 exhausted 后取消。task/runbook 明确 cost、input/output
+   token、context、attempt/repair 上限。
+5. context builder 只接纳 admitted root 下普通文件，拒绝 symlink/escape/篡改/超大小，
+   component/package 均带内容哈希和固定版本。
+
+### 变更、验证与限制
+
+- 主要文件：`src/jobslayer/workers/`、`src/jobslayer/governance/`、
+  `src/jobslayer/adapters/linux_sandbox.py`、`src/jobslayer/adapters/sqlite_workers.py`、
+  `src/jobslayer/adapters/sqlite_budgets.py`、`src/jobslayer/adapters/codex_cli.py`、
+  `src/jobslayer/application/context_packages.py`、
+  `src/jobslayer/application/budget_policy.py`、
+  `src/jobslayer/application/governed_executor.py`、`tests/test_sandbox.py`、
+  `tests/test_worker_leases.py`、`tests/test_governance.py`、
+  `tests/test_governed_executor.py`、`docs/adr/0026-enforcement-backed-worker-sandbox-budget-and-context.md`。
+- WSL 使用既有 `/var/tmp/jobslayer-sandbox-20260812` 普通用户测试工具运行 5 项真实隔离
+  测试全部通过；未安装系统组件。最终复核命令和结果记录在 DEV-14。
+- 原生 Windows 没有等价强 sandbox；同一接口明确报告能力缺口并拒绝强治理任务，可路由
+  WSL/Linux worker。Dagger/OCI/Kubernetes 未由缺乏需求证据的本切片提前引入。
+
+---
+
+## DEV-2026-08-12-13 — ST-06/ST-07 管理面、遥测与执行器比较
+
+- 状态：完成（本地查询/界面与确定性双 adapter 回归）
+- 类型：只读 Agent Dashboard、持久查询、OpenTelemetry 端口与 contract comparison
+
+### 背景与决策
+
+管理面不能从 UI 猜测状态或直写数据库；执行器比较也必须先证明任务和验证契约相同。
+依据 ADR-0027，以经过完整性校验的持久真相建立只读投影，并把 telemetry 保持为可选端口。
+
+### 当前落实
+
+1. `serve-dashboard`/`dashboard` 是 Windows/POSIX 统一入口，要求签名 view session、只绑定
+   loopback、没有写 API。默认查询 Phase 0 run；传入已有 SQLite DB/artifact root 时只读
+   Phase 1 workflow/run/artifact/outbox 真相且不自动迁移。
+2. Dashboard 汇总状态、executor、usage/cost、review/decision；详情展示完整 transitions、
+   run records、持久 events 和 artifacts。制品字节在展示前重新验 hash，intent-only 可见。
+3. `TelemetrySink` 默认 no-op；可选 OpenTelemetry adapter 只记录稳定标量，不收集 prompt、
+   credential 或 raw log。
+4. `compare-executors` 先校验 task/profile hash 完全一致，再比较终态、usage/cost、时长和
+   人工干预。当前第二 adapter 是 fake Codex CLI 合同回归，不冒充付费模型质量结果。
+
+### 变更、验证与限制
+
+- 主要文件：`src/jobslayer/management/`、`src/jobslayer/adapters/local_management.py`、
+  `src/jobslayer/adapters/persistent_management.py`、`src/jobslayer/observability/`、
+  `src/jobslayer/evaluation/`、`src/jobslayer/application/executor_comparison.py`、
+  `src/jobslayer/cli.py`、`tests/test_management.py`、`tests/test_observability.py`、
+  `tests/test_executor_comparison.py`、`tests/test_transactional_execution.py`、
+  `docs/adr/0027-persistent-management-observability-and-executor-evaluation.md`。
+- HTTP/认证、损坏证据拒绝、事务详情、no-secret telemetry 和 contract mismatch 均有正反
+  测试；最终统一测试计数记录在 DEV-14。
+- 远程多租户平台、生产 OTel exporter、Langfuse/Phoenix、Promptfoo 和第二个真实付费
+  executor 后置；这些不是本地必要基础架构的完成条件。
+
+---
+
+## DEV-2026-08-12-14 — 短期必要基础架构收口与跨平台验收
+
+- 状态：完成
+- 类型：兼容性修复、文档收口、Windows/WSL/PostgreSQL/可视化验收
+
+### 收口发现与修复
+
+1. 首次预验收 `\.\jobslayer.cmd check` 执行了 205 项测试，其中 2 项错误来自
+   `_cmd_review_decision` 误读取只属于 Dashboard 的参数。该 wiring 错误已移除；随后
+   `python -m unittest tests.test_supervision tests.test_transactional_execution
+   tests.test_management` 13 项全部通过。失败尝试未被隐藏或记作成功。
+2. 真实启动 Phase 0 Dashboard 后发现 HTTP/认证正常，但现有 21-run 语料全部被标为
+   invalid。原因不是证据损坏，而是当前 `AgentRunSpec`/execution authority 新增可选默认
+   字段后，inspect 把 Pydantic 解析后的 intent 与历史 raw context 做了字典逐字比较。
+3. 新增严格 `LocalExecutionContext`：历史 raw context 先经过当前 frozen/extra-forbid
+   契约应用兼容默认值，再与 intent 做类型相等比较；未知字段、非默认语义差异和原哈希
+   篡改仍拒绝，不重写任何历史记录。新增回归测试主动移除兼容默认字段后重建有效旧记录，
+   证明 inspect 可读且完整性门禁仍通过。
+4. 真实 loopback 复测结果为 21 个正常 run、0 个 invalid；详情实际返回 7 条 workflow
+   transition、5 条 run record、16 个 artifact。session 来源为
+   `persisted_local_events`，主体为只读 observer，`mutations=false`，CSP 存在。
+5. 按 Browser 技能尝试连接实际页面，但当前环境没有可用浏览器实例，因而没有生成新的
+   可视截图；没有绕过规范改用另一套浏览器自动化。HTTP/静态资源和 DOM 行为仍由真实
+   服务检查及管理 UI 集成测试覆盖。此前 Dashboard 截图保留为历史视觉证据，不冒充本轮。
+
+### 变更文件与架构记录
+
+- 本阶段主要新增/修改：`src/jobslayer/persistence/`、`identity/`、`workers/`、
+  `governance/`、`management/`、`observability/`、`evaluation/`，SQLite/PostgreSQL/
+  sandbox/identity/management adapters，budget/context/governed/transactional application
+  services，领域契约、统一 CLI、管理 UI、runbook/task 预算字段及对应测试。
+- 文档已更新：`README.md`、`docs/ROADMAP.md`、
+  `docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md`、`docs/UNIFIED_ENTRYPOINT.md`、
+  `docs/CODEX_INTEGRATION.md`、`docs/GOVERNED_EXECUTION_LOOP.md`、
+  `docs/HUMAN_SUPERVISION.md`、`docs/VISUAL_REVIEW_UI.md`、
+  `docs/MINIMUM_DEVELOPMENT_LOOP.md`、Phase 0/首次 Codex 历史说明及测试床说明。
+- durable decisions：ADR-0024 至 ADR-0027，并已更新 ADR 索引；ADR-0023 的长时完整权限
+  安全策略贯穿全部操作。旧 ADR/日志不改写，过时命令只保留在明确的历史记录中。
+
+### 精确验证证据
+
+- Windows 新基础架构定向命令：
+  `\.venv\Scripts\python.exe -m unittest tests.test_sqlite_state
+  tests.test_identity tests.test_worker_leases tests.test_governance
+  tests.test_governed_executor tests.test_sandbox tests.test_observability
+  tests.test_management tests.test_executor_comparison
+  tests.test_transactional_execution -v`：55 项通过，5 项 Linux-only 跳过，用时
+  6.619 秒。
+- Dashboard 兼容回归：`\.venv\Scripts\python.exe -m unittest
+  tests.test_local_run.LocalRunCoordinatorTests.test_inspect_normalizes_compatible_defaults_in_historical_context
+  tests.test_management -v`：4 项全部通过，用时 2.639 秒；真实 query 另得
+  `runs=21, invalid=0`。
+- WSL sandbox：设置
+  `JOBSLAYER_TEST_BWRAP=/var/tmp/jobslayer-sandbox-20260812/rootfs/usr/bin/bwrap` 后运行
+  `/var/tmp/jobslayer-posix-foundation-20260812-01/venv/bin/python -m unittest
+  tests.test_sandbox -v`：5 项全部通过，用时 2.537 秒。覆盖默认无网络、root 不可写、
+  workspace 可写、host secret 不可见、CPU/内存/process/time 和超时后无孤儿。
+- WSL PostgreSQL：仅在 `/var/tmp/jobslayer-postgres-contract-20260812` 启动既有普通用户
+  PostgreSQL 16，设置 socket DSN 后运行 `python -m unittest tests.test_postgres_state
+  -v`：11 项全部通过，用时 0.693 秒；同一 shell 的 EXIT trap 执行精确
+  `pg_ctl -D ... -m fast -w stop`，输出 `server stopped`。
+- WSL 统一 `JOBSLAYER_PYTHON=/var/tmp/jobslayer-posix-foundation-20260812-01/venv/bin/python
+  JOBSLAYER_TEST_BWRAP=... ./jobslayer check`：7/7 通过，用时 35.7 秒。兼容修复后的同一
+  WSL 测试集合以 `python -m unittest discover -s tests -q` 复核：206 项通过、1 项因
+  PostgreSQL 不常驻而 skip，用时 27.376 秒。
+- Windows 最终代码统一 `\.\jobslayer.cmd check`：7/7 通过，用时 99.9 秒；随后以
+  `\.venv\Scripts\python.exe -m unittest discover -s tests -q` 精确计数：206 项通过、
+  7 项因 POSIX 权限、Linux sandbox 和可选 PostgreSQL 环境而 skip，用时 97.576 秒。
+- `git -c core.autocrlf=true diff --check` 返回 0；当前 8765/8770/55432 无监听，WSL
+  PostgreSQL `pg_ctl status` 返回 `no server running`。没有系统安装、远端 push、部署、
+  删除仓库/用户数据或向 Agent 暴露签名 key/secret。
+- 本条日志落盘后再次执行封板门禁：Windows `\.\jobslayer.cmd check` 7/7 通过，
+  用时 99.8 秒；WSL 以同一临时 venv 和真实 bubblewrap 执行 `./jobslayer check` 7/7
+  通过，用时 39.5 秒。两次都包含 unittest、compileall、pip check、testbed、两套
+  source-controlled runbook 和 normalized Git diff，不以部分命令替代。
+
+### 完成边界与下一步
+
+短期计划 ST-00 至 ST-07 的必要基础功能与架构已闭合。仍明确后置的是生产 OIDC/mTLS、
+真实短期模型凭据 adapter、远程 worker/对象存储、备份/HA/outbox dispatcher、原生
+Windows 强沙箱、自动 repair 编排、第二个真实付费 executor 和远程多租户平台。这些
+需要部署选择、预算或外部调用授权，不以测试替身冒充本阶段完成证据。下一步建议在真实
+部署目标确定后，先实现 OIDC + secret broker + Linux worker 的纵向切片，再授权第二
+executor 评测；当前不会自动发起外部模型调用、push 或部署。

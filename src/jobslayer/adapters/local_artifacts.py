@@ -134,6 +134,32 @@ class LocalArtifactRegistry:
             raise ArtifactIntegrityError("artifact content does not match its manifest")
         return manifest
 
+    def list_manifests(
+        self,
+        *,
+        artifact_type: str | None = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
+    ) -> tuple[ArtifactManifest, ...]:
+        manifests_root = self.root / "manifests"
+        if not manifests_root.exists():
+            return ()
+        if manifests_root.is_symlink() or not manifests_root.is_dir():
+            raise ArtifactIntegrityError("artifact manifest root is unsafe")
+        manifests: list[ArtifactManifest] = []
+        for path in sorted(manifests_root.glob("artifact-*.json")):
+            if path.is_symlink() or not path.is_file():
+                raise ArtifactIntegrityError("artifact manifest path is unsafe")
+            manifest = self.get(path.stem)
+            if artifact_type is not None and manifest.artifact_type != artifact_type:
+                continue
+            if task_id is not None and manifest.task_id != task_id:
+                continue
+            if run_id is not None and manifest.run_id != run_id:
+                continue
+            manifests.append(manifest)
+        return tuple(manifests)
+
     def verify(self, manifest: ArtifactManifest) -> bool:
         try:
             self.read(manifest)

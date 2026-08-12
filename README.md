@@ -2,11 +2,11 @@
 
 JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它把 AI 执行器视为可替换的劳动力，把任务状态、权限、验证、证据与完成判定保留在确定性代码中。
 
-仓库已完成 **Phase 0 初步框架**，正在用真实任务进入 Phase 1 验证。已经提供：
+仓库已完成 **Phase 0 退出证据** 和 **Phase 1 必要基础架构**。当前已经提供：
 
 - 提供方无关的任务、执行、事件、制品和验证契约；
 - 由代码控制的任务状态机；
-- 带哈希链校验的追加式 JSONL 审计日志；
+- 带哈希链校验、partial-write 安全原子发布的追加式 JSONL 审计日志；
 - 从固定 commit 创建、检查和安全清理的任务级 Git worktree；
 - 按任务路径策略收集并哈希化补丁；
 - 按可信命令规则执行、超时终止并生成输出证据的本地 runner；
@@ -20,6 +20,14 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
 - 必须由外部显式授权、且仍服从相同工作树/验证/审查门禁的真实 Codex runbook；
 - append-only 运行记录链、确定性补丁重放 adapter 和 run 级监督入口；
 - 审批后复核补丁/基线、创建单一提交、只做本地 fast-forward 并保留集成证据的 adapter；
+- 只在原转换、内容制品和 Git 后置事实完全一致时补写缺失 decision/integration/cleanup 记录的证据约束恢复器；
+- Agent 前持久化 execution intent、严格 outcome 落盘后才允许补写首记录的无重跑执行恢复边界；
+- 从版本化定义经真实协调服务重建、并在 Windows/POSIX 校验的 21-run Phase 0 语料；
+- SQLite/PostgreSQL 事务控制平面、迁移机制、事务 outbox 和由 `WorkflowKernel` 产生的精确转换缓冲；
+- HMAC 签名的本地身份会话、RBAC、审批/执行权限证明和短期 Agent 凭据租约；
+- worker 租约、心跳、取消、孤儿回收，以及 Linux bubblewrap 强隔离端口；
+- 执行前 token/费用/时间/尝试预算、上下文包版本/哈希/大小门禁和运行中超限取消；
+- 只读多运行 Dashboard、持久证据/事件视图、无敏感字段遥测和确定性执行器比较；
 - 一个可运行的闭环演示和标准库测试；
 - 项目指导、架构决策和分阶段路线图。
 
@@ -49,12 +57,22 @@ python3 -m venv .venv
 ./jobslayer validate-runbook runbooks/bnw-filter-demo-001-codex.json
 ./jobslayer inspect-run .jobslayer/runs/bnw-scenario-slow-001-run-01
 ./jobslayer inspect-readiness --state-root .jobslayer --required-reviewed-tasks 20
+./jobslayer build-phase0-corpus
+./jobslayer inspect-readiness --state-root .jobslayer/phase0-corpus/state --required-reviewed-tasks 20
 ./jobslayer inspect-recovery .jobslayer/runs/RUN_ID
 ./jobslayer demo --journal .jobslayer/demo.jsonl
+./jobslayer create-local-identity-key .jobslayer/identity/key.json
+./jobslayer issue-local-identity-session \
+  --key .jobslayer/identity/key.json \
+  --subject-id local-reviewer --display-name "Local reviewer" \
+  --role reviewer --output .jobslayer/identity/reviewer.json
 ./jobslayer review-decision examples/decision-card.example.json \
-  --actor-id local-reviewer --output .jobslayer/example-decision.json
+  --identity-session .jobslayer/identity/reviewer.json \
+  --identity-key .jobslayer/identity/key.json \
+  --output .jobslayer/example-decision.json
 ./jobslayer ui examples/decision-card.example.json \
-  --actor-id local-reviewer \
+  --identity-session .jobslayer/identity/reviewer.json \
+  --identity-key .jobslayer/identity/key.json \
   --output .jobslayer/example-visual-decision.json \
   --open-browser
 ```
@@ -66,6 +84,11 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
 .\jobslayer.cmd check
 .\jobslayer.cmd validate-testbed testbeds/brave-new-world.json
+.\jobslayer.cmd serve-dashboard `
+  --state-root .jobslayer/phase0-corpus/state `
+  --identity-session .jobslayer/identity/observer.json `
+  --identity-key .jobslayer/identity/key.json `
+  --open-browser
 ```
 
 下文的 `./jobslayer` 在 Windows 上均对应 `.\jobslayer.cmd`。JobSlayer
@@ -113,4 +136,6 @@ BraveNewWorld 有独立的教学产品目标，但不属于 JobSlayer 控制平�
 
 ## 当前边界
 
-本阶段刻意不包含 PostgreSQL、远程/多用户 Web 平台、OpenHands adapter、生产级容器隔离、Dagger、Temporal、Ray 或 Kubernetes。当前只有 loopback 单决策审查页，不具备认证身份、远程共享或项目仪表盘能力。决定应用必须由外部有效 authority 授权，批准后只进入 `Integrating`；另一个显式命令才会在补丁、提交树、基线和干净目标全部匹配时执行本地 fast-forward。真实 Codex 候选仍停在 `MergeReview`，没有决定、提交或合并；执行前成本强制、外层网络/资源隔离、自动修复、push 和部署仍未实现。
+当前具备本地认证、事务控制平面和项目 Dashboard，但仍不是远程多用户生产平台。PostgreSQL adapter 已由真实 PostgreSQL 16 合同测试覆盖；SQLite 是无需外部服务的开发后端。Linux worker 可使用 bubblewrap 的默认拒绝式网络、挂载和资源隔离；原生 Windows 没有被冒充成等价强沙箱，要求强隔离的任务会失败关闭，可由同一接口路由到 WSL/Linux worker。
+
+尚未实现的能力包括远程对象存储、真实短期模型凭据下发 adapter、第二个真实模型执行器、自动修复编排、Dagger、Temporal、Ray、Kubernetes、push 和部署。决定应用、集成与清理都要求签名身份和各自权限；集成仍只允许在证据完全匹配时执行本地 fast-forward。完整阶段状态以[短期基础设施计划](docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md)和[路线图](docs/ROADMAP.md)为准。

@@ -85,6 +85,7 @@ class LocalRunbookLoaderTests(unittest.TestCase):
             acceptance_criteria=("verification passes",),
             validation_profile="fixture-v1",
             risk=RiskLevel.LOW,
+            max_cost_usd=1,
         )
         profile = ValidationProfile(
             profile_id="fixture-v1",
@@ -136,6 +137,9 @@ class LocalRunbookLoaderTests(unittest.TestCase):
                 "executor_type": "codex_cli",
                 "model_profile": "default",
                 "output_schema": "none",
+                "maximum_input_tokens": 100,
+                "maximum_output_tokens": 50,
+                "maximum_context_bytes": 65536,
             }
         )
         self.runbook_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -154,6 +158,9 @@ class LocalRunbookLoaderTests(unittest.TestCase):
                 "model_profile": "default",
                 "output_schema": "none",
                 "max_attempts": 2,
+                "maximum_input_tokens": 100,
+                "maximum_output_tokens": 50,
+                "maximum_context_bytes": 65536,
             }
         )
         self.runbook_path.write_text(json.dumps(payload), encoding="utf-8")

@@ -212,6 +212,69 @@ class DecisionApplicationTests(unittest.TestCase):
 
         self.assertEqual(self.kernel.current_state(self.task_id), TaskState.MERGE_REVIEW)
 
+    def test_attests_an_applied_transition_with_required_artifact_evidence(self) -> None:
+        card = self.card()
+        decision = self.decision(card, "approve")
+        attestation_now = datetime.now(UTC)
+        authority = self.authority().model_copy(
+            update={
+                "issued_at": attestation_now - timedelta(minutes=5),
+                "valid_until": attestation_now + timedelta(minutes=5),
+            }
+        )
+        required = ("artifact-decision", "artifact-authority")
+        record = self.service.apply(
+            card=card,
+            decision=decision,
+            authority=authority,
+            verification_report=self.report,
+            additional_evidence_ids=required,
+            now=attestation_now,
+        )
+
+        self.service.validate_applied_transition(
+            card=card,
+            decision=decision,
+            authority=authority,
+            transition=record,
+            verification_report=self.report,
+            required_evidence_ids=required,
+        )
+
+        self.assertIn("artifact-decision", record.evidence_ids)
+        self.assertIn("artifact-authority", record.evidence_ids)
+
+    def test_applied_transition_attestation_rejects_missing_artifact_evidence(self) -> None:
+        card = self.card()
+        decision = self.decision(card, "approve")
+        attestation_now = datetime.now(UTC)
+        authority = self.authority().model_copy(
+            update={
+                "issued_at": attestation_now - timedelta(minutes=5),
+                "valid_until": attestation_now + timedelta(minutes=5),
+            }
+        )
+        record = self.service.apply(
+            card=card,
+            decision=decision,
+            authority=authority,
+            verification_report=self.report,
+            now=attestation_now,
+        )
+
+        with self.assertRaisesRegex(
+            DecisionApplicationError,
+            "does not match",
+        ):
+            self.service.validate_applied_transition(
+                card=card,
+                decision=decision,
+                authority=authority,
+                transition=record,
+                verification_report=self.report,
+                required_evidence_ids=("artifact-decision", "artifact-authority"),
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

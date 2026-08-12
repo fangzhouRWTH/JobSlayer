@@ -12,6 +12,14 @@ dependencies = [
     "pydantic>=2.7,<3",
 ]
 
+[project.optional-dependencies]
+postgres = [
+    "psycopg[binary]>=3.2,<4",
+]
+observability = [
+    "opentelemetry-api>=1.27,<2",
+]
+
 [project.scripts]
 jobslayer = "jobslayer.launcher:main"
 
@@ -20,3 +28,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "jobslayer.supervision.ui" = ["*.html", "*.css", "*.js"]
+"jobslayer.persistence.migrations" = ["*.sql"]
+"jobslayer.persistence.postgres_migrations" = ["*.sql"]
+"jobslayer.management.ui" = ["*.html", "*.css", "*.js"]

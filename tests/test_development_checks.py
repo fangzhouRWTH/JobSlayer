@@ -76,6 +76,10 @@ class DevelopmentCheckRunnerTests(unittest.TestCase):
                 "-v",
             ),
         )
+        self.assertEqual(
+            report.results[-1].step.argv,
+            ("git", "-c", "core.autocrlf=true", "diff", "--check"),
+        )
 
 
 if __name__ == "__main__":

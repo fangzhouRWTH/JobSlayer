@@ -589,6 +589,10 @@ class TaskExecutionController:
             raise ExecutionAuthorizationError(
                 "execution authorization belongs to a different task"
             )
+        if authorization.run_id is not None and authorization.run_id != spec.run_id:
+            raise ExecutionAuthorizationError(
+                "execution authorization belongs to a different run"
+            )
         if now < authorization.issued_at or now >= authorization.valid_until:
             raise ExecutionAuthorizationError("execution authorization is not valid now")
         if _RISK_ORDER[task.risk] > _RISK_ORDER[authorization.maximum_risk]:

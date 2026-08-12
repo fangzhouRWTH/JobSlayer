@@ -52,6 +52,7 @@ class DecisionApplicationService:
         decision: HumanDecision,
         authority: ApprovalAuthority,
         verification_report: VerificationReport | None = None,
+        additional_evidence_ids: tuple[str, ...] = (),
         now: datetime | None = None,
     ) -> TransitionRecord:
         now = now or datetime.now(UTC)
@@ -94,6 +95,7 @@ class DecisionApplicationService:
                     card.card_id,
                     authority.authorization_id,
                     *decision.evidence_ids,
+                    *additional_evidence_ids,
                 )
             )
         )
@@ -106,6 +108,68 @@ class DecisionApplicationService:
             verification_report=verification_report,
             evidence_ids=evidence_ids,
         )
+
+    def validate_applied_transition(
+        self,
+        *,
+        card: DecisionCard,
+        decision: HumanDecision,
+        authority: ApprovalAuthority,
+        transition: TransitionRecord,
+        verification_report: VerificationReport | None = None,
+        required_evidence_ids: tuple[str, ...] = (),
+    ) -> None:
+        """Verify a persisted decision transition without applying it again."""
+
+        self._validate_bindings(card, decision)
+        self._validate_authority(
+            card,
+            decision,
+            authority,
+            transition.occurred_at,
+        )
+        expected_state = _EXPECTED_STATES.get(card.decision_kind)
+        if expected_state is None:
+            raise DecisionApplicationError(
+                f"decision kind is not applicable: {card.decision_kind.value}"
+            )
+        try:
+            expected_target = _TRANSITIONS[card.decision_kind][
+                decision.selected_option_id
+            ]
+        except KeyError as exc:
+            raise DecisionApplicationError(
+                "selected option has no approved workflow meaning"
+            ) from exc
+        if expected_target is TaskState.INTEGRATING:
+            if verification_report is None:
+                raise DecisionApplicationError(
+                    "merge approval requires the passing verification report"
+                )
+            if verification_report.report_id not in decision.evidence_ids:
+                raise DecisionApplicationError(
+                    "verification report was not part of the reviewed evidence"
+                )
+        expected_evidence = {
+            decision.decision_id,
+            card.card_id,
+            authority.authorization_id,
+            *decision.evidence_ids,
+            *required_evidence_ids,
+        }
+        if verification_report is not None and expected_target is TaskState.INTEGRATING:
+            expected_evidence.add(verification_report.report_id)
+        if (
+            transition.task_id != card.task_id
+            or transition.from_state is not expected_state
+            or transition.to_state is not expected_target
+            or transition.actor_type is not ActorType.HUMAN
+            or transition.actor_id != decision.actor_id
+            or not expected_evidence.issubset(transition.evidence_ids)
+        ):
+            raise DecisionApplicationError(
+                "persisted transition does not match the authorized decision"
+            )
 
     @staticmethod
     def _validate_bindings(card: DecisionCard, decision: HumanDecision) -> None:

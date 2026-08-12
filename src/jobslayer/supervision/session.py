@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from datetime import UTC, datetime
 from typing import Any
 
 from jobslayer.domain.models import (
@@ -15,7 +16,13 @@ from jobslayer.supervision.decision import (
     decision_card_hash,
 )
 from jobslayer.supervision.records import DecisionStore
-from jobslayer.workflow.journal import JsonlAuditJournal
+from jobslayer.workflow.journal import AuditJournal
+from jobslayer.identity import (
+    AuthenticatedPrincipal,
+    AuthorizationAction,
+    AuthorizationRequest,
+    Authorizer,
+)
 
 
 class ReviewSessionError(RuntimeError):
@@ -27,6 +34,10 @@ class DecisionAlreadyRecordedError(ReviewSessionError):
 
 
 class StaleDecisionCardError(ReviewSessionError):
+    pass
+
+
+class ReviewAuthorizationError(ReviewSessionError):
     pass
 
 
@@ -43,14 +54,28 @@ class ReviewSession:
         self,
         *,
         card: DecisionCard,
-        actor_id: str,
+        actor_id: str | None = None,
+        principal: AuthenticatedPrincipal | None = None,
+        authorizer: Authorizer | None = None,
         decision_store: DecisionStore,
-        journal: JsonlAuditJournal | None = None,
+        journal: AuditJournal | None = None,
     ):
-        if not actor_id.strip():
+        if (actor_id is None) == (principal is None):
+            raise ReviewSessionError(
+                "review session requires exactly one declared actor or authenticated principal"
+            )
+        if actor_id is not None and not actor_id.strip():
             raise ReviewSessionError("actor id must not be blank")
+        if principal is not None and authorizer is None:
+            raise ReviewSessionError(
+                "authenticated review session requires an authorizer"
+            )
         self.card = card
-        self.actor_id = actor_id
+        self.principal = principal
+        self.authorizer = authorizer
+        self.actor_id = (
+            principal.subject_id if principal is not None else str(actor_id)
+        )
         self.decision_store = decision_store
         self.journal = journal
         self._lock = threading.Lock()
@@ -72,15 +97,12 @@ class ReviewSession:
             if self.journal is None or expected_state is None
             else state is expected_state
         )
+        authorization = self._decision_authorization()
         return {
             "schema_version": "1.0",
             "card": self.card.model_dump(mode="json"),
             "card_sha256": decision_card_hash(self.card),
-            "actor": {
-                "actor_id": self.actor_id,
-                "authenticated": False,
-                "notice": "本地 actor_id 只是身份声明，尚未经过认证。",
-            },
+            "actor": self._actor_snapshot(),
             "workflow": {
                 "journal_configured": self.journal is not None,
                 "current_state": state.value if self.journal is not None else None,
@@ -96,7 +118,9 @@ class ReviewSession:
                 existing.model_dump(mode="json") if existing is not None else None
             ),
             "capabilities": {
-                "decision_recording": existing is None and state_matches is not False,
+                "decision_recording": existing is None
+                and state_matches is not False
+                and (authorization is None or authorization.permitted),
                 "decision_application": False,
                 "git_merge": False,
                 "deployment": False,
@@ -113,6 +137,9 @@ class ReviewSession:
                 raise DecisionAlreadyRecordedError(
                     "a decision has already been recorded for this session"
                 )
+            authorization = self._decision_authorization()
+            if authorization is not None and not authorization.permitted:
+                raise ReviewAuthorizationError(authorization.reason)
             self._require_current_card_state()
             try:
                 decision = create_human_decision(
@@ -125,6 +152,37 @@ class ReviewSession:
             except DecisionError:
                 raise
             return decision
+
+    def _actor_snapshot(self) -> dict[str, Any]:
+        if self.principal is None:
+            return {
+                "actor_id": self.actor_id,
+                "authenticated": False,
+                "notice": "本地 actor_id 只是身份声明，尚未经过认证。",
+            }
+        return {
+            "actor_id": self.principal.subject_id,
+            "display_name": self.principal.display_name,
+            "authenticated": True,
+            "authentication_method": self.principal.authentication_method.value,
+            "session_id": self.principal.session_id,
+            "roles": list(self.principal.roles),
+            "valid_until": self.principal.valid_until.isoformat(),
+            "notice": "身份已由短期签名会话验证；具体操作仍需 RBAC 授权。",
+        }
+
+    def _decision_authorization(self):
+        if self.principal is None:
+            return None
+        assert self.authorizer is not None
+        return self.authorizer.authorize(
+            AuthorizationRequest(
+                principal=self.principal,
+                action=AuthorizationAction.RECORD_DECISION,
+                task_id=self.card.task_id,
+            ),
+            now=datetime.now(UTC),
+        )
 
     def _require_current_card_state(self) -> None:
         expected_state = _EXPECTED_CARD_STATES.get(self.card.decision_kind)

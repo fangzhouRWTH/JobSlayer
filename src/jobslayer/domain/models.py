@@ -308,6 +308,30 @@ class WorkspaceInspection(DomainModel):
         return self
 
 
+class WorkspaceRemovalInspection(DomainModel):
+    """Read-only evidence that cleanup removed only the registered worktree."""
+
+    schema_version: str = "1.0"
+    workspace_id: str = Field(min_length=1)
+    task_id: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+    path_absent: bool
+    registration_absent: bool
+    branch_name: str = Field(min_length=1)
+    branch_commit: str | None = Field(
+        default=None, pattern=r"^[0-9a-fA-F]{40,64}$"
+    )
+    expected_commit: str = Field(pattern=r"^[0-9a-fA-F]{40,64}$")
+
+    @property
+    def safely_removed(self) -> bool:
+        return (
+            self.path_absent
+            and self.registration_absent
+            and self.branch_commit == self.expected_commit
+        )
+
+
 class WorkspacePatch(DomainModel):
     schema_version: str = "1.0"
     workspace_id: str = Field(min_length=1)
@@ -591,6 +615,19 @@ class HumanDecision(DomainModel):
     decided_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class ApprovalCredentialProof(DomainModel):
+    """Provider-neutral proof metadata attached by an authority issuer."""
+
+    schema_version: str = "1.0"
+    proof_type: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    issuer: str = Field(min_length=1)
+    key_id: str = Field(min_length=1)
+    subject_session_id: str = Field(min_length=1)
+    authorization_policy_id: str = Field(min_length=1)
+    authorized_action: str = Field(min_length=1)
+    signature: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class ApprovalAuthority(DomainModel):
     schema_version: str = "1.0"
     authorization_id: str = Field(min_length=1)
@@ -598,6 +635,7 @@ class ApprovalAuthority(DomainModel):
     allowed_decision_kinds: tuple[DecisionKind, ...] = Field(min_length=1)
     issued_at: datetime
     valid_until: datetime
+    proof: ApprovalCredentialProof | None = None
 
     @model_validator(mode="after")
     def validate_authority_window(self) -> ApprovalAuthority:
@@ -610,15 +648,30 @@ class ApprovalAuthority(DomainModel):
         return self
 
 
+class ExecutionCredentialProof(DomainModel):
+    """Provider-neutral signature metadata for one execution authority."""
+
+    schema_version: str = "1.0"
+    proof_type: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    issuer: str = Field(min_length=1)
+    key_id: str = Field(min_length=1)
+    subject_session_id: str = Field(min_length=1)
+    authorization_policy_id: str = Field(min_length=1)
+    authorized_action: str = Field(min_length=1)
+    signature: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class TaskExecutionAuthorization(DomainModel):
     schema_version: str = "1.0"
     authorization_id: str = Field(min_length=1)
     task_id: str = Field(min_length=1)
+    run_id: str | None = None
     actor_type: ActorType
     actor_id: str = Field(min_length=1)
     maximum_risk: RiskLevel
     issued_at: datetime
     valid_until: datetime
+    proof: ExecutionCredentialProof | None = None
 
     @model_validator(mode="after")
     def validate_execution_authority(self) -> TaskExecutionAuthorization:
@@ -662,13 +715,53 @@ class AgentRunSpec(DomainModel):
     permission_profile: str = Field(min_length=1)
     timeout_seconds: int = Field(gt=0)
     max_attempts: int = Field(default=1, ge=1)
+    max_repairs: int = Field(default=0, ge=0)
+    maximum_input_tokens: int | None = Field(default=None, gt=0)
+    maximum_output_tokens: int | None = Field(default=None, gt=0)
+    maximum_context_bytes: int | None = Field(default=None, gt=0)
     output_schema: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_repair_limit(self) -> AgentRunSpec:
+        if self.max_repairs >= self.max_attempts:
+            raise ValueError("max_repairs must be smaller than max_attempts")
+        return self
 
 
 class AgentInvocation(DomainModel):
     schema_version: str = "1.0"
     run_spec: AgentRunSpec
     prompt: str = Field(min_length=1, max_length=200_000)
+
+
+class TaskExecutionIntent(DomainModel):
+    """Immutable authorization and typed inputs for one execution attempt."""
+
+    schema_version: str = "1.0"
+    intent_id: str = Field(min_length=1)
+    run_id: str = Field(min_length=1)
+    task: TaskSpec
+    invocation: AgentInvocation
+    validation_profile: ValidationProfile
+    authorization: TaskExecutionAuthorization
+    prepared_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+    @model_validator(mode="after")
+    def validate_execution_bindings(self) -> TaskExecutionIntent:
+        if self.run_id != self.invocation.run_spec.run_id:
+            raise ValueError("execution intent run id does not match invocation")
+        if self.task.task_id != self.invocation.run_spec.task_id:
+            raise ValueError("execution intent task does not match invocation")
+        if self.authorization.task_id != self.task.task_id:
+            raise ValueError("execution intent authorization belongs to another task")
+        if self.validation_profile.profile_id != self.task.validation_profile:
+            raise ValueError("execution intent validation profile does not match task")
+        if (
+            self.prepared_at < self.authorization.issued_at
+            or self.prepared_at >= self.authorization.valid_until
+        ):
+            raise ValueError("execution intent was prepared outside authorization window")
+        return self
 
 
 class AgentRunHandle(DomainModel):

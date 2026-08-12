@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "corpus_id": "phase0-foundation-v1",
+  "required_reviewed_tasks": 20,
+  "cases": [
+    {"case_id": "case-00", "action": "approve_complete"},
+    {"case_id": "case-01", "action": "request_changes"},
+    {"case_id": "case-02", "action": "reject"},
+    {"case_id": "case-03", "action": "await_decision"},
+    {"case_id": "case-04", "action": "await_decision"},
+    {"case_id": "case-05", "action": "await_decision"},
+    {"case_id": "case-06", "action": "await_decision"},
+    {"case_id": "case-07", "action": "await_decision"},
+    {"case_id": "case-08", "action": "await_decision"},
+    {"case_id": "case-09", "action": "await_decision"},
+    {"case_id": "case-10", "action": "await_decision"},
+    {"case_id": "case-11", "action": "await_decision"},
+    {"case_id": "case-12", "action": "await_decision"},
+    {"case_id": "case-13", "action": "await_decision"},
+    {"case_id": "case-14", "action": "await_decision"},
+    {"case_id": "case-15", "action": "await_decision"},
+    {"case_id": "case-16", "action": "await_decision"},
+    {"case_id": "case-17", "action": "await_decision"},
+    {"case_id": "case-18", "action": "await_decision"},
+    {"case_id": "case-19", "action": "await_decision"},
+    {"case_id": "case-20", "action": "verification_failure"}
+  ]
+}

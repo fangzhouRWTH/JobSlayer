@@ -2,26 +2,31 @@
 
 ## 当前能力
 
-`TaskExecutionController` 已把 Phase 0 的独立组件组合成一个应用服务，并在真实 Codex/BraveNewWorld 任务中完成验证。它适合本地实验和受监督集成；当前没有面向不可信仓库的生产隔离，也不会自动操作远端 Git。
+`TaskExecutionController` 保留 Phase 0 JSONL 兼容路径；Phase 1 的 `TransactionalExecutionCoordinator` 和 `GovernedAgentExecutor` 已把事务真相、签名身份、短期凭据、强隔离、worker lease、上下文和预算组合为提供方无关基础架构。它仍不会自动操作远端 Git。
 
 ```mermaid
 sequenceDiagram
     participant U as Human/Policy
-    participant C as TaskExecutionController
+    participant C as Transactional Coordinator
+    participant P as Governance Ports
     participant K as WorkflowKernel
     participant A as AgentExecutor
     participant V as VerificationEngine
     participant R as Reviewer
     participant G as LocalGitIntegrator
     U->>C: TaskSpec + Authorization
-    C->>K: Draft -> Planned -> Implementing
+    C->>C: transaction: intent + artifact + outbox
+    C->>P: verify identity/context/grant/sandbox; reserve budget/lease
+    C->>K: buffer Draft -> Planned -> Implementing
     C->>A: isolated workspace invocation
-    A-->>C: terminal result + raw logs
+    A-->>P: normalized events + usage
+    P-->>C: terminal result + governed evidence
     C->>C: enforce path policy and register patch
     C->>K: Implementing -> Verifying
     C->>V: trusted ValidationProfile
     alt required checks pass
-        C->>K: Verifying -> Reviewing
+        C->>K: buffer Verifying -> Reviewing
+        C->>C: transaction: exact transitions + outcome + artifacts + outbox
         R->>C: ReviewReport
         C->>K: Reviewing -> MergeReview
         C-->>U: evidence-bound DecisionCard
@@ -36,12 +41,12 @@ sequenceDiagram
 
 ## 输入契约
 
-- `TaskSpec`：固定仓库基线、允许/禁止路径、验收条件、验证配置 ID 和风险。
-- `AgentInvocation`：固定执行器、模型配置名、上下文包、工作区、权限、时限和输出 schema。
-- `TaskExecutionAuthorization`：绑定 task、human/policy 行为者、最大风险和有效窗口。
+- `TaskSpec`：固定仓库基线、允许/禁止路径、验收条件、验证配置 ID、风险和费用上限。
+- `AgentInvocation`：固定执行器、模型配置名、上下文包、工作区、权限、时限、token/context/attempt/repair 上限和输出 schema。
+- `TaskExecutionAuthorization`：签名绑定 task/run、认证主体、最大风险和有效窗口。
 - `ValidationProfile`：绑定可信命令政策及一项或多项 required/optional 检查。
 
-Phase 0 控制器只接受 `Draft` 状态和 `max_attempts=1`。授权、任务、运行和验证配置 ID 不一致时，会在创建工作区和变更状态前拒绝请求。
+Phase 0 控制器继续只接受 `Draft` 状态和 `max_attempts=1`。Phase 1 协调器在长时间 Agent 之前单独提交 intent，期间只让 `WorkflowKernel` 写入可验证转换缓冲，终态后将转换、run record、artifact metadata 与 outbox 原子提交；不让数据库事务跨越 Agent/Git。授权、治理绑定或证据不一致时，会在相应副作用前拒绝请求。
 
 ## 输出与人工监督
 
@@ -54,7 +59,8 @@ Phase 0 控制器只接受 `Draft` 状态和 `max_attempts=1`。授权、任务�
 
 ```bash
 ./jobslayer review-decision card.json \
-  --actor-id reviewer-42 \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json \
   --output decision.json
 ```
 
@@ -62,7 +68,7 @@ Phase 0 控制器只接受 `Draft` 状态和 `max_attempts=1`。授权、任务�
 
 随后由操作员显式调用 `integrate-run`。本地 adapter 重新核对 reviewed patch、由该 patch 产生的 Git tree、固定 base、干净目标 checkout 和登记默认分支，只创建一个提交并执行 fast-forward；结果登记为制品后，kernel 才允许 `Completed`。`cleanup-run` 只移除已完成且干净的 worktree，保留分支。
 
-`LocalRunCoordinator` 已通过版本化 runbook 装配上述组件，支持确定性 `scripted_patch` 和需要外部 `--authorized-by` 的真实 `codex_cli`，并用另一条 append-only hash chain 保存 execution/review/decision/integration/cleanup 快照；这条 run ledger 不取代 `WorkflowKernel` 的状态真相。完整入口见 [MINIMUM_DEVELOPMENT_LOOP.md](MINIMUM_DEVELOPMENT_LOOP.md)。
+`LocalRunCoordinator` 支持确定性 `scripted_patch` 和签名 execution authority 的 `codex_cli`，以双 append-only hash chain 保存 Phase 0 快照。`TransactionalExecutionCoordinator` 则以 SQLite/PostgreSQL 为唯一元数据真相，并支持 execution/review/signed decision/integration/cleanup 的阶段事务。两条路径都不取代 `WorkflowKernel` 的状态真相，也不互相异步镜像。完整入口见 [MINIMUM_DEVELOPMENT_LOOP.md](MINIMUM_DEVELOPMENT_LOOP.md)。
 
 ## 制品与失败语义
 
@@ -87,5 +93,6 @@ Phase 0 控制器只接受 `Draft` 状态和 `max_attempts=1`。授权、任务�
 3. [完成] 低风险、路径范围窄的 scripted replay 真实 worktree 运行到 `MergeReview`，用于证明框架接线；
 4. [完成] 显式人工授权一次真实 Codex，在 BNW-0 worktree 实现滤波主题并经独立 Agent 复核到达 `MergeReview`；
 5. [完成] 用临时仓库验证人工批准、内容复核、本地 commit/fast-forward、完成门禁和 worktree 清理；
-6. [待完成] 由人类体验真实滤波决定卡并选择是否执行本地集成；仍不自动 push 或部署；
-7. [待完成] 建立短期凭据、执行前预算和默认无网络的外层 OCI/VM 执行环境。
+6. [完成] 真实人工决定体验、签名身份/authority 及越权拒绝测试；仍不自动 push 或部署；
+7. [完成] 短期凭据端口、执行前/运行中预算、上下文包、worker lease 和默认无网络 Linux 强隔离；
+8. [待部署能力] 接入生产 OIDC/secret broker、远程 worker 和第二个真实模型 executor；这些需要独立部署配置和外部调用授权。

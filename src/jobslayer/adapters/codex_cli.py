@@ -32,6 +32,12 @@ from jobslayer.execution.processes import (
     native_process_supervisor,
 )
 from jobslayer.workspace.manager import WorkspaceManager
+from jobslayer.workers import (
+    SandboxLauncher,
+    SandboxPolicy,
+    SandboxRequest,
+    SandboxUnavailableError,
+)
 
 
 class CodexExecutorError(AgentExecutorError):
@@ -82,6 +88,9 @@ class CodexCliExecutor:
         permission_profiles: Mapping[str, str] | None = None,
         output_schemas: Mapping[str, str | Path | None] | None = None,
         process_supervisor: ProcessSupervisor | None = None,
+        sandbox_launcher: SandboxLauncher | None = None,
+        sandbox_policy: SandboxPolicy | None = None,
+        credential_grant_id: str | None = None,
     ):
         self.workspace_manager = workspace_manager
         self.artifact_root = Path(artifact_root).resolve(strict=False)
@@ -98,6 +107,13 @@ class CodexCliExecutor:
             )
         self.codex_command = codex_command
         self.process_supervisor = process_supervisor or native_process_supervisor()
+        if (sandbox_launcher is None) != (sandbox_policy is None):
+            raise CodexConfigurationError(
+                "sandbox launcher and policy must be configured together"
+            )
+        self.sandbox_launcher = sandbox_launcher
+        self.sandbox_policy = sandbox_policy
+        self._credential_grant_id = credential_grant_id
         self.model_profiles = dict(model_profiles or {"default": None})
         self.permission_profiles = dict(
             permission_profiles
@@ -136,7 +152,9 @@ class CodexCliExecutor:
             if spec.run_id in self._runs:
                 raise CodexConfigurationError(f"run id already exists: {spec.run_id}")
 
-        command = self._command_for(invocation, workspace)
+        command, working_directory, environment = self._launch_for(
+            invocation, workspace
+        )
         run_directory = self.artifact_root / hashlib.sha256(
             spec.run_id.encode("utf-8")
         ).hexdigest()
@@ -155,8 +173,8 @@ class CodexCliExecutor:
         try:
             process = subprocess.Popen(
                 command,
-                cwd=Path(workspace.path),
-                env=self._codex_environment(),
+                cwd=working_directory,
+                env=environment,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -265,6 +283,57 @@ class CodexCliExecutor:
         if not state.done.is_set() or state.result is None:
             raise AgentRunStillRunningError(f"agent run is still active: {run_id}")
         return state.result
+
+    def sandbox_capabilities(self):
+        if self.sandbox_launcher is None:
+            raise CodexConfigurationError(
+                "Codex executor has no enforcement-backed sandbox launcher"
+            )
+        return self.sandbox_launcher.capabilities()
+
+    def credential_grant_id(self) -> str:
+        if not self._credential_grant_id:
+            raise CodexConfigurationError(
+                "Codex executor has no short-lived credential grant binding"
+            )
+        return self._credential_grant_id
+
+    def _launch_for(
+        self, invocation: AgentInvocation, workspace: WorkspaceManifest
+    ) -> tuple[list[str], Path, dict[str, str]]:
+        command = self._command_for(invocation, workspace)
+        if self.sandbox_launcher is None:
+            return command, Path(workspace.path), self._codex_environment()
+        assert self.sandbox_policy is not None
+        if self.sandbox_policy.timeout_seconds > invocation.run_spec.timeout_seconds:
+            raise CodexConfigurationError(
+                "sandbox timeout must not exceed the governed run timeout"
+            )
+        sandbox_command = list(command)
+        cd_index = sandbox_command.index("--cd") + 1
+        sandbox_command[cd_index] = "/workspace"
+        try:
+            plan = self.sandbox_launcher.prepare(
+                SandboxRequest(
+                    request_id=f"sandbox-{invocation.run_spec.run_id}",
+                    run_id=invocation.run_spec.run_id,
+                    workspace=Path(workspace.path),
+                    argv=tuple(sandbox_command),
+                    policy=self.sandbox_policy,
+                )
+            )
+        except SandboxUnavailableError as exc:
+            raise CodexConfigurationError(
+                "required Codex sandbox could not be prepared"
+            ) from exc
+        if plan.run_id != invocation.run_spec.run_id:
+            raise CodexConfigurationError("sandbox launch plan belongs to another run")
+        unmet = plan.capabilities.unmet(self.sandbox_policy)
+        if unmet:
+            raise CodexConfigurationError(
+                "sandbox launch plan lacks required controls: " + ", ".join(unmet)
+            )
+        return list(plan.argv), Path(plan.cwd), dict(plan.environment)
 
     def _command_for(
         self, invocation: AgentInvocation, workspace: WorkspaceManifest

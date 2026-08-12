@@ -2,11 +2,13 @@ import json
 import tempfile
 import threading
 import unittest
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, Request, build_opener
 
 from jobslayer.adapters.local_decisions import LocalDecisionStore
+from jobslayer.adapters.local_identity import RoleBasedAuthorizer
 from jobslayer.domain.models import (
     ActorType,
     DecisionCard,
@@ -14,6 +16,8 @@ from jobslayer.domain.models import (
     TaskState,
 )
 from jobslayer.supervision.session import ReviewSession, StaleDecisionCardError
+from jobslayer.supervision.session import ReviewAuthorizationError
+from jobslayer.identity import AuthenticatedPrincipal, AuthenticationMethod
 from jobslayer.supervision.web import ReviewServerError, create_review_server
 from jobslayer.workflow.journal import JsonlAuditJournal
 
@@ -180,6 +184,67 @@ class ReviewUiTests(unittest.TestCase):
                 rationale="This should be rejected as stale.",
             )
         self.assertFalse(stale_output.exists())
+
+    def test_authenticated_approver_is_bound_to_the_recorded_decision(self) -> None:
+        now = datetime.now(UTC)
+        principal = AuthenticatedPrincipal(
+            session_id="session-review-1",
+            subject_id="authenticated-operator",
+            display_name="Authenticated Operator",
+            roles=("approver",),
+            authentication_method=AuthenticationMethod.LOCAL_SIGNED_SESSION,
+            issuer="test-issuer",
+            authenticated_at=now - timedelta(minutes=1),
+            valid_until=now + timedelta(minutes=5),
+        )
+        output = self.root / "authenticated-decision.json"
+        session = ReviewSession(
+            card=self.card,
+            principal=principal,
+            authorizer=RoleBasedAuthorizer(),
+            decision_store=LocalDecisionStore(output),
+            journal=self.journal,
+        )
+
+        snapshot = session.snapshot()
+        decision = session.submit(
+            selected_option_id="request_changes",
+            rationale="Authenticated operator requests more evidence.",
+        )
+
+        self.assertTrue(snapshot["actor"]["authenticated"])
+        self.assertEqual(snapshot["actor"]["session_id"], principal.session_id)
+        self.assertTrue(snapshot["capabilities"]["decision_recording"])
+        self.assertEqual(decision.actor_id, principal.subject_id)
+
+    def test_authenticated_reviewer_role_cannot_record_a_decision(self) -> None:
+        now = datetime.now(UTC)
+        principal = AuthenticatedPrincipal(
+            session_id="session-reviewer-1",
+            subject_id="implementation-reviewer",
+            display_name="Implementation Reviewer",
+            roles=("reviewer",),
+            authentication_method=AuthenticationMethod.LOCAL_SIGNED_SESSION,
+            issuer="test-issuer",
+            authenticated_at=now - timedelta(minutes=1),
+            valid_until=now + timedelta(minutes=5),
+        )
+        output = self.root / "denied-decision.json"
+        session = ReviewSession(
+            card=self.card,
+            principal=principal,
+            authorizer=RoleBasedAuthorizer(),
+            decision_store=LocalDecisionStore(output),
+            journal=self.journal,
+        )
+
+        self.assertFalse(session.snapshot()["capabilities"]["decision_recording"])
+        with self.assertRaises(ReviewAuthorizationError):
+            session.submit(
+                selected_option_id="approve",
+                rationale="Reviewer must not approve.",
+            )
+        self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":

@@ -1,0 +1,58 @@
+name: Phase 0 corpus
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  governed-corpus:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Configure fixture Git identity
+        run: |
+          git config --global user.name "JobSlayer CI"
+          git config --global user.email "jobslayer-ci@example.invalid"
+      - name: Install JobSlayer
+        run: python -m pip install -e .
+      - name: Run complete local gate
+        run: python -m jobslayer check
+      - name: Build governed Phase 0 corpus
+        run: python -m jobslayer build-phase0-corpus
+      - name: Inspect the same retained corpus
+        run: python -m jobslayer inspect-readiness --state-root .jobslayer/phase0-corpus/state --required-reviewed-tasks 20
+
+  postgres-contract:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: jobslayer
+          POSTGRES_PASSWORD: jobslayer-test-password
+          POSTGRES_DB: jobslayer_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jobslayer -d jobslayer_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      JOBSLAYER_TEST_POSTGRES_DSN: postgresql://jobslayer:jobslayer-test-password@127.0.0.1:5432/jobslayer_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install PostgreSQL adapter
+        run: python -m pip install -e ".[postgres]"
+      - name: Run PostgreSQL state contract
+        run: python -m unittest tests.test_postgres_state -v

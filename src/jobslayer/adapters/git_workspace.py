@@ -10,6 +10,7 @@ from jobslayer.domain.models import (
     WorkspaceInspection,
     WorkspaceManifest,
     WorkspacePatch,
+    WorkspaceRemovalInspection,
     WorkspaceSpec,
 )
 from jobslayer.workspace.manager import WorkspaceOperationError
@@ -233,6 +234,33 @@ class GitWorktreeManager:
         if target.exists():
             raise WorkspaceError(f"Git reported removal but path still exists: {target}")
 
+    def inspect_removal(
+        self,
+        manifest: WorkspaceManifest,
+        *,
+        expected_commit: str,
+    ) -> WorkspaceRemovalInspection:
+        """Inspect cleanup facts without recreating or deleting a worktree."""
+
+        target = self._validate_manifest_binding(manifest)
+        resolved_expected = self._resolve_commit(expected_commit)
+        try:
+            branch_commit = self._resolve_commit(
+                f"refs/heads/{manifest.branch_name}"
+            )
+        except WorkspaceError:
+            branch_commit = None
+        return WorkspaceRemovalInspection(
+            workspace_id=manifest.workspace_id,
+            task_id=manifest.task_id,
+            path=str(target),
+            path_absent=not target.exists() and not target.is_symlink(),
+            registration_absent=target not in self._registered_worktrees(),
+            branch_name=manifest.branch_name,
+            branch_commit=branch_commit,
+            expected_commit=resolved_expected,
+        )
+
     def _target_for(self, workspace_id: str) -> Path:
         target = (self.workspace_root / workspace_id).resolve(strict=False)
         if target.parent != self.workspace_root:
@@ -240,15 +268,19 @@ class GitWorktreeManager:
         return target
 
     def _validate_manifest(self, manifest: WorkspaceManifest) -> Path:
+        target = self._validate_manifest_binding(manifest)
+        if not target.exists():
+            raise WorkspaceNotFoundError(f"workspace path does not exist: {target}")
+        if target not in self._registered_worktrees():
+            raise WorkspaceNotFoundError("workspace is not registered with Git")
+        return target
+
+    def _validate_manifest_binding(self, manifest: WorkspaceManifest) -> Path:
         if Path(manifest.repository_root).resolve() != self.repository:
             raise WorkspaceError("workspace belongs to a different repository")
         target = self._target_for(manifest.workspace_id)
         if Path(manifest.path).resolve() != target:
             raise WorkspaceError("manifest path does not match its workspace id")
-        if not target.exists():
-            raise WorkspaceNotFoundError(f"workspace path does not exist: {target}")
-        if target not in self._registered_worktrees():
-            raise WorkspaceNotFoundError("workspace is not registered with Git")
         return target
 
     def _registered_worktrees(self) -> set[Path]:

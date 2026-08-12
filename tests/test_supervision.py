@@ -8,6 +8,7 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 from jobslayer.cli import main
+from jobslayer.adapters.local_identity import LocalIdentityProvider
 from jobslayer.domain.models import DecisionCard, HumanDecision
 from jobslayer.supervision.decision import (
     DecisionError,
@@ -26,6 +27,19 @@ class HumanSupervisionTests(unittest.TestCase):
         return DecisionCard.model_validate_json(
             EXAMPLE_CARD.read_text(encoding="utf-8")
         )
+
+    def issue_approver(self, directory: str) -> tuple[Path, Path]:
+        key = Path(directory) / "identity-key.json"
+        session_path = Path(directory) / "identity-session.json"
+        provider = LocalIdentityProvider(key)
+        provider.create_key()
+        session = provider.issue(
+            subject_id="human-reviewer",
+            display_name="Human Reviewer",
+            roles=("approver",),
+        )
+        provider.create_session_file(session_path, session)
+        return key, session_path
 
     def test_renders_required_context_and_recommendation(self) -> None:
         rendered = render_decision_card(self.load_card())
@@ -71,6 +85,7 @@ class HumanSupervisionTests(unittest.TestCase):
     def test_interactive_cli_writes_a_structured_decision_without_applying_it(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "decision.json"
+            key, identity_session = self.issue_approver(directory)
             stdout = io.StringIO()
             with patch(
                 "builtins.input",
@@ -80,8 +95,10 @@ class HumanSupervisionTests(unittest.TestCase):
                     [
                         "review-decision",
                         str(EXAMPLE_CARD),
-                        "--actor-id",
-                        "human-reviewer",
+                        "--identity-session",
+                        str(identity_session),
+                        "--identity-key",
+                        str(key),
                         "--output",
                         str(output),
                     ]
@@ -98,6 +115,7 @@ class HumanSupervisionTests(unittest.TestCase):
     def test_cli_does_not_overwrite_an_existing_decision_record(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "decision.json"
+            key, identity_session = self.issue_approver(directory)
             output.write_text("existing\n", encoding="utf-8")
             stderr = io.StringIO()
             with redirect_stdout(io.StringIO()), redirect_stderr(stderr):
@@ -105,8 +123,10 @@ class HumanSupervisionTests(unittest.TestCase):
                     [
                         "review-decision",
                         str(EXAMPLE_CARD),
-                        "--actor-id",
-                        "human-reviewer",
+                        "--identity-session",
+                        str(identity_session),
+                        "--identity-key",
+                        str(key),
                         "--select",
                         "approve",
                         "--rationale",

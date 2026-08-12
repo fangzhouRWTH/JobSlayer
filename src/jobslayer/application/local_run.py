@@ -7,18 +7,25 @@ import json
 import os
 from pathlib import Path
 import shutil
-from typing import Any
+from typing import Any, Callable
 from uuid import uuid4
 
 from jobslayer.adapters.git_workspace import GitWorktreeManager
 from jobslayer.adapters.codex_cli import CodexCliExecutor
-from jobslayer.adapters.local_artifacts import LocalArtifactRegistry
+from jobslayer.adapters.local_artifacts import (
+    ArtifactRegistryError,
+    LocalArtifactRegistry,
+)
 from jobslayer.adapters.local_command import GovernedLocalCommandRunner
 from jobslayer.adapters.local_git_integration import LocalGitIntegrator
 from jobslayer.adapters.local_testbed import LocalGitTestbedInspector
 from jobslayer.adapters.scripted_patch import ScriptedPatchExecutor
 from jobslayer.agents.executor import AgentExecutorError
 from jobslayer.application.controller import TaskExecutionController
+from jobslayer.application.execution_intent import (
+    LocalExecutionContext,
+    LocalExecutionIntentEnvelope,
+)
 from jobslayer.application.run_records import (
     LocalRunLedger,
     RunRecordError,
@@ -41,10 +48,12 @@ from jobslayer.domain.models import (
     ReviewStatus,
     SourceIntegrationResult,
     TaskExecutionAuthorization,
+    TaskExecutionIntent,
     TaskExecutionOutcome,
     TaskSpec,
     TaskState,
     ValidationProfile,
+    WorkspaceRemovalInspection,
 )
 from jobslayer.supervision.application import DecisionApplicationService
 from jobslayer.verification.engine import VerificationEngine
@@ -81,6 +90,10 @@ class LocalRunCoordinator:
         *,
         state_root: str | Path | None = None,
         codex_binary: str | os.PathLike[str] | Sequence[str] = "codex",
+        execution_authority_verifier: (
+            Callable[[TaskExecutionAuthorization, str, str, datetime], TaskExecutionAuthorization]
+            | None
+        ) = None,
     ):
         self.repository_root = Path(repository_root).resolve(strict=True)
         requested_state = Path(state_root) if state_root is not None else Path(".jobslayer")
@@ -98,6 +111,7 @@ class LocalRunCoordinator:
                 "Codex executable command must contain non-empty arguments"
             )
         self.codex_command = codex_command
+        self.execution_authority_verifier = execution_authority_verifier
         if self.state_root == self.repository_root:
             raise LocalRunError("state root must not be the JobSlayer repository root")
 
@@ -106,15 +120,21 @@ class LocalRunCoordinator:
         runbook_path: str | Path,
         *,
         authorized_by: str | None = None,
+        execution_authorization: TaskExecutionAuthorization | None = None,
     ) -> dict[str, Any]:
         prepared = LocalRunbookLoader(self.repository_root).load(runbook_path)
-        self._preflight_executor(prepared, authorized_by=authorized_by)
+        run_id = prepared.runbook.invocation.run_spec.run_id
+        self._preflight_executor(
+            prepared,
+            run_id=run_id,
+            authorized_by=authorized_by,
+            execution_authorization=execution_authorization,
+        )
         checkout = self._checkout_for(prepared)
         inspection = LocalGitTestbedInspector(checkout).inspect(prepared.testbed)
         if not inspection.valid_local_baseline:
             raise LocalRunError("registered testbed checkout does not pass the baseline gate")
 
-        run_id = prepared.runbook.invocation.run_spec.run_id
         run_directory = self.state_root / "runs" / run_id
         try:
             run_directory.mkdir(parents=True, mode=0o700)
@@ -127,11 +147,35 @@ class LocalRunCoordinator:
             run_id=run_id,
             now=now,
             authorized_by=authorized_by,
+            supplied=execution_authorization,
+        )
+        runbook_bytes = prepared.source_path.read_bytes()
+        intent_envelope = LocalExecutionIntentEnvelope(
+            intent=TaskExecutionIntent(
+                intent_id=f"execution-intent-{run_id}",
+                run_id=run_id,
+                task=prepared.task,
+                invocation=prepared.runbook.invocation,
+                validation_profile=prepared.validation_profile,
+                authorization=authorization,
+                prepared_at=now,
+            ),
+            runbook_path=str(prepared.source_path),
+            runbook_sha256=hashlib.sha256(runbook_bytes).hexdigest(),
+            testbed=prepared.testbed,
+            testbed_inspection=inspection,
         )
         workspace_manager = GitWorktreeManager(
             checkout, self.state_root / "workspaces"
         )
         artifacts = LocalArtifactRegistry(run_directory / "artifacts")
+        intent_artifact = artifacts.register_bytes(
+            task_id=prepared.task.task_id,
+            run_id=run_id,
+            artifact_type="task-execution-intent",
+            producer="local-run-coordinator",
+            content=self._json_bytes(intent_envelope.model_dump(mode="json")),
+        )
         executor = self._executor_for(
             prepared,
             workspace_manager=workspace_manager,
@@ -151,19 +195,18 @@ class LocalRunCoordinator:
             authorization=authorization,
             now=now,
         )
-        runbook_bytes = prepared.source_path.read_bytes()
+        outcome_artifact = artifacts.register_bytes(
+            task_id=prepared.task.task_id,
+            run_id=run_id,
+            artifact_type="task-execution-outcome",
+            producer="local-run-coordinator",
+            content=self._json_bytes(outcome.model_dump(mode="json")),
+        )
         payload = {
-            "context": {
-                "runbook_path": str(prepared.source_path),
-                "runbook_sha256": hashlib.sha256(runbook_bytes).hexdigest(),
-                "testbed": prepared.testbed.model_dump(mode="json"),
-                "testbed_inspection": inspection.model_dump(mode="json"),
-                "task": prepared.task.model_dump(mode="json"),
-                "invocation": prepared.runbook.invocation.model_dump(mode="json"),
-                "validation_profile": prepared.validation_profile.model_dump(mode="json"),
-                "authorization": authorization.model_dump(mode="json"),
-            },
+            "context": intent_envelope.context_payload(),
             "outcome": outcome.model_dump(mode="json"),
+            "execution_intent_artifact": intent_artifact.model_dump(mode="json"),
+            "execution_outcome_artifact": outcome_artifact.model_dump(mode="json"),
         }
         LocalRunLedger(
             run_directory / "records.jsonl", run_id=run_id
@@ -178,19 +221,37 @@ class LocalRunCoordinator:
         self,
         prepared: PreparedLocalRun,
         *,
+        run_id: str,
         authorized_by: str | None,
+        execution_authorization: TaskExecutionAuthorization | None,
     ) -> None:
         executor = prepared.runbook.executor
         if isinstance(executor, ScriptedPatchConfig):
-            if authorized_by is not None:
+            if authorized_by is not None or execution_authorization is not None:
                 raise LocalRunError(
                     "scripted replay uses its registered policy authorization; "
                     "do not provide authorized_by"
                 )
             return
-        if authorized_by is None or not authorized_by.strip():
+        if authorized_by is not None and execution_authorization is not None:
             raise LocalRunError(
-                "codex_cli execution requires an explicit non-empty authorized_by actor"
+                "provide either a signed execution authority or the legacy test actor"
+            )
+        if execution_authorization is not None:
+            if self.execution_authority_verifier is None:
+                raise LocalRunError(
+                    "signed execution authority requires a configured verifier"
+                )
+            self.execution_authority_verifier(
+                execution_authorization,
+                prepared.task.task_id,
+                run_id,
+                datetime.now(UTC),
+            )
+        elif authorized_by is None or not authorized_by.strip():
+            raise LocalRunError(
+                "codex_cli execution requires a verified signed execution authority; "
+                "authorized_by is retained only for internal compatibility tests"
             )
         if shutil.which(self.codex_command[0]) is None:
             raise LocalRunError(
@@ -204,12 +265,15 @@ class LocalRunCoordinator:
         run_id: str,
         now: datetime,
         authorized_by: str | None,
+        supplied: TaskExecutionAuthorization | None,
     ) -> TaskExecutionAuthorization:
         if isinstance(prepared.runbook.executor, ScriptedPatchConfig):
             actor_type = ActorType.POLICY
             actor_id = "phase0-local-scripted-policy-v1"
             authorization_id = f"local-scripted-{run_id}"
         else:
+            if supplied is not None:
+                return supplied
             if authorized_by is None:
                 raise LocalRunError("codex_cli execution authorization is missing")
             actor_type = ActorType.HUMAN
@@ -222,6 +286,7 @@ class LocalRunCoordinator:
         return TaskExecutionAuthorization(
             authorization_id=authorization_id,
             task_id=prepared.task.task_id,
+            run_id=run_id,
             actor_type=actor_type,
             actor_id=actor_id,
             maximum_risk=prepared.task.risk,
@@ -378,12 +443,14 @@ class LocalRunCoordinator:
         decision_artifact = artifacts.register_file(
             decision_file,
             task_id=package.task_id,
+            run_id=records[0].run_id,
             artifact_type="human-decision",
             producer=decision.actor_id,
         )
         authority_artifact = artifacts.register_file(
             authority_file,
             task_id=package.task_id,
+            run_id=records[0].run_id,
             artifact_type="approval-authority",
             producer="authority-provider",
         )
@@ -393,6 +460,10 @@ class LocalRunCoordinator:
             decision=decision,
             authority=authority,
             verification_report=package.verification_report,
+            additional_evidence_ids=(
+                decision_artifact.artifact_id,
+                authority_artifact.artifact_id,
+            ),
             now=now,
         )
         ledger.append(
@@ -449,27 +520,27 @@ class LocalRunCoordinator:
             outcome.workspace.repository_root,
             Path(outcome.workspace.path).parent,
         )
-        result = LocalGitIntegrator(workspace_manager).integrate(
-            task=task,
-            workspace=outcome.workspace,
-            reviewed_patch=package.patch,
-            target_ref=target_ref,
-            approved_by=decision.actor_id,
-            commit_message=f"JobSlayer: {task.title}",
-        )
+        integrator = LocalGitIntegrator(workspace_manager)
         artifacts = LocalArtifactRegistry(directory / "artifacts")
-        integration_artifact = artifacts.register_bytes(
-            task_id=task.task_id,
-            run_id=records[0].run_id,
-            artifact_type="source-integration-result",
-            producer="local-git-integrator",
-            content=self._json_bytes(result.model_dump(mode="json")),
-        )
-
         journal = JsonlAuditJournal(directory / "workflow.jsonl")
         kernel = WorkflowKernel(journal)
         current_state = kernel.current_state(task.task_id)
         if current_state is TaskState.INTEGRATING:
+            result = integrator.integrate(
+                task=task,
+                workspace=outcome.workspace,
+                reviewed_patch=package.patch,
+                target_ref=target_ref,
+                approved_by=decision.actor_id,
+                commit_message=f"JobSlayer: {task.title}",
+            )
+            integration_artifact = artifacts.register_bytes(
+                task_id=task.task_id,
+                run_id=records[0].run_id,
+                artifact_type="source-integration-result",
+                producer="local-git-integrator",
+                content=self._json_bytes(result.model_dump(mode="json")),
+            )
             transition = kernel.transition(
                 task_id=task.task_id,
                 to_state=TaskState.COMPLETED,
@@ -489,15 +560,38 @@ class LocalRunCoordinator:
             )
         elif current_state is TaskState.COMPLETED:
             transition = kernel.history(task.task_id)[-1]
+            result, integration_artifact = self._completed_integration_evidence(
+                artifacts=artifacts,
+                evidence_ids=transition.evidence_ids,
+                task_id=task.task_id,
+                run_id=records[0].run_id,
+            )
+            required_evidence = {
+                decision.decision_id,
+                authority.authorization_id,
+                integration_artifact.artifact_id,
+                package.verification_report.report_id,
+                result.integration_id,
+            }
             if (
-                transition.actor_id != decision.actor_id
-                or result.integration_id not in transition.evidence_ids
-                or package.verification_report.report_id
-                not in transition.evidence_ids
+                transition.from_state is not TaskState.INTEGRATING
+                or transition.to_state is not TaskState.COMPLETED
+                or transition.actor_type is not ActorType.HUMAN
+                or transition.actor_id != decision.actor_id
+                or not required_evidence.issubset(transition.evidence_ids)
             ):
                 raise LocalRunError(
                     "completed workflow does not match the recoverable integration"
                 )
+            integrator.verify_existing_integration(
+                task=task,
+                workspace=outcome.workspace,
+                reviewed_patch=package.patch,
+                target_ref=target_ref,
+                approved_by=decision.actor_id,
+                commit_message=f"JobSlayer: {task.title}",
+                result=result,
+            )
         else:
             raise LocalRunError(
                 f"source integration requires integrating, task is {current_state.value}"
@@ -533,13 +627,20 @@ class LocalRunCoordinator:
             raise LocalRunError("only a completed run workspace may be removed")
 
         workspace_path = Path(outcome.workspace.path)
+        workspace_manager = GitWorktreeManager(
+            outcome.workspace.repository_root,
+            workspace_path.parent,
+        )
         if workspace_path.exists():
-            GitWorktreeManager(
-                outcome.workspace.repository_root,
-                workspace_path.parent,
-            ).remove(outcome.workspace)
-        if workspace_path.exists():
-            raise LocalRunError("workspace cleanup did not remove the worktree")
+            workspace_manager.remove(outcome.workspace)
+        removal = workspace_manager.inspect_removal(
+            outcome.workspace,
+            expected_commit=result.commit,
+        )
+        if not removal.safely_removed:
+            raise LocalRunError(
+                "workspace cleanup facts do not preserve the integrated source branch"
+            )
         ledger.append(
             task_id=result.task_id,
             stage=RunRecordStage.WORKSPACE_CLEANUP,
@@ -550,6 +651,7 @@ class LocalRunCoordinator:
                 "source_commit": result.commit,
                 "removed": True,
                 "branch_preserved": True,
+                "removal_inspection": removal.model_dump(mode="json"),
                 "removed_at": datetime.now(UTC).isoformat(),
             },
         )
@@ -631,6 +733,20 @@ class LocalRunCoordinator:
                     raise ValueError("workspace id mismatch")
                 if not cleanup_application["removed"]:
                     raise ValueError("workspace was not removed")
+                removal_payload = cleanup_application.get("removal_inspection")
+                if removal_payload is not None:
+                    removal = WorkspaceRemovalInspection.model_validate(
+                        removal_payload
+                    )
+                    if (
+                        removal.workspace_id != outcome.workspace.workspace_id
+                        or removal.task_id != outcome.workspace.task_id
+                        or removal.branch_name != outcome.workspace.branch_name
+                        or removal.expected_commit
+                        != integration_application["integration_result"]["commit"]
+                        or not removal.safely_removed
+                    ):
+                        raise ValueError("workspace removal evidence mismatch")
             except (KeyError, TypeError, ValueError) as exc:
                 raise LocalRunError("run cleanup record cannot be reconstructed") from exc
             if Path(outcome.workspace.path).exists():
@@ -658,6 +774,46 @@ class LocalRunCoordinator:
             )
             if artifact is not None
         )
+        intent_manifest_payload = execution.get("execution_intent_artifact")
+        outcome_manifest_payload = execution.get("execution_outcome_artifact")
+        if (intent_manifest_payload is None) != (outcome_manifest_payload is None):
+            raise LocalRunError("execution persistence evidence is incomplete")
+        if intent_manifest_payload is not None:
+            try:
+                intent_manifest = ArtifactManifest.model_validate(
+                    intent_manifest_payload
+                )
+                outcome_manifest = ArtifactManifest.model_validate(
+                    outcome_manifest_payload
+                )
+                persisted_intent = LocalExecutionIntentEnvelope.model_validate_json(
+                    artifacts.read(intent_manifest)
+                )
+                persisted_outcome = TaskExecutionOutcome.model_validate_json(
+                    artifacts.read(outcome_manifest)
+                )
+            except (ArtifactRegistryError, OSError, TypeError, ValueError) as exc:
+                raise LocalRunError(
+                    "execution persistence evidence cannot be reconstructed"
+                ) from exc
+            try:
+                recorded_context = LocalExecutionContext.model_validate(
+                    execution["context"]
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise LocalRunError(
+                    "execution persistence context cannot be reconstructed"
+                ) from exc
+            if (
+                persisted_intent.execution_context() != recorded_context
+                or persisted_outcome != outcome
+                or intent_manifest.task_id != task.task_id
+                or outcome_manifest.task_id != task.task_id
+                or intent_manifest.run_id != records[0].run_id
+                or outcome_manifest.run_id != records[0].run_id
+            ):
+                raise LocalRunError("execution persistence evidence binding is invalid")
+            manifests = (*manifests, intent_manifest, outcome_manifest)
         if disposition is not None:
             review_manifests = [disposition.review_artifact]
             if disposition.merge_review_package is not None:
@@ -795,6 +951,45 @@ class LocalRunCoordinator:
         except RunRecordError as exc:
             raise LocalRunError(str(exc)) from exc
         return directory, ledger, records
+
+    @staticmethod
+    def _completed_integration_evidence(
+        *,
+        artifacts: LocalArtifactRegistry,
+        evidence_ids: tuple[str, ...],
+        task_id: str,
+        run_id: str,
+    ) -> tuple[SourceIntegrationResult, ArtifactManifest]:
+        candidates: list[ArtifactManifest] = []
+        for evidence_id in evidence_ids:
+            if not evidence_id.startswith("artifact-"):
+                continue
+            try:
+                manifest = artifacts.get(evidence_id)
+            except (ArtifactRegistryError, OSError) as exc:
+                raise LocalRunError(
+                    "completed workflow references unavailable artifact evidence"
+                ) from exc
+            if manifest.artifact_type == "source-integration-result":
+                candidates.append(manifest)
+        if len(candidates) != 1:
+            raise LocalRunError(
+                "completed workflow must reference exactly one integration artifact"
+            )
+        manifest = candidates[0]
+        if (
+            manifest.task_id != task_id
+            or manifest.run_id != run_id
+            or manifest.producer != "local-git-integrator"
+        ):
+            raise LocalRunError("integration artifact binding is invalid")
+        try:
+            result = SourceIntegrationResult.model_validate_json(
+                artifacts.read(manifest)
+            )
+        except (ArtifactRegistryError, OSError, ValueError) as exc:
+            raise LocalRunError("integration artifact content is invalid") from exc
+        return result, manifest
 
     def _checkout_for(self, prepared: PreparedLocalRun) -> Path:
         hint = prepared.testbed.local_checkout_hint

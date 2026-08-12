@@ -26,7 +26,7 @@ AgentInvocation + WorkspaceManifest
     -> AgentRunResult + log hashes
 ```
 
-`start` 非阻塞返回 `AgentRunHandle`；`events(after_sequence=N)` 支持增量轮询；`cancel` 通过可注入的 `ProcessSupervisor` 协议终止 POSIX process group 或 Windows process tree；`collect` 只在终态返回，否则明确报运行中。该清理能力不是 OCI/VM 安全隔离。
+`start` 非阻塞返回 `AgentRunHandle`；`events(after_sequence=N)` 支持增量轮询；`cancel` 通过可注入的 `ProcessSupervisor` 协议终止 POSIX process group 或 Windows process tree；`collect` 只在终态返回，否则明确报运行中。进程清理本身不是安全隔离；配置 `SandboxLauncher` 后，命令才会通过可验证的外层沙箱启动。
 
 ## 事件映射
 
@@ -52,24 +52,29 @@ AgentInvocation + WorkspaceManifest
 
 构造 adapter 时若任何权限映射到 `danger-full-access`，会立即失败。模型 profile 和 output schema 同样必须在 adapter 初始化时由可信控制器登记。
 
-真实 `codex_cli` runbook 目前进一步固定为 `workspace_write`、`model_profile=default`、`output_schema=none` 和单次尝试。运行时必须另传 `--authorized-by`；源控 runbook 不能自我授权，也不能选择本机 Codex binary。
+真实 `codex_cli` runbook 目前进一步固定为 `workspace_write`、`model_profile=default`、`output_schema=none`，并显式登记 input/output token、context bytes、费用、attempt 与 repair 上限。公共 CLI 运行时必须传入具备 `execute_task` 权限的签名 session；CLI 生成绑定 task/run/风险/有效期的 `ExecutionCredentialProof`。源控 runbook 不能自我授权，也不能选择本机 Codex binary。
 
 ## 凭据原则
 
 - adapter 不继承 ambient `OPENAI_API_KEY` 或 `CODEX_API_KEY`；
-- 当前本地模式依赖 HOME/CODEX_HOME 中已有的 CLI 登录；
+- 历史 Phase 0 本地实验依赖操作员已有的 CLI 登录，但不构成安全部署方案；
 - 不把认证文件复制进目标 worktree；
 - 不把密钥写入 prompt、任务 JSON、事件、stderr 或制品；
-- CI 模式需要单独设计短期 credential provider，且 Agent 作业不得同时拥有仓库写入或部署凭据。
+- provider-neutral `AgentCredentialBroker` 只返回不含 secret 的短期 grant 证据；
+- 严格治理路径要求 executor 证明绑定同一 grant，并在终态撤销；没有真实短期凭据 adapter 时 fail closed；
+- CI 模式不得让 Agent 作业同时拥有仓库写入或部署凭据。
 
 ## 真实模型运行门禁
 
 1. 测试床已有人工建立且在本机核验的固定基线 commit/tag；发布状态必须单独如实记录；
 2. 创建低风险、允许路径明确、验证命令确定的 `TaskSpec`；
-3. 为 run 设置 timeout、`workspace_write`、一次尝试和无额外目录权限；
-4. 确认没有生产密钥进入进程环境；
-5. 运行前由外部人工通过 `--authorized-by` 明确批准本次模型调用；
-6. 运行后先收集 patch 和 raw logs，再通过独立验证 runner；
-7. 只生成合并提案，不自动 push、merge 或 deploy。
+3. 为 run 显式设置 token、费用、上下文、timeout、attempt/repair 和目录权限上限；
+4. 由 context builder 校验版本、内容哈希、普通文件和最大字节；
+5. 运行前验证签名 execution authority、短期凭据 grant、worker lease 和沙箱能力；
+6. 预算 reserve 与 attempt 授权在启动前持久化，运行中按 normalized usage 增量扣减；
+7. 运行后先收集 patch 和 raw logs，再通过独立验证 runner；
+8. 只生成合并提案，不自动 push、merge 或 deploy。
 
-当前实现不会自行跨过这些门禁。`--authorized-by` 仍只是声明而不是认证；token usage 只在运行结束后记录，尚不能强制执行前成本预算。`workspace-write` 也不等于 OCI/VM 外层网络、系统调用、CPU 或内存隔离，运行摘要会把这些能力标为不可用。
+`GovernedAgentExecutor` 统一执行 credential/context/sandbox/budget/lease 门禁：缺少任一能力都不启动；超限时先持久化预算耗尽和 lease cancel-requested，再通知 delegate。Linux bubblewrap adapter 已验证默认无网络、宿主文件不可见、仅 workspace 可写以及 CPU/内存/进程/时间限制。原生 Windows 没有等价强沙箱时明确失败关闭，可把同一请求路由到 WSL/Linux worker。
+
+`LocalRunCoordinator` 仍保留 Phase 0 JSONL 兼容路径，其签名 execution authority 已替代自由文本授权，但它不是生产 worker/secret broker 的替代品。面向外部模型的安全部署必须组合治理装饰器、真实短期凭据 adapter 和 enforcement-backed sandbox；当前仓库不会用已有 CLI 登录假装完成这条生产链路。

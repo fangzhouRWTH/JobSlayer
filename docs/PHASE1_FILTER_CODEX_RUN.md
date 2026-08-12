@@ -1,5 +1,9 @@
 # Phase 1 首次真实 Codex 与滤波主题实施说明
 
+> 这是 2026-08-07 首次真实运行的证据快照。运行结果与当时限制保持原样；当前认证、
+> 预算和隔离入口已由 ADR-0025/0026 取代旧的自由文本授权。不要用原 run/workspace ID
+> 重放或覆盖历史记录。
+
 ## 1. 本轮结果
 
 JobSlayer 已从源控 `TaskSpec + ValidationProfile + Runbook` 启动一次真实 Codex CLI，在 BraveNewWorld 的 `bnw-0` 固定基线上创建隔离 worktree，并完成含噪正弦与一阶低通滤波教学主题。实现经过独立验证和 Agent 技术审查，当前停在 `MergeReview`，等待人类决定。
@@ -33,15 +37,17 @@ JobSlayer 拥有工作区、授权、超时、事件归一化、路径政策、�
 - 固定基线：`fb43878c9f0164deef272e55969c0fc134a6d6a3` / `bnw-0`
 - 仓库：`https://github.com/fangzhouRWTH/BraveNewWorld.git`
 
-真实启动命令为：
+当时的运行使用了已经移除的自由文本授权参数。当前若用版本化的新 run/workspace ID
+复现实验，必须使用签名 executor session：
 
 ```bash
 ./jobslayer run-task \
   runbooks/bnw-filter-demo-001-codex.json \
-  --authorized-by fangzhou-user-request-2026-08-07
+  --identity-session .jobslayer/identity/executor.json \
+  --identity-key .jobslayer/identity/key.json
 ```
 
-`--authorized-by` 是本地显式声明，不是认证身份。当前 run/workspace ID 已被使用；复现实验必须版本化新 ID，不能覆盖已有记录。
+源控中的当前 run/workspace ID 已被使用；复现实验必须先版本化新 ID，不能覆盖已有记录。
 
 ## 4. BraveNewWorld 实现
 
@@ -91,11 +97,12 @@ JobSlayer 最终 `./jobslayer check` 为 7/7，通过 101 项 unittest、编译�
 ```bash
 ./jobslayer run-ui \
   .jobslayer/runs/bnw-filter-demo-001-run-01 \
-  --actor-id local-supervisor \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json \
   --open-browser
 ```
 
-页面真实显示 low risk、`MergeReview`、五次状态转换、补丁路径、验证/补丁/审查证据和当前能力边界。页面只能创建决定文件；身份未认证，决定不会自动应用，更不会执行 Git merge、push 或部署。
+页面真实显示 low risk、`MergeReview`、五次状态转换、补丁路径、验证/补丁/审查证据和当前能力边界。页面验证签名 session 且只能创建决定文件；决定不会自动应用，更不会执行 Git merge、push 或部署。
 
 BraveNewWorld 候选界面位于保留的 worktree，可运行：
 
@@ -104,12 +111,15 @@ cd .jobslayer/workspaces/bnw-filter-demo-001-ws-01
 ./bnw ui --open-browser
 ```
 
-## 7. 当前边界与下一步
+## 7. 该运行边界与后续基础架构
 
 - 主 checkout 仍是干净的 `bnw-0`；候选补丁只存在于受治理 worktree。
-- `workspace-write` 拦截了模型侧 socket 创建，但 JobSlayer 尚无独立 OCI/VM 证明，因此能力仍如实标记为无网络/资源强隔离。
-- 本轮只有事后 token usage，没有执行前 token/cost 强制预算；不应立即扩大到无人值守批量运行。
+- 该历史运行只有 Codex `workspace-write`，没有独立外层沙箱证明；它不能追溯升级为强隔离证据。
+- 该历史运行只有事后 token usage，没有执行前预算；它不能用于证明无人值守批量运行安全。
 - controller 当前只允许一次尝试；验证失败会进入 `Repairing`，但不会自动启动下一次模型修复。
 - 人类决定应用需要外部有效 `ApprovalAuthority`。后续框架已由 ADR-0012 把批准改为 `Integrating`，并提供另行显式调用、证据门禁的本地 fast-forward；该真实 run 尚未记录决定，仍未提交或集成。
 
-建议下一次讨论先决定：是否接受并整合该 BNW 候选补丁；随后在“有界修复循环、执行前预算、外层隔离”中选择一个作为 JobSlayer 下一纵向切片。
+此后已完成签名 identity/authority、预算/上下文、worker lease、Linux bubblewrap 强隔离、
+事务状态和只读 Dashboard 基础架构。新的严格治理路径没有真实短期模型凭据 adapter 时
+会失败关闭；该历史 BNW 候选是否本地集成仍是独立人工产品决定，不会被基础架构工作
+自动批准、push 或部署。

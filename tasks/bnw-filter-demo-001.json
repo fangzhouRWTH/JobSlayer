@@ -39,5 +39,6 @@
     "没有修改任务允许范围之外的路径，也没有新增运行时依赖"
   ],
   "validation_profile": "brave-new-world-filter-v1",
-  "risk": "low"
+  "risk": "low",
+  "max_cost_usd": 10.0
 }

@@ -1,8 +1,12 @@
 import hashlib
 import json
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from jobslayer.domain.models import (
     ActorType,
@@ -173,6 +177,83 @@ class WorkflowKernelTests(unittest.TestCase):
 
         with self.assertRaises(AuditIntegrityError):
             self.journal.read_all()
+
+    def test_partial_generation_write_preserves_the_previous_journal(self) -> None:
+        self.transition(TaskState.PLANNED)
+        previous_bytes = self.path.read_bytes()
+
+        def partial_write(descriptor: int, content: bytes) -> None:
+            os.write(descriptor, content[: max(1, len(content) // 2)])
+            raise OSError("injected partial journal generation write")
+
+        with (
+            patch.object(JsonlAuditJournal, "_write_all", side_effect=partial_write),
+            self.assertRaisesRegex(AuditIntegrityError, "durably publish"),
+        ):
+            self.transition(TaskState.IMPLEMENTING, ActorType.POLICY)
+
+        self.assertEqual(self.path.read_bytes(), previous_bytes)
+        self.assertEqual(self.kernel.current_state(self.task_id), TaskState.PLANNED)
+        self.assertEqual(
+            tuple(self.path.parent.glob(f".{self.path.name}.*.tmp")),
+            (),
+        )
+
+    def test_process_exit_around_atomic_replace_exposes_old_or_new_journal(self) -> None:
+        self.transition(TaskState.PLANNED)
+        first = self.journal.read_all()[0]
+        crash_script = (
+            "import os\n"
+            "from pathlib import Path\n"
+            "import sys\n"
+            "from unittest.mock import patch\n"
+            "from jobslayer.domain.models import ActorType, TaskState\n"
+            "from jobslayer.workflow.journal import JsonlAuditJournal\n"
+            "journal = JsonlAuditJournal(Path(sys.argv[1]))\n"
+            "mode = sys.argv[2]\n"
+            "original_replace = os.replace\n"
+            "def crash_replace(source, destination):\n"
+            "    if mode == 'after':\n"
+            "        original_replace(source, destination)\n"
+            "        os._exit(84)\n"
+            "    os._exit(83)\n"
+            "with patch('jobslayer.workflow.journal.os.replace', "
+            "side_effect=crash_replace):\n"
+            "    journal.append_transition(\n"
+            "        task_id='task-1',\n"
+            "        from_state=TaskState.PLANNED,\n"
+            "        to_state=TaskState.IMPLEMENTING,\n"
+            "        actor_type=ActorType.POLICY,\n"
+            "        actor_id='test-policy',\n"
+            "        reason='approved implementation')\n"
+        )
+
+        before = subprocess.run(
+            (sys.executable, "-c", crash_script, str(self.path), "before"),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        self.assertEqual(before.returncode, 83, before.stderr)
+        self.assertEqual(self.journal.read_all(), [first])
+
+        after = subprocess.run(
+            (sys.executable, "-c", crash_script, str(self.path), "after"),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        self.assertEqual(after.returncode, 84, after.stderr)
+        records = self.journal.read_all()
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0], first)
+        self.assertEqual(records[1].from_state, TaskState.PLANNED)
+        self.assertEqual(records[1].to_state, TaskState.IMPLEMENTING)
+        self.assertEqual(records[1].previous_hash, first.record_hash)
 
 
 if __name__ == "__main__":

@@ -44,7 +44,9 @@ class UnifiedEntrypointTests(unittest.TestCase):
         result = self.run_command(*self.repository_command(), "--help")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("serve-review,ui,check", result.stdout)
+        self.assertIn("serve-review", result.stdout)
+        self.assertIn("create-local-identity-key", result.stdout)
+        self.assertIn("issue-local-identity-session", result.stdout)
         self.assertIn("run-task", result.stdout)
         self.assertIn("validate-runbook", result.stdout)
         self.assertIn("inspect-run", result.stdout)

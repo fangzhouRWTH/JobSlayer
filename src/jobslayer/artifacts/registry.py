@@ -39,5 +39,14 @@ class ArtifactRegistry(Protocol):
     def get(self, artifact_id: str) -> ArtifactManifest:
         """Load a persisted manifest by its stable registry identifier."""
 
+    def list_manifests(
+        self,
+        *,
+        artifact_type: str | None = None,
+        task_id: str | None = None,
+        run_id: str | None = None,
+    ) -> tuple[ArtifactManifest, ...]:
+        """List verified manifests matching provider-neutral metadata filters."""
+
     def verify(self, manifest: ArtifactManifest) -> bool:
         """Return whether stored bytes still match the manifest."""

@@ -158,9 +158,36 @@ class GitWorktreeManagerTests(unittest.TestCase):
 
         self.manager.remove(manifest)
 
+        removal = self.manager.inspect_removal(
+            manifest,
+            expected_commit=self.base_commit,
+        )
+
         self.assertFalse(Path(manifest.path).exists())
         branches = self._git("branch", "--list", manifest.branch_name)
         self.assertIn(manifest.branch_name, branches)
+        self.assertTrue(removal.safely_removed)
+        self.assertTrue(removal.path_absent)
+        self.assertTrue(removal.registration_absent)
+        self.assertEqual(removal.branch_commit, self.base_commit)
+
+    def test_removed_workspace_attestation_detects_source_branch_drift(self) -> None:
+        manifest = self.manager.create(self.workspace_spec("drifted-cleanup"))
+        self.manager.remove(manifest)
+        (self.repository / "post-cleanup.txt").write_text(
+            "drift\n", encoding="utf-8"
+        )
+        self._git("add", "post-cleanup.txt")
+        self._git("commit", "-m", "post cleanup drift")
+        self._git("branch", "-f", manifest.branch_name, "HEAD")
+
+        removal = self.manager.inspect_removal(
+            manifest,
+            expected_commit=self.base_commit,
+        )
+
+        self.assertFalse(removal.safely_removed)
+        self.assertNotEqual(removal.branch_commit, self.base_commit)
 
     def test_rejects_an_unknown_base_commit(self) -> None:
         spec = WorkspaceSpec(

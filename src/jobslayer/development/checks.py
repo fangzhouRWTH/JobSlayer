@@ -145,8 +145,8 @@ class DevelopmentCheckRunner:
             ),
             DevelopmentCheckStep(
                 step_id="diff",
-                description="Git whitespace and conflict-marker validation",
-                argv=("git", "diff", "--check"),
+                description="normalized Git whitespace and conflict-marker validation",
+                argv=("git", "-c", "core.autocrlf=true", "diff", "--check"),
             ),
         )
 

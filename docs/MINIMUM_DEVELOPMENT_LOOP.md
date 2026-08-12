@@ -2,7 +2,7 @@
 
 ## 结论
 
-JobSlayer 当前已经支持本地单任务成功路径的全部基础操作：版本化任务绑定、独立 worktree、scripted 或显式授权 Codex 执行、路径门禁、确定性验证、独立实现审查、可视化人工决定、外部 authority 应用、受控本地 commit/fast-forward、完成证据和安全 worktree 清理。
+JobSlayer 当前已经支持本地单任务成功路径的全部基础操作：版本化任务绑定、独立 worktree、签名执行授权、预算/上下文门禁、scripted 或受治理 Agent 执行、路径门禁、确定性验证、独立实现审查、可视化人工决定、签名 authority 应用、受控本地 commit/fast-forward、完成证据和安全 worktree 清理。
 
 ```text
 Draft → Planned → Implementing → Verifying → Reviewing → MergeReview
@@ -17,43 +17,70 @@ Draft → Planned → Implementing → Verifying → Reviewing → MergeReview
 
 ```bash
 ./jobslayer check
+./jobslayer build-phase0-corpus
+./jobslayer inspect-readiness --state-root .jobslayer/phase0-corpus/state \
+  --required-reviewed-tasks 20
 ./jobslayer inspect-run RUN_DIR
 ./jobslayer inspect-recovery RUN_DIR
-./jobslayer review-run RUN_DIR --actor-type agent --actor-id REVIEWER \
+./jobslayer review-run RUN_DIR \
+  --identity-session .jobslayer/identity/reviewer.json \
+  --identity-key .jobslayer/identity/key.json \
   --status accepted --summary "实现与验证证据一致"
-./jobslayer run-ui RUN_DIR --actor-id HUMAN --open-browser
-./jobslayer apply-run-decision RUN_DIR --authority AUTHORITY.json
-./jobslayer integrate-run RUN_DIR
-./jobslayer cleanup-run RUN_DIR
+./jobslayer run-ui RUN_DIR \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json --open-browser
+./jobslayer issue-approval-authority \
+  --key .jobslayer/identity/key.json \
+  --identity-session .jobslayer/identity/approver.json \
+  --decision-kind merge_review --output .jobslayer/identity/authority.json
+./jobslayer apply-run-decision RUN_DIR \
+  --authority .jobslayer/identity/authority.json \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json
+./jobslayer integrate-run RUN_DIR \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json
+./jobslayer cleanup-run RUN_DIR \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json
 ```
 
-若 `inspect-recovery` 报告 `recoverable` 且动作为
-`restore_decision_card`，可执行 `./jobslayer recover-run RUN_DIR`。当前恢复器
-只重建由权威 review ledger 可证明的缺失决策卡投影；其他状态会拒绝并要求人工
-处理，不会覆盖文件或重复执行 Agent、验证、审查、状态转换和 Git 集成。
+若 `inspect-recovery` 报告 `recoverable`，可用带 `recover_run` 权限的 session 执行
+`./jobslayer recover-run RUN_DIR --identity-session SESSION --identity-key KEY`。当前支持 `restore_decision_card`，以及在 Git、
+原始集成制品和 `Completed` 转换全部只读证明一致后执行
+`resume_decision_application_record`、`resume_source_integration_record` 和
+`resume_workspace_cleanup_record`；execution outcome 已完整落盘时还支持
+`resume_execution_record`。这些动作只追加缺失的 run record，不重复 Agent、决定
+转换、commit、fast-forward 或 worktree remove，也不创建替代制品。其他状态会
+拒绝并要求人工处理；恢复器不会覆盖可疑文件或重复执行 Agent、验证和审查。
 
 Windows PowerShell 使用 `.\jobslayer.cmd` 替换上述 `./jobslayer`。控制平面、
 临时 Git 仓库闭环和完整开发检查可原生运行；本节现成 BraveNewWorld runbook
 仍调用测试床的 `./bnw`，实际执行它时需要 POSIX 兼容环境。
 
+`build-phase0-corpus` 从 `corpora/phase0-foundation-v1.json` 在新的忽略目录中
+重建 21 个真实 run，并拒绝覆盖既有输出。它用于自动回归且明确标记 fixture；
+其中的自动决定不满足本节的真实人工计划/决定体验要求。
+
 每一步后都可再次运行 `inspect-run`。摘要中的 capability 只反映当时真实可执行的下一步：`decision_recording`、`decision_application`、`source_integration` 或 `workspace_cleanup`。
 
-## 外部 authority
+## 签名 identity 与 authority
 
-UI 只创建 `HumanDecision`，不签发权限。体验测试需要由人工侧另行提供一个当前有效的 `ApprovalAuthority` JSON：
+UI 只创建 `HumanDecision`，不自动应用权限。首次本地体验先创建一个签名 key，再按
+最小角色签发 session：
 
-```json
-{
-  "schema_version": "1.0",
-  "authorization_id": "local-experience-approval-001",
-  "actor_id": "与 run-ui --actor-id 完全相同",
-  "allowed_decision_kinds": ["merge_review"],
-  "issued_at": "带时区且早于应用时刻的 RFC 3339 时间",
-  "valid_until": "带时区且晚于应用时刻的 RFC 3339 时间"
-}
+```bash
+./jobslayer create-local-identity-key .jobslayer/identity/key.json
+./jobslayer issue-local-identity-session \
+  --key .jobslayer/identity/key.json \
+  --subject-id local-approver --display-name "Local approver" \
+  --role approver --output .jobslayer/identity/approver.json
 ```
 
-本地 CLI 尚未认证 `actor_id`，也不会自行签发 authority；这正是当前体验需要重点验证的人工边界。
+`issue-approval-authority` 由签名 session 签发短期 proof；`apply-run-decision` 再验证
+issuer、session、actor、decision kind、策略版本和有效期。key/session/authority 都不应
+提交、写入制品或交给 Agent。生产部署仍应以 OIDC/mTLS 和 secret broker adapter 替换
+本地 HMAC adapter。
 
 ## BraveNewWorld 现成候选
 
@@ -68,7 +95,7 @@ UI 只创建 `HumanDecision`，不签发权限。体验测试需要由人工侧�
 
 1. 决策页是否以足够少的信息准确解释任务、风险、补丁、验证和审查结论；
 2. `request_changes`、`reject` 与 `approve` 的后果是否清楚，是否有误导性的“自动完成”感；
-3. authority 缺失、过期、actor 不匹配时是否明确拒绝且状态不变；
+3. session/authority 缺失、过期、篡改、actor 或权限不匹配时是否明确拒绝且状态不变；
 4. 审核后修改 worktree 或移动 `main` 时，`integrate-run` 是否拒绝且不覆盖现场；
 5. 成功集成后 commit trailer、目标 HEAD、运行账本、审计链与制品是否一致；
 6. 清理后能否继续检查完整 run，且任务分支仍可用于追溯；

@@ -94,6 +94,14 @@ class LocalTaskRunbook(_RunbookModel):
                 raise ValueError("codex_cli currently requires the none output schema")
             if spec.max_attempts != 1:
                 raise ValueError("codex_cli retry policy is not implemented; max_attempts must be 1")
+            if (
+                spec.maximum_input_tokens is None
+                or spec.maximum_output_tokens is None
+                or spec.maximum_context_bytes is None
+            ):
+                raise ValueError(
+                    "codex_cli requires explicit input/output/context and task cost budgets"
+                )
         return self
 
 
@@ -199,6 +207,8 @@ class LocalRunbookLoader:
             raise RunbookError("task validation_profile does not match the profile")
         if runbook.invocation.run_spec.task_id != task.task_id:
             raise RunbookError("invocation task_id does not match the task")
+        if isinstance(runbook.executor, CodexCliConfig) and task.max_cost_usd is None:
+            raise RunbookError("codex_cli task requires an explicit maximum cost")
         if task.risk is not RiskLevel.LOW:
             raise RunbookError("local runbooks are currently limited to low-risk tasks")
         commands = {check.argv for check in profile.checks if check.required}

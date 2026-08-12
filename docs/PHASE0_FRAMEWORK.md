@@ -1,10 +1,14 @@
 # JobSlayer Phase 0 初步框架说明
 
+> 本文保留 Phase 0 架构与样例证据；当前基础设施状态和入口以
+> [短期基础设施计划](SHORT_TERM_INFRASTRUCTURE_PLAN.md)与
+> [统一入口](UNIFIED_ENTRYPOINT.md)为准。
+
 ## 1. 当前结论
 
 截至 2026-08-07，JobSlayer 已形成一个可独立运行、可检查、可人工监督的 Phase 0 初步框架。它能从版本化 task/runbook 出发，在固定基线创建独立 worktree，经 executor adapter 产生补丁，执行受政策约束的真实验证，保留结构化证据，接受独立实现审查，并在人工批准后以受控本地 fast-forward 形成完成证据。
 
-这不是生产平台，也没有宣称完成真实 Codex 安全运行。当前已经闭合的是控制平面和本地装配路径；真实身份、外层强沙箱、远端发布和多进程事务存储仍是下一阶段边界。
+这不是生产平台，也没有宣称该历史 Codex 运行具备可追溯的强隔离。后续 Phase 1 已补齐本地签名身份、Linux 强沙箱、预算/上下文和 SQLite/PostgreSQL 事务端口；生产 OIDC/secret broker、远程发布及多租户部署仍是明确边界。
 
 ## 2. 已接通的完整路径
 
@@ -84,8 +88,8 @@ flowchart LR
 ```bash
 ./jobslayer review-run \
   .jobslayer/runs/bnw-scenario-slow-001-run-01 \
-  --actor-type agent \
-  --actor-id independent-reviewer \
+  --identity-session .jobslayer/identity/reviewer.json \
+  --identity-key .jobslayer/identity/key.json \
   --status accepted \
   --summary "路径、补丁和验证证据一致。"
 ```
@@ -97,11 +101,12 @@ flowchart LR
 ```bash
 ./jobslayer run-ui \
   .jobslayer/runs/bnw-scenario-slow-001-run-01 \
-  --actor-id local-supervisor \
+  --identity-session .jobslayer/identity/approver.json \
+  --identity-key .jobslayer/identity/key.json \
   --open-browser
 ```
 
-页面展示真实任务、风险、五次状态转换、验证/补丁/审查证据和能力边界。提交后只创建 run 目录中的 `decision.json`；身份仍是未认证声明，决定尚未应用。
+页面展示真实任务、风险、五次状态转换、验证/补丁/审查证据和能力边界。启动前验证签名 session；提交后只创建 run 目录中的 `decision.json`，决定尚未应用。
 
 ### 4.6 使用外部权限应用决定
 
@@ -140,20 +145,20 @@ authority 必须与决定 actor、决定种类和当前有效时间匹配。批�
 
 | 模块 | 已有真实能力 | 当前明确不具备 |
 |---|---|---|
-| WorkflowKernel | 合法转换、行为者权限、验证/完成门禁 | 跨进程事务调度 |
-| Git workspace | 固定 commit worktree、路径政策、补丁哈希 | 容器/VM 隔离 |
-| Local runner | 精确 argv 政策、最小环境、timeout、进程组清理、输出哈希 | 网络、系统调用、CPU/内存强隔离 |
-| Executors | Codex CLI adapter；确定性 scripted replay | 真实 Codex 安全验收与自动模型选择 |
-| Evidence | 内容寻址对象、清单和读取复核 | 远程 RBAC、保留策略、事务索引 |
-| Run persistence | workflow/run 双哈希链、可恢复 review/decision/integration/cleanup | 多写者锁、数据库事务和完整跨文件事务恢复 |
-| UI | 本地真实 merge card、证据、时间线、create-only 决定 | 身份认证、远程协作、自动应用/集成/部署 |
+| WorkflowKernel | 合法转换、行为者权限、验证/完成门禁、事务转换缓冲 | 分布式工作流调度 |
+| Git workspace | 固定 commit worktree、路径政策、补丁哈希 | 远端 PR/push/deploy |
+| Execution | 跨平台进程监督；Linux 强沙箱；Windows fail-closed 接口 | 原生 Windows 等价强沙箱、生产远程 worker |
+| Executors | Codex CLI adapter；确定性 scripted replay；治理装饰器 | 第二个真实模型和自动模型选择 |
+| Evidence | 内容寻址对象、清单、读取复核、事务 metadata | 远程对象存储和保留策略 |
+| Run persistence | Phase 0 双链恢复；Phase 1 SQLite/PostgreSQL 事务、outbox | 托管备份、HA、生产 dispatcher |
+| UI | 签名本地审查页；认证只读多运行 Dashboard | 远程多租户协作、自动应用/部署 |
 
-## 7. 下一轮具体讨论建议
+## 7. 后续产品讨论建议
 
 初步框架已经足以承载具体设计讨论。建议依次决定：
 
 1. BNW-1 首个产品主题是继续扩展信号滤波，还是进入 PID；
 2. 是否授权把 BNW-0 commit/tag 推送到 GitHub，使其他开发端可复现；
-3. 真实 Codex 首跑采用哪种外层隔离（优先 rootless OCI、默认无网络）；
-4. 本地 `ApprovalAuthority` 由何种真实身份/签发机制提供；
-5. 哪些 run 视图必须进入下一版监督 UI，哪些继续保持 CLI/制品形式。
+3. 生产部署采用哪种 OIDC/secret broker 与远程 Linux worker；
+4. 第二个真实 executor 及其独立预算/质量评测范围；
+5. 哪些审批动作应进入远程多租户 UI，哪些继续保持显式 CLI/制品形式。

@@ -263,4 +263,4 @@ BraveNewWorld 当前只承担“外部消费者和实验对象”角色：
 - 本地路径仅是开发提示，自动化通过仓库 URL 和固定 commit 获取；
 - BNW-0 由人工辅助建立；后续实验修改必须从登记基线进入 JobSlayer 的 worktree、受限执行和验证门禁。
 
-`./bnw check`、慢响应场景和含噪低通场景现已登记为 JobSlayer 受治理 validation profile。任务 `bnw-scenario-slow-001` 通过固定哈希 replay 证明控制框架接线，不计入模型能力；任务 `bnw-filter-demo-001` 则由一次外部显式授权的真实 Codex 完成并停在 `MergeReview`。临时仓库已经验证 `Integrating → 本地 fast-forward → Completed → cleanup`，真实候选留给人工体验。执行前预算、有界修复、外层隔离和基线首次 push 仍是独立决定，不能由本地 inspection 或模型自述暗示已经完成。
+`./bnw check`、慢响应场景和含噪低通场景现已登记为 JobSlayer 受治理 validation profile。任务 `bnw-scenario-slow-001` 通过固定哈希 replay 证明控制框架接线，不计入模型能力；任务 `bnw-filter-demo-001` 则由一次外部显式授权的真实 Codex 完成并停在 `MergeReview`。临时仓库已经验证 `Integrating → 本地 fast-forward → Completed → cleanup`，真实候选留给人工体验。后续框架已建立执行前/运行中预算、repair 上限和 Linux 强隔离端口，但历史 Codex run 不能追溯升级为这些能力的证据；自动修复编排、真实短期模型凭据和基线首次 push 仍是独立决定，不能由本地 inspection 或模型自述暗示已经完成。

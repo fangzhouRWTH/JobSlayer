@@ -5,6 +5,7 @@ import hashlib
 import json
 import sys
 import webbrowser
+from datetime import timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -17,11 +18,22 @@ from jobslayer.adapters.local_decisions import (
 )
 from jobslayer.adapters.local_testbed import LocalGitTestbedInspector
 from jobslayer.application.local_run import LocalRunCoordinator, LocalRunError
+from jobslayer.application.executor_comparison import ExecutorComparisonEvaluator
+from jobslayer.application.phase0_corpus import Phase0CorpusBuilder, Phase0CorpusError
 from jobslayer.application.readiness import (
     Phase0ReadinessEvaluator,
     ReadinessInspectionError,
 )
 from jobslayer.adapters.local_recovery import LocalRunRecoveryManager
+from jobslayer.adapters.local_identity import (
+    LocalIdentityError,
+    LocalIdentityProvider,
+    RoleBasedAuthorizer,
+)
+from jobslayer.adapters.local_management import LocalManagementQuery
+from jobslayer.adapters.persistent_management import PersistentManagementQuery
+from jobslayer.adapters.local_artifacts import LocalArtifactRegistry
+from jobslayer.adapters.sqlite_state import SqliteControlPlaneStore
 from jobslayer.application.runbook import LocalRunbookLoader, RunbookError
 from jobslayer.development.checks import (
     DevelopmentCheckConfigurationError,
@@ -33,6 +45,8 @@ from jobslayer.domain.models import (
     CheckResult,
     CheckStatus,
     DecisionCard,
+    DecisionKind,
+    HumanDecision,
     ReviewStatus,
     TaskSpec,
     TaskState,
@@ -50,10 +64,47 @@ from jobslayer.supervision.session import ReviewSession, ReviewSessionError
 from jobslayer.supervision.web import ReviewServerError, create_review_server
 from jobslayer.testbeds.inspection import TestbedInspectionError
 from jobslayer.recovery import RecoveryError, RecoveryStatus
+from jobslayer.identity import (
+    AuthenticatedPrincipal,
+    AuthorizationAction,
+    AuthorizationRequest,
+)
+from jobslayer.management import ManagementQueryError
+from jobslayer.management.web import (
+    ManagementServerError,
+    create_management_server,
+)
+from jobslayer.evaluation import ExecutorComparisonError
 
 
 def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _authenticated_principal(
+    *,
+    identity_session: Path | None,
+    identity_key: Path | None,
+    action: AuthorizationAction,
+    task_id: str | None = None,
+    run_id: str | None = None,
+) -> AuthenticatedPrincipal:
+    if identity_session is None or identity_key is None:
+        raise LocalIdentityError(
+            "protected operation requires both --identity-session and --identity-key"
+        )
+    principal = LocalIdentityProvider(identity_key).load_session(identity_session)
+    verdict = RoleBasedAuthorizer().authorize(
+        AuthorizationRequest(
+            principal=principal,
+            action=action,
+            task_id=task_id,
+            run_id=run_id,
+        )
+    )
+    if not verdict.permitted:
+        raise LocalIdentityError(f"authorization denied: {verdict.reason}")
+    return principal
 
 
 def _cmd_validate_task(path: Path) -> int:
@@ -160,14 +211,21 @@ def _cmd_verify_journal(path: Path) -> int:
 def _cmd_review_decision(
     path: Path,
     *,
-    actor_id: str,
+    identity_session: Path,
+    identity_key: Path,
     selected_option_id: str | None,
     rationale: str | None,
     output: Path | None,
 ) -> int:
     try:
         card = DecisionCard.model_validate_json(path.read_text(encoding="utf-8"))
-    except (OSError, ValidationError) as exc:
+        principal = _authenticated_principal(
+            identity_session=identity_session,
+            identity_key=identity_key,
+            action=AuthorizationAction.RECORD_DECISION,
+            task_id=card.task_id,
+        )
+    except (OSError, ValidationError, LocalIdentityError) as exc:
         print(f"decision card is invalid: {exc}", file=sys.stderr)
         return 1
 
@@ -187,7 +245,7 @@ def _cmd_review_decision(
     try:
         decision = create_human_decision(
             card,
-            actor_id=actor_id,
+            actor_id=principal.subject_id,
             selected_option_id=selected_option_id,
             rationale=rationale,
         )
@@ -215,7 +273,8 @@ def _cmd_review_decision(
 def _cmd_serve_review(
     path: Path,
     *,
-    actor_id: str,
+    identity_session: Path,
+    identity_key: Path,
     output: Path,
     journal_path: Path | None,
     port: int,
@@ -226,9 +285,11 @@ def _cmd_serve_review(
         journal = (
             JsonlAuditJournal(journal_path) if journal_path is not None else None
         )
+        principal = LocalIdentityProvider(identity_key).load_session(identity_session)
         session = ReviewSession(
             card=card,
-            actor_id=actor_id,
+            principal=principal,
+            authorizer=RoleBasedAuthorizer(),
             decision_store=LocalDecisionStore(output),
             journal=journal,
         )
@@ -241,6 +302,7 @@ def _cmd_serve_review(
         DecisionStoreError,
         ReviewSessionError,
         ReviewServerError,
+        LocalIdentityError,
     ) as exc:
         print(f"could not start review UI: {exc}", file=sys.stderr)
         return 1
@@ -249,7 +311,11 @@ def _cmd_serve_review(
     url = f"http://{host}:{actual_port}/"
     print(f"local review UI: {url}")
     print(f"decision output: {output}")
-    print("identity is declared, not authenticated; decisions are not auto-applied")
+    print(
+        f"authenticated subject: {session.principal.subject_id} "
+        f"(session {session.principal.session_id})"
+    )
+    print("RBAC permits recording only; decisions are not auto-applied")
     print("press Ctrl+C to stop")
     if open_browser:
         webbrowser.open(url)
@@ -273,10 +339,17 @@ def _cmd_check(root: Path | None) -> int:
 
 
 def _local_run_coordinator(
-    *, root: Path | None, state_root: Path | None
+    *,
+    root: Path | None,
+    state_root: Path | None,
+    execution_authority_verifier=None,
 ) -> LocalRunCoordinator:
     repository_root = find_repository_root(root)
-    return LocalRunCoordinator(repository_root, state_root=state_root)
+    return LocalRunCoordinator(
+        repository_root,
+        state_root=state_root,
+        execution_authority_verifier=execution_authority_verifier,
+    )
 
 
 def _cmd_run_task(
@@ -284,13 +357,53 @@ def _cmd_run_task(
     *,
     root: Path | None,
     state_root: Path | None,
-    authorized_by: str | None,
+    identity_session: Path | None,
+    identity_key: Path | None,
 ) -> int:
     try:
-        summary = _local_run_coordinator(
-            root=root, state_root=state_root
-        ).execute(path, authorized_by=authorized_by)
-    except (RuntimeError, OSError, ValidationError) as exc:
+        coordinator = _local_run_coordinator(root=root, state_root=state_root)
+        prepared = LocalRunbookLoader(coordinator.repository_root).load(path)
+        execution_authorization = None
+        if prepared.runbook.executor.adapter == "codex_cli":
+            if identity_session is None or identity_key is None:
+                raise LocalIdentityError(
+                    "codex_cli execution requires both --identity-session and --identity-key"
+                )
+            provider = LocalIdentityProvider(identity_key)
+            signed_session = provider.load_signed_session(identity_session)
+            execution_authorization = provider.issue_execution_authorization(
+                signed_session,
+                task_id=prepared.task.task_id,
+                run_id=prepared.runbook.invocation.run_spec.run_id,
+                maximum_risk=prepared.task.risk,
+                lifetime=timedelta(
+                    seconds=max(
+                        15 * 60,
+                        prepared.runbook.invocation.run_spec.timeout_seconds + 60,
+                    )
+                ),
+            )
+            coordinator = _local_run_coordinator(
+                root=root,
+                state_root=state_root,
+                execution_authority_verifier=(
+                    lambda authority, task_id, run_id, now: provider.verify_execution_authorization(
+                        authority,
+                        task_id=task_id,
+                        run_id=run_id,
+                        now=now,
+                    )
+                ),
+            )
+        elif identity_session is not None or identity_key is not None:
+            raise LocalIdentityError(
+                "scripted replay uses policy authorization and accepts no identity session"
+            )
+        summary = coordinator.execute(
+            path,
+            execution_authorization=execution_authorization,
+        )
+    except (RuntimeError, OSError, ValidationError, LocalIdentityError) as exc:
         print(f"task run failed: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(summary, ensure_ascii=False, indent=2))
@@ -344,6 +457,207 @@ def _cmd_inspect_readiness(
     return 0 if report.automated_gate_passes else 1
 
 
+def _cmd_compare_executors(run_directories: tuple[Path, ...]) -> int:
+    try:
+        report = ExecutorComparisonEvaluator().evaluate_runs(run_directories)
+    except (ExecutorComparisonError, OSError, ValueError) as exc:
+        print(f"executor comparison failed: {exc}", file=sys.stderr)
+        return 1
+    print(report.model_dump_json(indent=2))
+    return 0
+
+
+def _cmd_build_phase0_corpus(
+    *,
+    root: Path | None,
+    definition: Path | None,
+    output_root: Path | None,
+) -> int:
+    try:
+        repository_root = find_repository_root(root)
+        definition_path = definition or (
+            repository_root / "corpora" / "phase0-foundation-v1.json"
+        )
+        if not definition_path.is_absolute():
+            definition_path = repository_root / definition_path
+        corpus_root = output_root or (
+            repository_root / ".jobslayer" / "phase0-corpus"
+        )
+        if not corpus_root.is_absolute():
+            corpus_root = repository_root / corpus_root
+        report = Phase0CorpusBuilder(definition_path, corpus_root).build()
+    except (
+        DevelopmentCheckConfigurationError,
+        Phase0CorpusError,
+        OSError,
+        ValueError,
+    ) as exc:
+        print(f"Phase 0 corpus build failed: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _cmd_serve_dashboard(
+    *,
+    root: Path | None,
+    state_root: Path | None,
+    identity_session: Path,
+    identity_key: Path,
+    control_plane_db: Path | None,
+    artifact_root: Path | None,
+    port: int,
+    open_browser: bool,
+) -> int:
+    try:
+        principal = _authenticated_principal(
+            identity_session=identity_session,
+            identity_key=identity_key,
+            action=AuthorizationAction.VIEW_CONTROL_PLANE,
+        )
+        if control_plane_db is None:
+            if artifact_root is not None:
+                raise ManagementQueryError(
+                    "--artifact-root requires --control-plane-db"
+                )
+            coordinator = _local_run_coordinator(root=root, state_root=state_root)
+            query = LocalManagementQuery(coordinator)
+        else:
+            if artifact_root is None:
+                raise ManagementQueryError(
+                    "--control-plane-db requires --artifact-root"
+                )
+            database = control_plane_db.resolve(strict=True)
+            artifacts_path = artifact_root.resolve(strict=True)
+            if database.is_symlink() or not database.is_file():
+                raise ManagementQueryError(
+                    "control-plane database must be an existing regular file"
+                )
+            if artifacts_path.is_symlink() or not artifacts_path.is_dir():
+                raise ManagementQueryError(
+                    "artifact root must be an existing real directory"
+                )
+            query = PersistentManagementQuery(
+                SqliteControlPlaneStore(database),
+                LocalArtifactRegistry(artifacts_path),
+                source_name=f"sqlite://{database}",
+            )
+        query.snapshot()
+        server = create_management_server(query, principal, port=port)
+    except (
+        DevelopmentCheckConfigurationError,
+        LocalIdentityError,
+        ManagementQueryError,
+        ManagementServerError,
+        OSError,
+        ValueError,
+    ) as exc:
+        print(f"could not start management dashboard: {exc}", file=sys.stderr)
+        return 1
+    host, actual_port = server.server_address[:2]
+    url = f"http://{host}:{actual_port}/"
+    print(f"Agent management dashboard: {url}")
+    print(f"authenticated subject: {principal.subject_id}")
+    print("read-only persisted-event view; press Ctrl+C to stop")
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        server.serve_forever(poll_interval=0.5)
+    except KeyboardInterrupt:
+        print("\nmanagement dashboard stopped")
+    finally:
+        server.server_close()
+    return 0
+
+
+def _cmd_create_identity_key(path: Path) -> int:
+    try:
+        key_id = LocalIdentityProvider(path).create_key()
+    except LocalIdentityError as exc:
+        print(f"identity key creation failed: {exc}", file=sys.stderr)
+        return 1
+    print(json.dumps({"created": True, "key_id": key_id, "path": str(path)}, indent=2))
+    return 0
+
+
+def _cmd_issue_identity_session(
+    *,
+    key: Path,
+    subject_id: str,
+    display_name: str,
+    roles: tuple[str, ...],
+    lifetime_minutes: int,
+    output: Path,
+) -> int:
+    try:
+        session = LocalIdentityProvider(key).issue(
+            subject_id=subject_id,
+            display_name=display_name,
+            roles=roles,
+            lifetime=timedelta(minutes=lifetime_minutes),
+        )
+        LocalIdentityProvider.create_session_file(output, session)
+    except (LocalIdentityError, ValidationError, ValueError) as exc:
+        print(f"identity session issuance failed: {exc}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "created": True,
+                "session_id": session.principal.session_id,
+                "subject_id": session.principal.subject_id,
+                "roles": list(session.principal.roles),
+                "valid_until": session.principal.valid_until.isoformat(),
+                "output": str(output),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _cmd_issue_approval_authority(
+    *,
+    key: Path,
+    identity_session: Path,
+    decision_kinds: tuple[str, ...],
+    lifetime_minutes: int,
+    output: Path,
+) -> int:
+    try:
+        provider = LocalIdentityProvider(key)
+        session = provider.load_signed_session(identity_session)
+        authority = provider.issue_approval_authority(
+            session,
+            allowed_decision_kinds=tuple(
+                DecisionKind(value) for value in decision_kinds
+            ),
+            lifetime=timedelta(minutes=lifetime_minutes),
+        )
+        provider.create_approval_authority_file(output, authority)
+    except (LocalIdentityError, ValidationError, ValueError) as exc:
+        print(f"approval authority issuance failed: {exc}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "created": True,
+                "authorization_id": authority.authorization_id,
+                "actor_id": authority.actor_id,
+                "allowed_decision_kinds": [
+                    item.value for item in authority.allowed_decision_kinds
+                ],
+                "valid_until": authority.valid_until.isoformat(),
+                "output": str(output),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
 def _cmd_inspect_recovery(
     path: Path,
     *,
@@ -367,8 +681,16 @@ def _cmd_recover_run(
     *,
     root: Path | None,
     state_root: Path | None,
+    identity_session: Path,
+    identity_key: Path,
 ) -> int:
     try:
+        _authenticated_principal(
+            identity_session=identity_session,
+            identity_key=identity_key,
+            action=AuthorizationAction.RECOVER_RUN,
+            run_id=path.name,
+        )
         manager = LocalRunRecoveryManager(
             _local_run_coordinator(root=root, state_root=state_root)
         )
@@ -378,6 +700,7 @@ def _cmd_recover_run(
         RecoveryError,
         OSError,
         ValueError,
+        LocalIdentityError,
     ) as exc:
         print(f"run recovery failed: {exc}", file=sys.stderr)
         return 1
@@ -388,8 +711,8 @@ def _cmd_recover_run(
 def _cmd_review_run(
     path: Path,
     *,
-    actor_type: str,
-    actor_id: str,
+    identity_session: Path,
+    identity_key: Path,
     status: str,
     summary: str,
     findings: tuple[str, ...],
@@ -397,17 +720,24 @@ def _cmd_review_run(
     state_root: Path | None,
 ) -> int:
     try:
-        result = _local_run_coordinator(
-            root=root, state_root=state_root
-        ).review(
+        coordinator = _local_run_coordinator(root=root, state_root=state_root)
+        current = coordinator.inspect(path)
+        principal = _authenticated_principal(
+            identity_session=identity_session,
+            identity_key=identity_key,
+            action=AuthorizationAction.REVIEW_IMPLEMENTATION,
+            task_id=current["task_id"],
+            run_id=current["run_id"],
+        )
+        result = coordinator.review(
             path,
-            actor_type=ActorType(actor_type),
-            actor_id=actor_id,
+            actor_type=ActorType.HUMAN,
+            actor_id=principal.subject_id,
             status=ReviewStatus(status),
             summary=summary,
             findings=findings,
         )
-    except (RuntimeError, OSError, ValidationError) as exc:
+    except (RuntimeError, OSError, ValidationError, LocalIdentityError) as exc:
         print(f"implementation review failed: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -417,7 +747,8 @@ def _cmd_review_run(
 def _cmd_serve_run(
     path: Path,
     *,
-    actor_id: str,
+    identity_session: Path,
+    identity_key: Path,
     output: Path | None,
     port: int,
     open_browser: bool,
@@ -438,7 +769,8 @@ def _cmd_serve_run(
         return 1
     return _cmd_serve_review(
         Path(card_path_raw),
-        actor_id=actor_id,
+        identity_session=identity_session,
+        identity_key=identity_key,
         output=output_path,
         journal_path=run_directory / "workflow.jsonl",
         port=port,
@@ -453,16 +785,40 @@ def _cmd_apply_run_decision(
     decision: Path | None,
     root: Path | None,
     state_root: Path | None,
+    identity_session: Path,
+    identity_key: Path,
 ) -> int:
     try:
-        result = _local_run_coordinator(
-            root=root, state_root=state_root
-        ).apply_decision(
+        coordinator = _local_run_coordinator(root=root, state_root=state_root)
+        current = coordinator.inspect(path)
+        decision_file = decision or Path(current["run_directory"]) / "decision.json"
+        recorded_decision = HumanDecision.model_validate_json(
+            decision_file.read_text(encoding="utf-8")
+        )
+        principal = _authenticated_principal(
+            identity_session=identity_session,
+            identity_key=identity_key,
+            action=AuthorizationAction.APPLY_DECISION,
+            task_id=current["task_id"],
+            run_id=current["run_id"],
+        )
+        if recorded_decision.actor_id != principal.subject_id:
+            raise LocalIdentityError(
+                "authenticated subject does not own the recorded decision"
+            )
+        verified_authority = LocalIdentityProvider(
+            identity_key
+        ).load_approval_authority(authority)
+        if verified_authority.actor_id != principal.subject_id:
+            raise LocalIdentityError(
+                "verified approval authority belongs to another subject"
+            )
+        result = coordinator.apply_decision(
             path,
             authority_path=authority,
-            decision_path=decision,
+            decision_path=decision_file,
         )
-    except (RuntimeError, OSError, ValidationError) as exc:
+    except (RuntimeError, OSError, ValidationError, LocalIdentityError) as exc:
         print(f"decision application failed: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -474,12 +830,30 @@ def _cmd_integrate_run(
     *,
     root: Path | None,
     state_root: Path | None,
+    identity_session: Path,
+    identity_key: Path,
 ) -> int:
     try:
-        result = _local_run_coordinator(
-            root=root, state_root=state_root
-        ).integrate(path)
-    except (RuntimeError, OSError, ValidationError) as exc:
+        coordinator = _local_run_coordinator(root=root, state_root=state_root)
+        current = coordinator.inspect(path)
+        decision = HumanDecision.model_validate_json(
+            (Path(current["run_directory"]) / "decision.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        principal = _authenticated_principal(
+            identity_session=identity_session,
+            identity_key=identity_key,
+            action=AuthorizationAction.INTEGRATE_SOURCE,
+            task_id=current["task_id"],
+            run_id=current["run_id"],
+        )
+        if decision.actor_id != principal.subject_id:
+            raise LocalIdentityError(
+                "authenticated subject does not own the integration approval"
+            )
+        result = coordinator.integrate(path)
+    except (RuntimeError, OSError, ValidationError, LocalIdentityError) as exc:
         print(f"source integration failed: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -491,12 +865,30 @@ def _cmd_cleanup_run(
     *,
     root: Path | None,
     state_root: Path | None,
+    identity_session: Path,
+    identity_key: Path,
 ) -> int:
     try:
-        result = _local_run_coordinator(
-            root=root, state_root=state_root
-        ).cleanup(path)
-    except (RuntimeError, OSError, ValidationError) as exc:
+        coordinator = _local_run_coordinator(root=root, state_root=state_root)
+        current = coordinator.inspect(path)
+        decision = HumanDecision.model_validate_json(
+            (Path(current["run_directory"]) / "decision.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        principal = _authenticated_principal(
+            identity_session=identity_session,
+            identity_key=identity_key,
+            action=AuthorizationAction.CLEANUP_WORKSPACE,
+            task_id=current["task_id"],
+            run_id=current["run_id"],
+        )
+        if decision.actor_id != principal.subject_id:
+            raise LocalIdentityError(
+                "authenticated subject does not own the completed approval"
+            )
+        result = coordinator.cleanup(path)
+    except (RuntimeError, OSError, ValidationError, LocalIdentityError) as exc:
         print(f"workspace cleanup failed: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -628,7 +1020,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="inspect a decision card and produce a human decision record",
     )
     review.add_argument("path", type=Path)
-    review.add_argument("--actor-id", required=True)
+    review.add_argument("--identity-session", type=Path, required=True)
+    review.add_argument("--identity-key", type=Path, required=True)
     review.add_argument("--select", dest="selected_option_id")
     review.add_argument("--rationale")
     review.add_argument("--output", type=Path)
@@ -639,11 +1032,78 @@ def build_parser() -> argparse.ArgumentParser:
         help="serve a loopback-only visual UI for one decision card",
     )
     serve_review.add_argument("path", type=Path)
-    serve_review.add_argument("--actor-id", required=True)
+    serve_review.add_argument("--identity-session", type=Path, required=True)
+    serve_review.add_argument("--identity-key", type=Path, required=True)
     serve_review.add_argument("--output", type=Path, required=True)
     serve_review.add_argument("--journal", type=Path)
     serve_review.add_argument("--port", type=int, default=8765)
     serve_review.add_argument("--open-browser", action="store_true")
+
+    dashboard = commands.add_parser(
+        "serve-dashboard",
+        aliases=["dashboard"],
+        help="serve the authenticated read-only Agent management dashboard",
+    )
+    dashboard.add_argument("--root", type=Path)
+    dashboard.add_argument("--state-root", type=Path)
+    dashboard.add_argument(
+        "--control-plane-db",
+        type=Path,
+        help="existing transactional SQLite control-plane database",
+    )
+    dashboard.add_argument(
+        "--artifact-root",
+        type=Path,
+        help="artifact registry paired with --control-plane-db",
+    )
+    dashboard.add_argument("--identity-session", type=Path, required=True)
+    dashboard.add_argument("--identity-key", type=Path, required=True)
+    dashboard.add_argument("--port", type=int, default=8770)
+    dashboard.add_argument("--open-browser", action="store_true")
+
+    create_identity_key = commands.add_parser(
+        "create-local-identity-key",
+        help="create one protected local operator-session signing key",
+    )
+    create_identity_key.add_argument("path", type=Path)
+
+    issue_identity = commands.add_parser(
+        "issue-local-identity-session",
+        help="issue one short-lived signed local operator session",
+    )
+    issue_identity.add_argument("--key", type=Path, required=True)
+    issue_identity.add_argument("--subject-id", required=True)
+    issue_identity.add_argument("--display-name", required=True)
+    issue_identity.add_argument(
+        "--role",
+        action="append",
+        choices=[
+            "observer",
+            "executor",
+            "reviewer",
+            "approver",
+            "worker-admin",
+            "operator-admin",
+        ],
+        required=True,
+    )
+    issue_identity.add_argument("--lifetime-minutes", type=int, default=30)
+    issue_identity.add_argument("--output", type=Path, required=True)
+
+    issue_authority = commands.add_parser(
+        "issue-approval-authority",
+        help="issue one short-lived verifiable approval authority",
+    )
+    issue_authority.add_argument("--key", type=Path, required=True)
+    issue_authority.add_argument("--identity-session", type=Path, required=True)
+    issue_authority.add_argument(
+        "--decision-kind",
+        action="append",
+        choices=[item.value for item in DecisionKind],
+        required=True,
+    )
+    issue_authority.add_argument("--lifetime-minutes", type=int, default=15)
+    issue_authority.add_argument("--output", type=Path, required=True)
 
     check = commands.add_parser(
         "check",
@@ -662,10 +1122,8 @@ def build_parser() -> argparse.ArgumentParser:
     run_task.add_argument("path", type=Path)
     run_task.add_argument("--root", type=Path)
     run_task.add_argument("--state-root", type=Path)
-    run_task.add_argument(
-        "--authorized-by",
-        help="declared human actor authorizing one real codex_cli execution",
-    )
+    run_task.add_argument("--identity-session", type=Path)
+    run_task.add_argument("--identity-key", type=Path)
 
     inspect_run = commands.add_parser(
         "inspect-run",
@@ -688,6 +1146,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="minimum number of distinct integrity-verified reviewed tasks (default: 20)",
     )
 
+    compare_executors = commands.add_parser(
+        "compare-executors",
+        help="compare two or more executor runs under exact shared contracts",
+    )
+    compare_executors.add_argument(
+        "--run",
+        dest="run_directories",
+        action="append",
+        type=Path,
+        required=True,
+        help="persisted run directory; provide at least two",
+    )
+
+    build_corpus = commands.add_parser(
+        "build-phase0-corpus",
+        help="build the source-defined deterministic Phase 0 evidence corpus",
+    )
+    build_corpus.add_argument("--root", type=Path)
+    build_corpus.add_argument(
+        "--definition",
+        type=Path,
+        help="corpus definition; defaults to corpora/phase0-foundation-v1.json",
+    )
+    build_corpus.add_argument(
+        "--output-root",
+        type=Path,
+        help="new output directory; defaults to .jobslayer/phase0-corpus",
+    )
+
     inspect_recovery = commands.add_parser(
         "inspect-recovery",
         help="classify one persisted run without changing workflow state",
@@ -703,6 +1190,8 @@ def build_parser() -> argparse.ArgumentParser:
     recover_run.add_argument("path", type=Path)
     recover_run.add_argument("--root", type=Path)
     recover_run.add_argument("--state-root", type=Path)
+    recover_run.add_argument("--identity-session", type=Path, required=True)
+    recover_run.add_argument("--identity-key", type=Path, required=True)
 
     review_run = commands.add_parser(
         "review-run",
@@ -710,11 +1199,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     review_run.add_argument("path", type=Path)
     review_run.add_argument(
-        "--actor-type",
-        choices=[ActorType.AGENT.value, ActorType.HUMAN.value],
+        "--identity-session",
+        type=Path,
         required=True,
     )
-    review_run.add_argument("--actor-id", required=True)
+    review_run.add_argument("--identity-key", type=Path, required=True)
     review_run.add_argument(
         "--status",
         choices=[item.value for item in ReviewStatus],
@@ -730,7 +1219,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="serve the real merge decision generated by a persisted run",
     )
     run_ui.add_argument("path", type=Path)
-    run_ui.add_argument("--actor-id", required=True)
+    run_ui.add_argument("--identity-session", type=Path, required=True)
+    run_ui.add_argument("--identity-key", type=Path, required=True)
     run_ui.add_argument("--output", type=Path)
     run_ui.add_argument("--port", type=int, default=8765)
     run_ui.add_argument("--open-browser", action="store_true")
@@ -746,6 +1236,8 @@ def build_parser() -> argparse.ArgumentParser:
     apply_run_decision.add_argument("--decision", type=Path)
     apply_run_decision.add_argument("--root", type=Path)
     apply_run_decision.add_argument("--state-root", type=Path)
+    apply_run_decision.add_argument("--identity-session", type=Path, required=True)
+    apply_run_decision.add_argument("--identity-key", type=Path, required=True)
 
     integrate_run = commands.add_parser(
         "integrate-run",
@@ -754,6 +1246,8 @@ def build_parser() -> argparse.ArgumentParser:
     integrate_run.add_argument("path", type=Path)
     integrate_run.add_argument("--root", type=Path)
     integrate_run.add_argument("--state-root", type=Path)
+    integrate_run.add_argument("--identity-session", type=Path, required=True)
+    integrate_run.add_argument("--identity-key", type=Path, required=True)
 
     cleanup_run = commands.add_parser(
         "cleanup-run",
@@ -762,6 +1256,8 @@ def build_parser() -> argparse.ArgumentParser:
     cleanup_run.add_argument("path", type=Path)
     cleanup_run.add_argument("--root", type=Path)
     cleanup_run.add_argument("--state-root", type=Path)
+    cleanup_run.add_argument("--identity-session", type=Path, required=True)
+    cleanup_run.add_argument("--identity-key", type=Path, required=True)
 
     demo = commands.add_parser("demo", help="run a no-side-effect workflow demo")
     demo.add_argument(
@@ -794,7 +1290,8 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.command == "review-decision":
         return _cmd_review_decision(
             arguments.path,
-            actor_id=arguments.actor_id,
+            identity_session=arguments.identity_session,
+            identity_key=arguments.identity_key,
             selected_option_id=arguments.selected_option_id,
             rationale=arguments.rationale,
             output=arguments.output,
@@ -802,11 +1299,42 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.command in {"serve-review", "ui"}:
         return _cmd_serve_review(
             arguments.path,
-            actor_id=arguments.actor_id,
+            identity_session=arguments.identity_session,
+            identity_key=arguments.identity_key,
             output=arguments.output,
             journal_path=arguments.journal,
             port=arguments.port,
             open_browser=arguments.open_browser,
+        )
+    if arguments.command in {"serve-dashboard", "dashboard"}:
+        return _cmd_serve_dashboard(
+            root=arguments.root,
+            state_root=arguments.state_root,
+            identity_session=arguments.identity_session,
+            identity_key=arguments.identity_key,
+            control_plane_db=arguments.control_plane_db,
+            artifact_root=arguments.artifact_root,
+            port=arguments.port,
+            open_browser=arguments.open_browser,
+        )
+    if arguments.command == "create-local-identity-key":
+        return _cmd_create_identity_key(arguments.path)
+    if arguments.command == "issue-local-identity-session":
+        return _cmd_issue_identity_session(
+            key=arguments.key,
+            subject_id=arguments.subject_id,
+            display_name=arguments.display_name,
+            roles=tuple(arguments.role),
+            lifetime_minutes=arguments.lifetime_minutes,
+            output=arguments.output,
+        )
+    if arguments.command == "issue-approval-authority":
+        return _cmd_issue_approval_authority(
+            key=arguments.key,
+            identity_session=arguments.identity_session,
+            decision_kinds=tuple(arguments.decision_kind),
+            lifetime_minutes=arguments.lifetime_minutes,
+            output=arguments.output,
         )
     if arguments.command == "check":
         return _cmd_check(arguments.root)
@@ -815,7 +1343,8 @@ def main(argv: list[str] | None = None) -> int:
             arguments.path,
             root=arguments.root,
             state_root=arguments.state_root,
-            authorized_by=arguments.authorized_by,
+            identity_session=arguments.identity_session,
+            identity_key=arguments.identity_key,
         )
     if arguments.command == "inspect-run":
         return _cmd_inspect_run(
@@ -829,6 +1358,14 @@ def main(argv: list[str] | None = None) -> int:
             state_root=arguments.state_root,
             required_reviewed_tasks=arguments.required_reviewed_tasks,
         )
+    if arguments.command == "compare-executors":
+        return _cmd_compare_executors(tuple(arguments.run_directories))
+    if arguments.command == "build-phase0-corpus":
+        return _cmd_build_phase0_corpus(
+            root=arguments.root,
+            definition=arguments.definition,
+            output_root=arguments.output_root,
+        )
     if arguments.command == "inspect-recovery":
         return _cmd_inspect_recovery(
             arguments.path,
@@ -840,12 +1377,14 @@ def main(argv: list[str] | None = None) -> int:
             arguments.path,
             root=arguments.root,
             state_root=arguments.state_root,
+            identity_session=arguments.identity_session,
+            identity_key=arguments.identity_key,
         )
     if arguments.command == "review-run":
         return _cmd_review_run(
             arguments.path,
-            actor_type=arguments.actor_type,
-            actor_id=arguments.actor_id,
+            identity_session=arguments.identity_session,
+            identity_key=arguments.identity_key,
             status=arguments.status,
             summary=arguments.summary,
             findings=tuple(arguments.finding),
@@ -855,7 +1394,8 @@ def main(argv: list[str] | None = None) -> int:
     if arguments.command == "run-ui":
         return _cmd_serve_run(
             arguments.path,
-            actor_id=arguments.actor_id,
+            identity_session=arguments.identity_session,
+            identity_key=arguments.identity_key,
             output=arguments.output,
             port=arguments.port,
             open_browser=arguments.open_browser,
@@ -869,18 +1409,24 @@ def main(argv: list[str] | None = None) -> int:
             decision=arguments.decision,
             root=arguments.root,
             state_root=arguments.state_root,
+            identity_session=arguments.identity_session,
+            identity_key=arguments.identity_key,
         )
     if arguments.command == "integrate-run":
         return _cmd_integrate_run(
             arguments.path,
             root=arguments.root,
             state_root=arguments.state_root,
+            identity_session=arguments.identity_session,
+            identity_key=arguments.identity_key,
         )
     if arguments.command == "cleanup-run":
         return _cmd_cleanup_run(
             arguments.path,
             root=arguments.root,
             state_root=arguments.state_root,
+            identity_session=arguments.identity_session,
+            identity_key=arguments.identity_key,
         )
     if arguments.command == "demo":
         return _cmd_demo(arguments.journal)

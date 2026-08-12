@@ -9,7 +9,7 @@ from jobslayer.domain.models import (
     TransitionRecord,
     VerificationReport,
 )
-from jobslayer.workflow.journal import JsonlAuditJournal
+from jobslayer.workflow.journal import AuditJournal
 
 
 class WorkflowError(RuntimeError):
@@ -66,7 +66,7 @@ ALLOWED_TRANSITIONS: Mapping[TaskState, frozenset[TaskState]] = {
 class WorkflowKernel:
     """Owns task state and rejects transitions that lack authority or evidence."""
 
-    def __init__(self, journal: JsonlAuditJournal):
+    def __init__(self, journal: AuditJournal):
         self.journal = journal
 
     def current_state(self, task_id: str) -> TaskState:
