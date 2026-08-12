@@ -7,7 +7,7 @@ from tempfile import TemporaryDirectory
 import threading
 import unittest
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
 
 from jobslayer.adapters.local_management import LocalManagementQuery
 from jobslayer.identity import AuthenticatedPrincipal, AuthenticationMethod
@@ -86,6 +86,7 @@ class ManagementWebTests(unittest.TestCase):
         self.thread.start()
         host, port = self.server.server_address[:2]
         self.base = f"http://{host}:{port}"
+        self.opener = build_opener(ProxyHandler({}))
 
     def tearDown(self) -> None:
         self.server.shutdown()
@@ -93,7 +94,7 @@ class ManagementWebTests(unittest.TestCase):
         self.thread.join(timeout=2)
 
     def read_json(self, path: str):
-        with urlopen(self.base + path, timeout=2) as response:
+        with self.opener.open(self.base + path, timeout=2) as response:
             return response, json.loads(response.read().decode("utf-8"))
 
     def test_authenticated_read_model_exposes_dashboard_and_run_detail(self) -> None:
@@ -108,13 +109,15 @@ class ManagementWebTests(unittest.TestCase):
         self.assertEqual(detail["summary"]["task_id"], "task-1")
 
     def test_dashboard_is_loopback_read_only_and_hardened(self) -> None:
-        with urlopen(self.base + "/", timeout=2) as response:
+        with self.opener.open(self.base + "/", timeout=2) as response:
             html = response.read().decode("utf-8")
             self.assertEqual(response.headers["X-Frame-Options"], "DENY")
             self.assertIn("default-src 'self'", response.headers["Content-Security-Policy"])
             self.assertNotIn("<script>", html)
         with self.assertRaises(HTTPError) as caught:
-            urlopen(Request(self.base + "/api/dashboard", method="POST"), timeout=2)
+            self.opener.open(
+                Request(self.base + "/api/dashboard", method="POST"), timeout=2
+            )
         self.assertEqual(caught.exception.code, 405)
         with self.assertRaises(ManagementServerError):
             create_management_server(_FakeQuery(), self.principal, host="0.0.0.0")

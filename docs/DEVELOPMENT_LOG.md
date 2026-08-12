@@ -1654,3 +1654,61 @@ Windows 强沙箱、自动 repair 编排、第二个真实付费 executor 和远
 需要部署选择、预算或外部调用授权，不以测试替身冒充本阶段完成证据。下一步建议在真实
 部署目标确定后，先实现 OIDC + secret broker + Linux worker 的纵向切片，再授权第二
 executor 评测；当前不会自动发起外部模型调用、push 或部署。
+
+---
+
+## DEV-2026-08-12-15 — Dashboard loopback 测试的代理隔离
+
+- 状态：完成（本地门禁恢复；远端 Windows CI 仍待独立根因确认）
+- 类型：测试确定性、环境兼容与 CI 诊断
+
+### 背景与根因
+
+在更新后复核中，不带环境修饰运行 `./jobslayer check` 得到 6/7：206 项测试中仅
+Dashboard 的两个 HTTP 测试返回 502。当前宿主代理配置不会绕过 `127.0.0.1`，而
+`tests/test_management.py` 直接使用全局 `urlopen`，因此本应命中进程内 loopback
+server 的请求被发送到代理。既有 review UI 测试已通过空 `ProxyHandler` 明确隔离代理，
+Dashboard 测试没有采用相同边界。
+
+### 落实与验证
+
+1. `tests/test_management.py` 改为建立 `build_opener(ProxyHandler({}))`，全部测试请求均
+   通过该无代理 opener；产品服务、运行时网络策略和环境变量均未改变。
+2. 在原始代理环境下运行 `.venv/bin/python -m unittest tests.test_management -v`：
+   3 项全部通过，用时 1.023 秒。
+3. 不设置 `NO_PROXY`/`no_proxy` 运行完整 `./jobslayer check`：7/7 通过；206 项测试
+   `OK`，5 项因当前未配置 PostgreSQL DSN 或 bubblewrap 而 skip；compile、依赖、
+   BraveNewWorld 测试床、两套 runbook 和 normalized Git diff 全部通过。
+4. `git diff --check` 返回 0。变更文件仅为 `tests/test_management.py` 和本追加日志。
+
+### 限制与下一步
+
+GitHub Actions 对提交 `f310b1c` 的首次远端运行总体失败；公开摘要确认
+`governed-corpus (windows-latest)` 在 `Run complete local gate` 失败，而
+`postgres-contract` 成功。当前环境没有 GitHub CLI，公开页面又不提供完整失败日志，
+因此不能把本地 loopback 修复声明为远端 Windows 根因或已修复。下一步需取得该 job 的
+完整日志，按实际失败补充最小修复，并重新触发 Windows/Ubuntu/PostgreSQL 远端门禁。
+
+### 补充：远端 Windows 日志根因与 UTF-8 公共入口修复
+
+上述“完整日志尚不可用”限制随后由已连接 GitHub 应用的只读 Actions 日志接口补足，
+不再作为当前根因结论。远端 206 项测试全部通过；唯一失败发生在开发门禁第 4 步：
+GitHub Windows Server 2025 runner 的 stdout 为 CP1252，`validate-testbed` 输出中文
+`purpose` 时触发 `UnicodeEncodeError`。Ubuntu corpus 与真实 PostgreSQL contract job
+均成功，因此该失败是公共 CLI 输出编码边界，而不是领域契约或数据库问题。
+
+1. `src/jobslayer/launcher.py` 在所有源码、模块和安装后公共入口调用 CLI 前，把可重配置的
+   stdout/stderr 明确设为 UTF-8 strict；直接调用内部 `jobslayer.cli.main` 的单元测试不受
+   全局副作用影响。
+2. `tests/test_unified_entrypoint.py` 新增 CP1252 子进程回归：设置
+   `PYTHONIOENCODING=cp1252` 后执行 `python -m jobslayer validate-testbed`，要求退出码为
+   0、UTF-8 JSON 可解析且中文字段完整。
+3. `.venv/bin/python -m unittest tests.test_unified_entrypoint
+   tests.test_management -v`：10 项全部通过，用时 1.711 秒；另以同一 CP1252 环境真实
+   管道解析测试床输出，得到 `BraveNewWorld True`。
+4. 本次最终变更文件为 `src/jobslayer/launcher.py`、`tests/test_unified_entrypoint.py`、
+   `tests/test_management.py` 和 `docs/DEVELOPMENT_LOG.md`。远端状态只有在这些本地变更经
+   明确提交并重新触发 workflow 后才能更新；本轮没有擅自 commit、push 或重跑远端 job。
+5. 日志补充落盘前运行最终 `./jobslayer check`：7/7 全部通过；207 项 unittest
+   `OK`，5 项因当前未配置 PostgreSQL DSN 或 bubblewrap 而 skip；compile、依赖、测试床、
+   两套 source-controlled runbook 与 normalized Git diff 全部通过，用时 19.063 秒。

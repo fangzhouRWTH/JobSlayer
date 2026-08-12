@@ -67,6 +67,31 @@ class UnifiedEntrypointTests(unittest.TestCase):
         self.assertEqual(module.returncode, 0, module.stderr)
         self.assertEqual(source.stdout, module.stdout)
 
+    def test_module_entrypoint_forces_utf8_for_structured_output(self) -> None:
+        environment = os.environ.copy()
+        environment["PYTHONIOENCODING"] = "cp1252"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "jobslayer",
+                "validate-testbed",
+                "testbeds/brave-new-world.json",
+            ],
+            cwd=REPOSITORY_ROOT,
+            env=environment,
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=5,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["display_name"], "BraveNewWorld")
+        self.assertIn("控制理论", payload["purpose"])
+
     def test_readiness_command_reports_missing_evidence_with_a_nonzero_exit(self) -> None:
         with TemporaryDirectory() as state_root:
             result = self.run_command(
