@@ -1,4 +1,5 @@
 jobslayer text eol=lf
+*.sh text eol=lf
 *.cmd text eol=crlf
 *.py text eol=lf
 *.toml text eol=lf

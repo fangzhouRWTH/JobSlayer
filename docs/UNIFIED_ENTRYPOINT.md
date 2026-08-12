@@ -1,5 +1,25 @@
 # JobSlayer 统一入口
 
+## 环境初始化与正式入口分层
+
+未准备的源码 checkout 先运行 `init.cmd`（Windows）或 `sh ./init.sh`（POSIX）。
+该入口创建/检查 `.venv`，并为 `ui-framework` 解析兼容 Node/npm；完整规则见
+[跨平台开发环境初始化](INITIALIZATION.md)。它不进入 CLI、状态机或运行数据。
+
+```powershell
+.\init.cmd
+.\init.cmd --check --json
+.\init.cmd -- npm --prefix ui-framework run dev
+```
+
+```bash
+sh ./init.sh
+sh ./init.sh --check --json
+sh ./init.sh -- npm --prefix ui-framework run dev
+```
+
+环境就绪后，继续使用下述 `jobslayer` 公共应用入口。初始化和正式命令不互相复制职责。
+
 ## 入口约定
 
 跨平台公共命令契约是：
@@ -188,6 +208,9 @@ $env:JOBSLAYER_PYTHON = 'C:\Python312\python.exe'
 |---|---|
 | `/jobslayer` | 仓库可执行入口、解释器选择和源码 bootstrap |
 | `/jobslayer.cmd` | Windows 仓库入口、解释器发现和退出码透传 |
+| `/init.sh`、`/init.cmd` | 未准备 checkout 的平台 Python 发现与统一初始化转发 |
+| `scripts/bootstrap.py` | manifest 驱动的 Python/Node/UI 检测、安装与受限工具运行 |
+| `bootstrap/toolchains.json` | 固定 Node 版本、平台发行包和 SHA-256 |
 | `jobslayer.launcher` | 源码、模块和安装后脚本共用的稳定公共入口 |
 | `jobslayer.cli` | 命令 schema 与功能分发 |
 | `jobslayer.development.checks` | 版本化开发验证步骤与退出汇总 |

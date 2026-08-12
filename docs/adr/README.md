@@ -29,5 +29,7 @@
 | [ADR-0025](0025-authenticated-control-plane-and-agent-credential-grants.md) | Accepted | 公共写入口使用认证 RBAC 与签名 authority，Agent 只接受短期最小权限 grant |
 | [ADR-0026](0026-enforcement-backed-worker-sandbox-budget-and-context.md) | Accepted | 强沙箱、worker lease、预算与内容寻址上下文由统一治理执行器在 launch 前强制 |
 | [ADR-0027](0027-persistent-management-observability-and-executor-evaluation.md) | Accepted | 管理面只读事务事件真相，并提供 OTel 端口与同契约执行器比较 |
+| [ADR-0028](0028-isolated-web-workbench-interaction-prototype.md) | Accepted | 在隔离目录用成熟 Web 组件验证工程工作台交互，UI 不拥有控制面语义或状态 |
+| [ADR-0029](0029-cross-platform-manifest-driven-development-bootstrap.md) | Accepted | 用统一 init、固定校验的用户级 Node 和仓库 venv 提供跨平台、只读可检测的开发环境初始化 |
 
 新增或取代 ADR 时，同时更新本索引和 `docs/DEVELOPMENT_LOG.md`。Accepted ADR 不通过静默编辑改变原决定；需要改变方向时新增 superseding ADR。

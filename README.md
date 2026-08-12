@@ -16,6 +16,7 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
 - 带事件序列、取消和原始日志证据的 `AgentExecutor`/Codex CLI adapter；
 - 串联工作区、Agent、补丁、验证与合并决策卡的应用控制器；
 - 统一源码、UI、完整开发验证与安装后 CLI 的 POSIX/Windows 根入口；
+- manifest 驱动的跨平台开发初始化、固定校验的项目 Node LTS 和 lockfile 前端依赖；
 - 由版本化 task/profile/runbook 驱动的本地真实运行协调器；
 - 必须由外部显式授权、且仍服从相同工作树/验证/审查门禁的真实 Codex runbook；
 - append-only 运行记录链、确定性补丁重放 adapter 和 run 级监督入口；
@@ -33,7 +34,24 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
 
 ## 快速开始
 
-需要 Python 3.11 或更高版本。安装并激活项目环境后，Windows 与 POSIX 使用
+需要 Python 3.11 或更高版本。首次 checkout 使用跨平台初始化入口准备 Python、
+Node/npm 和项目依赖：
+
+```powershell
+.\init.cmd
+.\init.cmd --check
+```
+
+```bash
+sh ./init.sh
+sh ./init.sh --check
+```
+
+初始化不会安装系统软件或修改 `PATH`；没有全局 npm 时可通过
+`.\init.cmd -- npm --prefix ui-framework run dev`（POSIX 使用 `sh ./init.sh -- ...`）
+运行前端。完整参数与集成协议见[跨平台开发环境初始化](docs/INITIALIZATION.md)。
+
+环境准备后，Windows 与 POSIX 使用
 完全相同的公共接口：
 
 ```text
@@ -45,11 +63,9 @@ python -m jobslayer <子命令> [参数]
 安装包生成的 console script，后者是源码/模块入口；两者进入同一个 launcher。
 平台脚本只用于尚未激活环境时的 bootstrap。
 
-POSIX（Linux/macOS/WSL）初始化使用：
+POSIX（Linux/macOS/WSL）公共命令示例：
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -e .
 ./jobslayer check
 ./jobslayer validate-testbed testbeds/brave-new-world.json
 ./jobslayer inspect-testbed testbeds/brave-new-world.json
@@ -80,8 +96,6 @@ python3 -m venv .venv
 Windows PowerShell 使用原生 Python，不要求 WSL：
 
 ```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
 .\jobslayer.cmd check
 .\jobslayer.cmd validate-testbed testbeds/brave-new-world.json
 .\jobslayer.cmd serve-dashboard `
@@ -108,6 +122,9 @@ Draft -> Planned -> Implementing -> Verifying -> Reviewing
 ## 文档入口
 
 - [项目开发指导](docs/PROJECT_GUIDE.md)
+- [交互设计与前后端协作指南](docs/INTERACTION_DESIGN_GUIDE.md)
+- [Workbench Stage 0 交互原型](ui-framework/README.md)
+- [跨平台开发环境初始化](docs/INITIALIZATION.md)
 - [初步实施路线图](docs/ROADMAP.md)
 - [短期基础设施开发计划](docs/SHORT_TERM_INFRASTRUCTURE_PLAN.md)
 - [开发决策与落实日志](docs/DEVELOPMENT_LOG.md)

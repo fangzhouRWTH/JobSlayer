@@ -5,6 +5,9 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .venv/
+node_modules/
+.vite/
+.bootstrap-state.json
 build/
 dist/
 .jobslayer/

@@ -1712,3 +1712,194 @@ GitHub Windows Server 2025 runner 的 stdout 为 CP1252，`validate-testbed` 输
 5. 日志补充落盘前运行最终 `./jobslayer check`：7/7 全部通过；207 项 unittest
    `OK`，5 项因当前未配置 PostgreSQL DSN 或 bubblewrap 而 skip；compile、依赖、测试床、
    两套 source-controlled runbook 与 normalized Git diff 全部通过，用时 19.063 秒。
+
+---
+
+## DEV-2026-08-13-16 — Web Workbench 交互指南与隔离 Stage 0 原型
+
+- 状态：完成（交互原型与文档；无控制面接线）
+- 类型：interaction architecture、frontend prototype、ADR、dependency adoption
+
+### 背景与设计决定
+
+外部《AI Collaboration Platform Interaction Framework Design Guide》建议以
+React/TypeScript/Vite 建立 Web-first 工程工作台，并复用 React Flow、Monaco、xterm.js、
+ECharts、Markdown/PDF 与 Tauri。直接照搬会与本仓库“JobSlayer 拥有工程真相”、现有
+loopback UI 边界和按路线图退出条件引入依赖的规则发生歧义。
+
+依据新增 ADR-0028，本轮只在 `ui-framework/` 建立不导入 Python、不注册 CLI/HTTP route、
+不连接数据库/Agent/worker/Kernel 的 Stage 0 原型。React Flow 数据只作为 view model，
+写按钮只改变浏览器组件状态并持续提示未提交；Workflow IR、权限、重试、验证、审计和完成
+仍由未来 provider-neutral application contract 与 `WorkflowKernel.transition` 拥有。
+PDF.js、Tauri 和 dock-layout 因当前没有实际示例/桌面退出条件继续后置。
+
+### 当前落实
+
+1. `docs/INTERACTION_DESIGN_GUIDE.md` 把原文章整理为项目级规范：文档优先级、工作台信息
+   架构、GUI/Control Plane 权限边界、Workflow IR adapter、统一事件包络、query/command
+   分离、快照/事件恢复、关键界面行为、无障碍/响应式基线、依赖采用矩阵、现有 UI 关系、
+   Stage 0 至 governed command slice 的升级路径和评审检查表。
+2. `ui-framework/` 提供总索引与 4 个可跳转示例：Workflow Studio 使用 React Flow 和只读
+   Monaco YAML；Run Inspector 使用结构化任务层级、事件、ECharts trace 与只读 xterm；
+   Artifact Review 使用 Markdown、JSON、Monaco Diff、验证/authority gate 和本地决定；
+   Observability 展示成功/验证差异、成本、trace、worker 和可行动提醒。全局支持 hash 导航、
+   小屏导航、`Ctrl/Cmd+K` 命令面板、明确焦点和 reduced-motion。
+3. `package.json`/`package-lock.json` 锁定 React、Vite、TypeScript、`@xyflow/react`、
+   `@monaco-editor/react`、`@xterm/xterm`、ECharts、`react-markdown` 和 `lucide-react`。
+   页面级动态导入隔离 Monaco、React Flow、xterm 和图表；ECharts 只注册 Bar/Line/Pie、
+   Grid/Tooltip/Legend 与 Canvas renderer。审计发现 Monaco 的精确间接依赖 DOMPurify 3.4.8
+   存在公开问题，使用 npm override 固定为 3.4.13 后审计为 0 项漏洞。
+4. `README.md` 增加交互指南与原型入口；`docs/ROADMAP.md` 将 Web-first 工作台标记为
+   `[~]` 原型而非已接线产品；ADR 索引登记 ADR-0028；`.gitignore` 增加 Node/Vite 临时目录。
+   现有 `src/jobslayer/supervision/ui`、`management/ui` 和所有 Python 内核代码未修改。
+
+### 变更文件
+
+- 根与文档：`.gitignore`、`README.md`、`docs/ROADMAP.md`、
+  `docs/INTERACTION_DESIGN_GUIDE.md`、`docs/adr/README.md`、
+  `docs/adr/0028-isolated-web-workbench-interaction-prototype.md`、本日志；
+- 前端配置：`ui-framework/package.json`、`package-lock.json`、`tsconfig.json`、
+  `vite.config.ts`、`index.html`、`README.md`；
+- 前端实现：`ui-framework/src/App.tsx`、`main.tsx`、`styles.css`、`types.ts`、
+  `mockData.ts`，以及 `components/Overview.tsx`、`WorkflowStudio.tsx`、
+  `RunInspector.tsx`、`TerminalPanel.tsx`、`ArtifactReview.tsx`、`Observability.tsx`、
+  `EChart.tsx`、`CommandPalette.tsx`。
+
+### 精确验证证据
+
+1. 使用 nodejs.org 当前 LTS `v24.19.0` 的临时便携运行时执行
+   `npm install --no-audit --no-fund`；首次安装 141 packages，未在系统或仓库提交 Node
+   runtime，`node_modules` 被忽略。
+2. 在 `ui-framework/` 执行 `npm run check`：TypeScript 7 `tsc --noEmit` 与 Vite 8.2.1
+   production build 均通过，2716 modules transformed；路由级 chunk 正常生成，无 build
+   warning。`npm audit --audit-level=moderate` 返回 `found 0 vulnerabilities`。
+3. 本地 Vite 仅绑定 `127.0.0.1:4173`；PowerShell `Invoke-WebRequest` 对 `/` 和经 HTML
+   引用的 `/src/main.tsx` 均返回 HTTP 200，页面 title 存在。测试后服务已终止，4173 不作为
+   常驻进程保留；`Get-NetTCPConnection -LocalPort 4173 -State Listen` 最终返回 0 个监听者。
+4. 尝试通过已规定的应用内 Browser 做视觉/交互 QA，但当前 browser runtime 返回空可用
+   列表，未生成截图，也未以另一套浏览器工具替代。该限制不被记录成视觉通过证据。
+5. Windows 根统一门禁 `\.\jobslayer.cmd check`：7/7 通过，用时 108.9 秒；207 项 unittest
+   `OK`，7 项因 POSIX 权限、未配置 PostgreSQL DSN 或 Linux bubblewrap 而 skip；compile、
+   Python dependency consistency、BraveNewWorld testbed、scripted/Codex runbook 和 normalized
+   Git diff 全部通过。
+6. 日志落盘后的 `git diff --check` 返回 0；没有 whitespace error 或 conflict marker。
+
+### 限制与下一步
+
+当前页面使用固定 mock data，没有 read model、WebSocket、身份、幂等 command、并发恢复、
+真实 PDF 或桌面能力；本轮也没有修改 AI 项目管理内核、commit、push 或部署。下一步推荐先
+组织一次桌面/窄屏人工视觉评审并记录信息架构问题；若原型方向获准，再单独定义版本化只读
+snapshot/event API，只消费现有完整性检查后的 run/event/artifact 真相。写命令继续后置到该
+read-only vertical slice 证明不会形成第二控制平面之后。
+
+---
+
+## DEV-2026-08-13-17 — 跨平台、manifest 驱动的开发环境初始化
+
+- 状态：完成（Windows 与 Linux x86_64 真实初始化；macOS/arm64 为契约覆盖）
+- 类型：developer bootstrap、dependency integrity、cross-platform tooling、ADR
+
+### 背景与决定
+
+Stage 0 Web Workbench 引入 Node/npm 后，已有根 `jobslayer` / `jobslayer.cmd` 只会选择
+Python，不能从未准备的 checkout 创建 `.venv`、检测 Node 或安装 lockfile 依赖。上一轮
+使用的临时便携 Node 也不修改 shell `PATH`，使用者因而会看到 `npm` 命令不存在。
+
+依据 ADR-0029，新增 `init.cmd` / `init.sh` 作为项目初始化入口，两者只发现 Python 并转发
+到同一标准库实现 `scripts/bootstrap.py`。Python 3.11+ 是唯一系统前置条件；脚本不调用
+winget/Homebrew/apt/sudo、不安装系统软件、不写用户 `PATH`。Node 先复用合格的显式或
+系统 runtime，否则依据源码控制的 `bootstrap/toolchains.json` 下载固定 Node 24.19.0
+LTS，验证 SHA-256 后安装到用户级、版本/平台隔离的 JobSlayer cache。
+
+### 当前落实
+
+1. Python：创建/复用仓库 `.venv`，执行 editable install、`pip check` 与 import probe；
+   `pyproject.toml` 哈希和 optional extras 写入忽略的 state stamp。只允许显式
+   `postgres`/`observability` extras，不改变全局 Python/pip。
+2. Node：支持 Windows、Linux、macOS 的 x86_64/arm64 固定发行包；下载采用 `.part`、
+   250 MiB 上限、完整 SHA-256 和原子发布。zip/tar 解压前拒绝路径穿越、绝对/越界链接、
+   设备与 FIFO；无效显式 `JOBSLAYER_NODE` 不静默回退。
+3. UI：只执行 `npm ci`，并以 `package.json`/`package-lock.json` 哈希、平台、Node 版本、
+   state stamp 和完整 `npm ls --all` 判断 readiness。manifest 未变且依赖完整时第二次
+   初始化不下载、不重装。Windows `EPERM/unlink` 会提示停止占用 checkout 的 Vite/Node，
+   且绝不把半安装状态记为 ready。
+4. 组合接口：`--check` 严格只读，`--check --json` 返回稳定 schema/退出码；支持
+   `--offline`、`--skip-ui`、`--force`、`--extra` 和 `--tool-cache`。`--` 后只允许运行
+   `python`、`jobslayer`、`node`、`npm` 参数数组，因此没有全局 npm 时仍可用
+   `init -- npm --prefix ui-framework run dev/check`。
+5. `.venv`/`node_modules` state 记录 host platform；同一物理 checkout 的 Windows/WSL
+   混用失败关闭，要求独立 clone/worktree，避免原生依赖互相覆盖。用户级 Node cache 自身
+   继续按平台隔离。
+6. `docs/INITIALIZATION.md` 记录快速开始、默认 cache、检测/安装协议、JSON/退出码、
+   离线/可选依赖、工具运行、安全恢复和 init/application 分层；README、Workbench README、
+   unified-entrypoint 文档、路线图和 ADR 索引同步更新。
+
+### 实际故障与修正
+
+1. Windows 首次 `npm ci` 发现现有 Vite 进程占用 Rolldown 原生模块，返回真实
+   `EPERM unlink`；初始化正确失败且未写 ready stamp。只停止了已核对 command line 指向
+   本 checkout 的 Vite Node PID 30512，没有关闭用户 Terminal 或其他 Node 任务；随后
+   `npm ci` 安装 138 packages 成功。错误信息已补充可操作恢复说明。
+2. Linux 首次实机运行在 Node 包完成校验/解压后发现 npm probe 失败。根因是 POSIX npm
+   使用 `/usr/bin/env node`，探测时尚未在子进程 `PATH` 加入同发行包的 `bin`。修正后只在
+   probe/install 子进程环境注入该路径，不改变用户 shell；第二次 Linux 全流程通过。
+
+### 变更文件
+
+- 初始化实现：`init.cmd`、`init.sh`、`scripts/__init__.py`、
+  `scripts/bootstrap.py`、`bootstrap/toolchains.json`；
+- 测试：`tests/test_bootstrap.py`；
+- 架构/文档：`docs/INITIALIZATION.md`、
+  `docs/adr/0029-cross-platform-manifest-driven-development-bootstrap.md`、
+  `docs/adr/README.md`、`docs/UNIFIED_ENTRYPOINT.md`、`docs/ROADMAP.md`、`README.md`、
+  `ui-framework/README.md` 和本日志；
+- 仓库文本/忽略规则：`.gitattributes`、`.gitignore`。
+
+### 精确验证证据
+
+1. Windows 真实初始化：`.\init.cmd` 创建/更新 `.venv`，下载并验证
+   `node-v24.19.0-win-x64.zip`，发布到
+   `%LOCALAPPDATA%\JobSlayer\toolchains\node\v24.19.0\windows-x86_64`，随后 `npm ci`
+   安装 138 packages。立即第二次 `.\init.cmd` 输出 Python/Node/UI 三项 `[ready]`，未重装。
+2. `.\init.cmd --check --json` 返回 `ready=true`、Python 3.12.10、Node 24.19.0、
+   npm 11.17.0 和 `source=jobslayer-cache`；`.\init.cmd --offline` 在已有完整缓存/依赖下
+   成功，证明无网络复用路径。`.\init.cmd -- node --version` 返回 `v24.19.0`。
+3. `.\init.cmd -- npm --prefix ui-framework run check`：TypeScript `tsc --noEmit` 与
+   Vite 8.2.1 production build 通过，2716 modules transformed；
+   `.\init.cmd -- npm --prefix ui-framework audit --audit-level=moderate` 返回
+   `found 0 vulnerabilities`。
+4. Windows 定向测试
+   `.\.venv\Scripts\python.exe -m unittest tests.test_bootstrap
+   tests.test_unified_entrypoint -v`：16 项通过。覆盖支持/拒绝平台、版本下限、正常与路径
+   穿越 archive、篡改离线缓存、显式 Node fail-closed、外平台/不完整 venv 拒绝、只读 JSON
+   check、CMD/SH 行尾与既有统一入口。
+5. WSL 只读当前 Windows checkout：
+   `wsl.exe -e sh -lc "cd /mnt/d/projects/JobSlayer/JobSlayer &&
+   sh ./init.sh --check --json"` 返回 1/`ready=false` 且未写文件，正确拒绝把 Windows
+   `.venv`/`node_modules` 作为 Linux 环境。
+6. WSL 独立 `/var/tmp/jobslayer-init-e2e-20260813-02` checkout 真实执行
+   `sh ./init.sh`、`sh ./init.sh --check --json`、
+   `sh ./init.sh -- npm --prefix ui-framework run check`：创建 Python 3.12.3 venv，下载并
+   验证 `node-v24.19.0-linux-x64.tar.xz`，安装 Node 24.19.0/npm 11.17.0 和 138 packages，
+   JSON `ready=true`，同一 2716-module Vite build 通过；EXIT trap 后
+   `test ! -e /var/tmp/jobslayer-init-e2e-20260813-02` 通过，临时 venv/cache/dependencies
+   已清理。
+7. Windows 根统一门禁 `.\jobslayer.cmd check`：7/7 通过，用时 137 秒；216 项 unittest
+   `OK`，7 项因 POSIX 权限、未配置 PostgreSQL DSN 或 Linux bubblewrap 而 skip；compile、
+   Python dependency consistency、BraveNewWorld testbed、scripted/Codex runbook 和
+   normalized Git diff 全部通过。
+8. 日志落盘后的 `git diff --check` 返回 0；最终 `.\init.cmd --check --json` 经 Python
+   管道断言四级 readiness 均为 true。当前 checkout 相关 Node 进程为 0，4173/5173 UI
+   listener 合计为 0，没有为验证遗留常驻预览服务。
+
+### 限制与下一步
+
+本轮没有 macOS 或 arm64 实机；其平台映射、固定 archive/checksum 和拒绝路径由单元测试
+覆盖，不能冒充实机验证。Python 3.11+ 仍需由宿主预先提供；这是 JobSlayer 的运行前提，
+初始化不会以特权 package manager 安装。optional extras 在既有 venv 中是增量安装，若要
+严格最小环境应删除 `.venv` 后重建。初始化没有修改 WorkflowKernel、运行状态、权限、审计、
+identity、run/artifact 数据，也没有 commit、push 或部署。
+
+下一步推荐把 `init --check --json` 接入 IDE workspace onboarding 和 GitHub Actions 的
+环境诊断步骤，并在可用的 macOS x86_64/arm64 runner 上执行独立 checkout 的真实 init +
+UI build；Node 版本/checksum 后续升级必须作为显式 toolchain 决策评审。
