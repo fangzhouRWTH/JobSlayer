@@ -4,7 +4,8 @@
 页面已经形成一个受限的本地纵向切片：
 
 - 总览索引与工作台导航；
-- 任务描述、多轮讨论、Agent 待应用提案、版本化拓扑、节点 CRUD/支线/子任务与定稿记录；
+- 多计划搜索/切换/归档、任务讨论、Agent 候选差异与应用/拒绝、结构化节点、语义边 CRUD、
+  完整度评估、历史比较/派生与定稿记录；
 - Workflow Studio、React Flow 图和 canonical mock IR；
 - Run Inspector、结构化事件、trace 与只读 xterm 输出；
 - Markdown/JSON/Monaco Diff 制品审查和人工门；
@@ -47,9 +48,11 @@ Task Orchestration 还需要先启动默认 `127.0.0.1:8780` 的认证 API：
   读取固定样例；
 - Task Orchestration 通过 Vite same-origin proxy 调用认证 loopback API，计划 revision 由
   Python 应用服务和追加式 store 拥有，浏览器不持久化权威计划；
-- 当前 PlanningAgent 是确定性本地 fixture，不调用 Codex、shell、Git 或执行工作流；
+- 默认 PlanningAgent 是确定性本地 fixture；后端可显式启用 Codex planning adapter，但 UI
+  仍只显示并提交待应用提案，不调用 shell、Git 或执行工作流；
 - 讨论中的 Agent 图是待应用 proposal，只有用户显式应用/CRUD/定稿才产生新 revision；
 - React Flow JSON 不是 Workflow IR；
+- React Flow 拖动坐标只按 plan 保存为浏览器 presentation metadata，不写入权威 revision；
 - finalized plan 只是用户确认的设计制品，不等于 `TaskState.PLANNED` 或 Completed；
 - 本目录不替代现有 `supervision/ui` 和 `management/ui`。
 
@@ -57,7 +60,8 @@ Task Orchestration 还需要先启动默认 `127.0.0.1:8780` 的认证 API：
 产品边界见 [`ADR-0028`](../docs/adr/0028-isolated-web-workbench-interaction-prototype.md)，
 统一依赖门禁见 [`ADR-0030`](../docs/adr/0030-unified-gate-for-locked-ui-dependencies.md)。
 任务编排边界见 [`ADR-0031`](../docs/adr/0031-versioned-collaborative-task-orchestration.md)。
+交互式规划完善决策见 [`ADR-0032`](../docs/adr/0032-governed-interactive-planning-workbench.md)。
 
 ## 依赖口径
 
-当前只安装被示例实际使用的库。PDF.js、Tauri、持久布局和真实 transport 在对应需求与契约成立前不引入。`package-lock.json` 固定本原型已验证的完整依赖树。
+当前只安装被示例实际使用的库。PDF.js、Tauri、服务器端协作布局和真实 transport 在对应需求与契约成立前不引入。`package-lock.json` 固定本原型已验证的完整依赖树。

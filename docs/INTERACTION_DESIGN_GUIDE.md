@@ -241,11 +241,17 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 
 - 用户输入先形成版本化 plan，不直接创建执行任务；
 - 多轮讨论中的 Agent 输出是 `pending_proposal`，图上必须明确区分 proposed/applied；
-- 用户应用 proposal、节点 CRUD、支线或子任务时必须携带 `expected_revision`；
+- 应用前展示节点与语义边的新增、修改和删除；拒绝 proposal 不改变 applied graph；
+- 用户应用/拒绝 proposal、节点/边 CRUD、支线、子任务、归档或历史派生时必须携带 `expected_revision`；
+- 节点用结构化字段表达验收标准、交付物、约束、风险、验证要求和人工决策点；
+- 完整度面板区分 blocker/warning/info；blocker 阻止 plan finalization，但不冒充执行验证；
 - finalization 记录 actor、revision、时间和 hash，只表示确认了计划设计；
 - 定稿后的修改创建新 draft revision，不覆盖之前的 finalized revision；
-- React Flow 坐标属于 presentation metadata，系统只保存 provider-neutral 节点和语义边；
-- 真实 Codex、其他模型或未来多人 store 必须在 adapter 后接入，不能改变用户应用边界。
+- 历史比较和派生只追加新 draft；归档/恢复也不删除或覆盖 revision；
+- React Flow 坐标属于 presentation metadata，可按 plan 保存于浏览器，但系统只保存 provider-neutral 节点和语义边；
+- Codex 和其他模型必须在 `PlanningAgent` adapter 后接入，返回非权威 proposal draft；provider
+  失败或原始制品不能改变用户应用边界。当前 Codex adapter 需要显式 opt-in/model，并把成功
+  invocation 的 prompt、JSONL、stderr 与 final JSON 绑定到待应用提案。
 
 ### 6.3 Workflow Studio
 
@@ -335,6 +341,7 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 
 - Workflow Studio、Run Inspector、Artifact Review 与 Observability 使用固定 mock data；
 - Task Orchestration 调用 loopback 计划 API，权威 revision 位于 Python store；
+- 计划列表、proposal diff、完整度、edge CRUD、revision compare/derive 和 archive 均通过同一应用服务契约；
 - 不导入 `src/jobslayer`；
 - React 源码不注册 CLI、数据库或事件消费者；API/CLI 位于独立 Python application/adapter；
 - 不取代 ADR-0007/ADR-0027 的现有本地界面；
@@ -366,8 +373,10 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 
 补充进展：ADR-0031 已为执行前 Task Orchestration 建立一个独立的本地 governed command
 slice，使用签名 planner 身份、expected revision、追加历史和 Agent proposal/application
-分离。它不替代本节尚未完成的 run/artifact/event read-only slice，也不把 plan 解释为执行
-工作流状态。
+分离；ADR-0032 在同一边界内补齐结构化节点、计划评估、语义边、历史派生与归档。它不替代
+本节尚未完成的 run/artifact/event read-only slice，也不把 plan 解释为执行工作流状态。
+ADR-0033 进一步接入显式启用的 Codex planning adapter，但其原始制品尚未形成通用 Artifact
+Viewer read model，模型调用也不获得工作流命令权限。
 
 ### Stage 2：Governed command slice
 

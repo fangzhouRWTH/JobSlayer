@@ -11,6 +11,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping, TextIO
 
+from jobslayer.adapters.codex_common import (
+    CodexCommandConfigurationError,
+    codex_environment,
+    normalize_codex_command,
+)
 from jobslayer.agents.events import RunEventBuffer, RunEventIntegrityError
 from jobslayer.agents.executor import (
     AgentExecutorError,
@@ -95,17 +100,10 @@ class CodexCliExecutor:
         self.workspace_manager = workspace_manager
         self.artifact_root = Path(artifact_root).resolve(strict=False)
         self.artifact_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if isinstance(codex_binary, (str, os.PathLike)):
-            codex_command = (os.fspath(codex_binary),)
-        else:
-            codex_command = tuple(str(argument) for argument in codex_binary)
-        if not codex_command or any(
-            not argument or "\x00" in argument for argument in codex_command
-        ):
-            raise CodexConfigurationError(
-                "Codex executable command must contain non-empty arguments"
-            )
-        self.codex_command = codex_command
+        try:
+            self.codex_command = normalize_codex_command(codex_binary)
+        except CodexCommandConfigurationError as exc:
+            raise CodexConfigurationError(str(exc)) from exc
         self.process_supervisor = process_supervisor or native_process_supervisor()
         if (sandbox_launcher is None) != (sandbox_policy is None):
             raise CodexConfigurationError(
@@ -303,7 +301,7 @@ class CodexCliExecutor:
     ) -> tuple[list[str], Path, dict[str, str]]:
         command = self._command_for(invocation, workspace)
         if self.sandbox_launcher is None:
-            return command, Path(workspace.path), self._codex_environment()
+            return command, Path(workspace.path), codex_environment()
         assert self.sandbox_policy is not None
         if self.sandbox_policy.timeout_seconds > invocation.run_spec.timeout_seconds:
             raise CodexConfigurationError(
@@ -565,43 +563,6 @@ class CodexCliExecutor:
             while chunk := stream.read(65_536):
                 digest.update(chunk)
         return digest.hexdigest()
-
-    @staticmethod
-    def _codex_environment() -> dict[str, str]:
-        environment = {"PATH": os.environ.get("PATH", os.defpath)}
-        for name in (
-            "HOME",
-            "USERPROFILE",
-            "APPDATA",
-            "LOCALAPPDATA",
-            "SYSTEMROOT",
-            "WINDIR",
-            "COMSPEC",
-            "PATHEXT",
-            "TEMP",
-            "TMP",
-            "CODEX_HOME",
-            "SSL_CERT_FILE",
-            "SSL_CERT_DIR",
-            "HTTP_PROXY",
-            "HTTPS_PROXY",
-            "NO_PROXY",
-            "http_proxy",
-            "https_proxy",
-            "no_proxy",
-        ):
-            value = os.environ.get(name)
-            if value:
-                environment[name] = value
-        environment.update(
-            {
-                "GIT_TERMINAL_PROMPT": "0",
-                "PYTHONNOUSERSITE": "1",
-                "LANG": "C.UTF-8",
-                "LC_ALL": "C.UTF-8",
-            }
-        )
-        return environment
 
     def _terminate_process_group(self, process: subprocess.Popen[str]) -> None:
         try:

@@ -131,8 +131,25 @@ class LocalTaskPlanStore:
                             f"blank task-plan journal line {line_number}"
                         )
                     try:
-                        record = TaskPlanRevisionRecord.model_validate(json.loads(line))
+                        raw_record = json.loads(line)
+                        if not isinstance(raw_record, dict):
+                            raise ValueError("task-plan record must be an object")
+                        supplied_hash = raw_record.get("record_hash")
+                        unhashed = dict(raw_record)
+                        unhashed.pop("record_hash", None)
+                        if (
+                            not isinstance(supplied_hash, str)
+                            or _record_hash(unhashed) != supplied_hash
+                        ):
+                            raise TaskPlanJournalError(
+                                f"record hash mismatch at task-plan revision {line_number}"
+                            )
+                        record = TaskPlanRevisionRecord.model_validate(raw_record)
                     except (json.JSONDecodeError, ValidationError) as exc:
+                        raise TaskPlanJournalError(
+                            f"invalid task-plan record at line {line_number}"
+                        ) from exc
+                    except ValueError as exc:
                         raise TaskPlanJournalError(
                             f"invalid task-plan record at line {line_number}"
                         ) from exc
@@ -141,10 +158,29 @@ class LocalTaskPlanStore:
             raise
         except OSError as exc:
             raise TaskPlanJournalError("could not read task-plan history") from exc
-        verify_task_plan_revision_history(records)
+        self._verify_revision_links(records)
         if records and records[0].plan_id != plan_id:
             raise TaskPlanJournalError("task-plan journal filename does not match plan id")
         return tuple(records)
+
+    @staticmethod
+    def _verify_revision_links(records: list[TaskPlanRevisionRecord]) -> None:
+        previous_hash: str | None = None
+        plan_id: str | None = None
+        for sequence, record in enumerate(records, start=1):
+            if record.sequence != sequence:
+                raise TaskPlanJournalError(
+                    f"unexpected task-plan sequence at position {sequence}"
+                )
+            if plan_id is None:
+                plan_id = record.plan_id
+            elif record.plan_id != plan_id:
+                raise TaskPlanJournalError("task-plan history mixes plan ids")
+            if record.previous_hash != previous_hash:
+                raise TaskPlanJournalError(
+                    f"broken previous_hash at task-plan revision {sequence}"
+                )
+            previous_hash = record.record_hash
 
     def append(
         self,

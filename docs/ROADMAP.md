@@ -47,7 +47,7 @@
 - [ ] Promptfoo 的模型/提示回归套件；
 - [x] 本地认证项目仪表板、证据面板和审批状态视图；
 - [~] Web-first 工程工作台交互框架（隔离的 Stage 0 原型已使用 lockfile 外部组件并进入根级/CI production build 门禁；总索引、Workflow Studio、Run Inspector、Artifact Review 与 Observability 尚未接入 read model、事件流或任何写命令）；
-- [~] 协作式任务编排（本地纵向切片已支持认证用户输入、多轮确定性 Agent proposal、版本化 DAG、节点 CRUD/支线/子任务和追加式定稿；真实 Codex adapter、多人事务 store 与 plan-to-Workflow IR 编译仍后置）；
+- [~] 协作式任务编排（本地纵向切片已支持多计划管理、认证讨论、proposal/diff/apply/reject、结构化节点、语义边 CRUD、版本化 DAG、完整度门禁、历史比较/派生、归档和追加式定稿；Codex planning adapter 已完成显式 opt-in、结构化输出与 raw artifact 假 CLI 契约验证，真实预算授权 smoke test、多人事务 store 与 plan-to-Workflow IR 编译仍后置）；
 - [x] 跨平台开发环境初始化入口（仓库 venv、固定校验的用户级 Node LTS、lockfile UI install、只读 JSON 检测与离线/分组件模式）；
 - [ ] OpenHands 适配器的有界 PoC。
 
