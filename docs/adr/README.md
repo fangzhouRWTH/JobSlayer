@@ -31,5 +31,7 @@
 | [ADR-0027](0027-persistent-management-observability-and-executor-evaluation.md) | Accepted | 管理面只读事务事件真相，并提供 OTel 端口与同契约执行器比较 |
 | [ADR-0028](0028-isolated-web-workbench-interaction-prototype.md) | Accepted | 在隔离目录用成熟 Web 组件验证工程工作台交互，UI 不拥有控制面语义或状态 |
 | [ADR-0029](0029-cross-platform-manifest-driven-development-bootstrap.md) | Accepted | 用统一 init、固定校验的用户级 Node 和仓库 venv 提供跨平台、只读可检测的开发环境初始化 |
+| [ADR-0030](0030-unified-gate-for-locked-ui-dependencies.md) | Accepted | 把 lockfile 外部 UI 栈的类型检查和 production build 纳入统一完成门禁与 CI |
+| [ADR-0031](0031-versioned-collaborative-task-orchestration.md) | Accepted | 用版本化 DAG、Agent 待应用提案和追加式定稿记录建立协作任务编排纵向切片 |
 
 新增或取代 ADR 时，同时更新本索引和 `docs/DEVELOPMENT_LOG.md`。Accepted ADR 不通过静默编辑改变原决定；需要改变方向时新增 superseding ADR。

@@ -29,6 +29,8 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
 - worker 租约、心跳、取消、孤儿回收，以及 Linux bubblewrap 强隔离端口；
 - 执行前 token/费用/时间/尝试预算、上下文包版本/哈希/大小门禁和运行中超限取消；
 - 只读多运行 Dashboard、持久证据/事件视图、无敏感字段遥测和确定性执行器比较；
+- 认证的协作式任务编排：多轮讨论、Agent 待应用图提案、节点 CRUD/支线/子任务、
+  追加式 revision 与用户定稿哈希；
 - 一个可运行的闭环演示和标准库测试；
 - 项目指导、架构决策和分阶段路线图。
 
@@ -59,7 +61,9 @@ jobslayer <子命令> [参数]
 python -m jobslayer <子命令> [参数]
 ```
 
-例如两端均可运行 `jobslayer check` 或 `python -m jobslayer check`。前者是
+例如两端均可运行 `jobslayer check` 或 `python -m jobslayer check`。完整门禁也会离线
+验证 `ui-framework` 的 TypeScript 和 production build，因此首次运行前必须完成上述初始化。
+前者是
 安装包生成的 console script，后者是源码/模块入口；两者进入同一个 launcher。
 平台脚本只用于尚未激活环境时的 bootstrap。
 
@@ -123,6 +127,7 @@ Draft -> Planned -> Implementing -> Verifying -> Reviewing
 
 - [项目开发指导](docs/PROJECT_GUIDE.md)
 - [交互设计与前后端协作指南](docs/INTERACTION_DESIGN_GUIDE.md)
+- [协作式任务编排](docs/TASK_ORCHESTRATION.md)
 - [Workbench Stage 0 交互原型](ui-framework/README.md)
 - [跨平台开发环境初始化](docs/INITIALIZATION.md)
 - [初步实施路线图](docs/ROADMAP.md)

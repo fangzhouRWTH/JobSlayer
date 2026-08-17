@@ -31,10 +31,16 @@ from jobslayer.adapters.local_identity import (
     RoleBasedAuthorizer,
 )
 from jobslayer.adapters.local_management import LocalManagementQuery
+from jobslayer.adapters.local_orchestration import (
+    LocalTaskPlanStore,
+    TaskPlanJournalError,
+)
+from jobslayer.adapters.local_planning_agent import LocalPlanningAgent
 from jobslayer.adapters.persistent_management import PersistentManagementQuery
 from jobslayer.adapters.local_artifacts import LocalArtifactRegistry
 from jobslayer.adapters.sqlite_state import SqliteControlPlaneStore
 from jobslayer.application.runbook import LocalRunbookLoader, RunbookError
+from jobslayer.application.task_orchestration import TaskOrchestrationService
 from jobslayer.development.checks import (
     DevelopmentCheckConfigurationError,
     DevelopmentCheckRunner,
@@ -73,6 +79,10 @@ from jobslayer.management import ManagementQueryError
 from jobslayer.management.web import (
     ManagementServerError,
     create_management_server,
+)
+from jobslayer.orchestration.web import (
+    TaskOrchestrationServerError,
+    create_task_orchestration_server,
 )
 from jobslayer.evaluation import ExecutorComparisonError
 
@@ -570,6 +580,61 @@ def _cmd_serve_dashboard(
     return 0
 
 
+def _cmd_serve_task_orchestration(
+    *,
+    root: Path | None,
+    state_root: Path | None,
+    identity_session: Path,
+    identity_key: Path,
+    port: int,
+    open_browser: bool,
+) -> int:
+    try:
+        repository_root = find_repository_root(root)
+        principal = _authenticated_principal(
+            identity_session=identity_session,
+            identity_key=identity_key,
+            action=AuthorizationAction.MANAGE_TASK_PLAN,
+        )
+        plan_root = state_root or (repository_root / ".jobslayer" / "orchestration")
+        if not plan_root.is_absolute():
+            plan_root = repository_root / plan_root
+        service = TaskOrchestrationService(
+            LocalTaskPlanStore(plan_root),
+            LocalPlanningAgent(),
+            actor_id=principal.subject_id,
+        )
+        service.list_latest()
+        server = create_task_orchestration_server(service, principal, port=port)
+    except (
+        DevelopmentCheckConfigurationError,
+        LocalIdentityError,
+        TaskPlanJournalError,
+        TaskOrchestrationServerError,
+        OSError,
+        ValueError,
+    ) as exc:
+        print(f"could not start task orchestration API: {exc}", file=sys.stderr)
+        return 1
+    host, actual_port = server.server_address[:2]
+    api_url = f"http://{host}:{actual_port}/api/orchestration"
+    ui_url = "http://127.0.0.1:4173/#/orchestration"
+    print(f"Task orchestration API: {api_url}")
+    print(f"authenticated planner: {principal.subject_id}")
+    print("append-only plan revisions; agent output remains a pending proposal")
+    print("Workbench: sh ./init.sh -- npm --prefix ui-framework run dev")
+    print(f"Open after Vite starts: {ui_url}")
+    if open_browser:
+        webbrowser.open(ui_url)
+    try:
+        server.serve_forever(poll_interval=0.5)
+    except KeyboardInterrupt:
+        print("\ntask orchestration API stopped")
+    finally:
+        server.server_close()
+    return 0
+
+
 def _cmd_create_identity_key(path: Path) -> int:
     try:
         key_id = LocalIdentityProvider(path).create_key()
@@ -1061,6 +1126,22 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--port", type=int, default=8770)
     dashboard.add_argument("--open-browser", action="store_true")
 
+    orchestration = commands.add_parser(
+        "serve-task-orchestration",
+        aliases=["orchestration-api"],
+        help="serve the authenticated task discussion and graph-planning API",
+    )
+    orchestration.add_argument("--root", type=Path)
+    orchestration.add_argument(
+        "--state-root",
+        type=Path,
+        help="append-only task-plan journal root",
+    )
+    orchestration.add_argument("--identity-session", type=Path, required=True)
+    orchestration.add_argument("--identity-key", type=Path, required=True)
+    orchestration.add_argument("--port", type=int, default=8780)
+    orchestration.add_argument("--open-browser", action="store_true")
+
     create_identity_key = commands.add_parser(
         "create-local-identity-key",
         help="create one protected local operator-session signing key",
@@ -1083,6 +1164,7 @@ def build_parser() -> argparse.ArgumentParser:
             "reviewer",
             "approver",
             "worker-admin",
+            "planner",
             "operator-admin",
         ],
         required=True,
@@ -1314,6 +1396,15 @@ def main(argv: list[str] | None = None) -> int:
             identity_key=arguments.identity_key,
             control_plane_db=arguments.control_plane_db,
             artifact_root=arguments.artifact_root,
+            port=arguments.port,
+            open_browser=arguments.open_browser,
+        )
+    if arguments.command in {"serve-task-orchestration", "orchestration-api"}:
+        return _cmd_serve_task_orchestration(
+            root=arguments.root,
+            state_root=arguments.state_root,
+            identity_session=arguments.identity_session,
+            identity_key=arguments.identity_key,
             port=arguments.port,
             open_browser=arguments.open_browser,
         )

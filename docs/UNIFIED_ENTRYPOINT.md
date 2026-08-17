@@ -106,6 +106,21 @@ Agent 开发管理 Dashboard 的脚本入口是：
 Dashboard 仅绑定 loopback、只读且要求 `view_control_plane` 权限；不会自动创建或迁移
 传入数据库，也没有写状态、审批、合并或部署 API。
 
+### 协作式任务编排
+
+任务编排 API 使用独立的 `planner` 身份和 `manage_task_plan` 权限：
+
+```bash
+./jobslayer orchestration-api \
+  --identity-session .jobslayer/identity/planner-session.json \
+  --identity-key .jobslayer/identity/planner-key.json
+```
+
+随后运行 `sh ./init.sh -- npm --prefix ui-framework run dev`，打开
+`http://127.0.0.1:4173/#/orchestration`。该入口记录讨论、待应用 Agent proposal、节点
+CRUD/支线/子任务和用户定稿 revision；不会把计划变成 `TaskState`、启动执行、调用 Git 或
+标记完成。契约和 API 见[协作式任务编排](TASK_ORCHESTRATION.md)。
+
 ### 完整开发验证
 
 ```bash
@@ -117,12 +132,16 @@ Dashboard 仅绑定 loopback、只读且要求 `view_control_plane` 权限；不
 1. `python -m unittest discover -s tests -v`；
 2. `python -m compileall -q src tests`；
 3. `python -m pip check`；
-4. 通过统一模块入口校验 BraveNewWorld 测试床登记；
-5. 校验 BraveNewWorld scripted task/profile/runbook/patch 的交叉绑定；
-6. 校验真实 Codex task/profile/runbook 的交叉绑定；
-7. `git -c core.autocrlf=true diff --check`，先按跨平台 checkout 规则规范化文本再检查空白与冲突标记。
+4. 通过初始化所解析的项目 npm，离线执行 `ui-framework` 的 TypeScript 与 Vite production build；
+5. 通过统一模块入口校验 BraveNewWorld 测试床登记；
+6. 校验 BraveNewWorld scripted task/profile/runbook/patch 的交叉绑定；
+7. 校验真实 Codex task/profile/runbook 的交叉绑定；
+8. `git -c core.autocrlf=true diff --check`，先按跨平台 checkout 规则规范化文本再检查空白与冲突标记。
 
-`check` 只能在 JobSlayer 源码 checkout 中使用。通常会自动查找根目录；从其他工作目录运行时可以传 `--root /path/to/JobSlayer`。任何一步失败都会使最终退出码非零，但其他步骤仍继续执行，便于一次看到完整问题列表。
+`check` 只能在已经运行 `init.cmd`/`init.sh` 的 JobSlayer 源码 checkout 中使用；UI 步骤
+不会联网补装或升级依赖。通常会自动查找根目录；从其他工作目录运行时可以传
+`--root /path/to/JobSlayer`。任何一步失败都会使最终退出码非零，但其他步骤仍继续执行，
+便于一次看到完整问题列表。
 
 ### 正式功能
 

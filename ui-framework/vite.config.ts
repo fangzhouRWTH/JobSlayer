@@ -11,6 +11,11 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 4173,
+    proxy: {
+      "/api/orchestration": {
+        target: "http://127.0.0.1:8780",
+      },
+    },
   },
   preview: {
     host: "127.0.0.1",

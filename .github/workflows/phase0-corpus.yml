@@ -20,14 +20,14 @@ jobs:
         run: |
           git config --global user.name "JobSlayer CI"
           git config --global user.email "jobslayer-ci@example.invalid"
-      - name: Install JobSlayer
-        run: python -m pip install -e .
+      - name: Initialize JobSlayer and locked UI dependencies
+        run: python scripts/bootstrap.py
       - name: Run complete local gate
-        run: python -m jobslayer check
+        run: python scripts/bootstrap.py -- jobslayer check
       - name: Build governed Phase 0 corpus
-        run: python -m jobslayer build-phase0-corpus
+        run: python scripts/bootstrap.py -- jobslayer build-phase0-corpus
       - name: Inspect the same retained corpus
-        run: python -m jobslayer inspect-readiness --state-root .jobslayer/phase0-corpus/state --required-reviewed-tasks 20
+        run: python scripts/bootstrap.py -- jobslayer inspect-readiness --state-root .jobslayer/phase0-corpus/state --required-reviewed-tasks 20
 
   postgres-contract:
     runs-on: ubuntu-latest

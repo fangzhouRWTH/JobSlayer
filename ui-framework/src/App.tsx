@@ -9,6 +9,7 @@ import {
   Home,
   Menu,
   Network,
+  ListTree,
   Search,
   ShieldCheck,
   X,
@@ -18,12 +19,14 @@ import { Overview } from "./components/Overview";
 import type { ViewId } from "./types";
 
 const WorkflowStudio = lazy(() => import("./components/WorkflowStudio").then((module) => ({ default: module.WorkflowStudio })));
+const TaskOrchestration = lazy(() => import("./components/TaskOrchestration").then((module) => ({ default: module.TaskOrchestration })));
 const RunInspector = lazy(() => import("./components/RunInspector").then((module) => ({ default: module.RunInspector })));
 const ArtifactReview = lazy(() => import("./components/ArtifactReview").then((module) => ({ default: module.ArtifactReview })));
 const Observability = lazy(() => import("./components/Observability").then((module) => ({ default: module.Observability })));
 
 const navItems: Array<{ id: ViewId; label: string; icon: typeof Home }> = [
   { id: "overview", label: "Prototype index", icon: Home },
+  { id: "orchestration", label: "Task Orchestration", icon: ListTree },
   { id: "workflow", label: "Workflow Studio", icon: Network },
   { id: "run", label: "Run Inspector", icon: Activity },
   { id: "artifact", label: "Artifact Review", icon: FileSearch },
@@ -32,6 +35,7 @@ const navItems: Array<{ id: ViewId; label: string; icon: typeof Home }> = [
 
 const viewLabels: Record<ViewId, string> = {
   overview: "Interaction Prototype",
+  orchestration: "Task Orchestration",
   workflow: "Workflow Studio",
   run: "Run Inspector",
   artifact: "Artifact Review",
@@ -77,6 +81,7 @@ export default function App() {
   }, [notice]);
 
   const content = useMemo(() => {
+    if (view === "orchestration") return <TaskOrchestration onNotice={setNotice} />;
     if (view === "workflow") return <WorkflowStudio onNotice={setNotice} />;
     if (view === "run") return <RunInspector onNotice={setNotice} />;
     if (view === "artifact") return <ArtifactReview onNotice={setNotice} />;
@@ -95,7 +100,7 @@ export default function App() {
         <div className="breadcrumb"><span>BraveNewWorld</span><i>/</i><strong>{viewLabels[view]}</strong></div>
         <button className="global-search" onClick={() => setPaletteOpen(true)}><Search size={15} /><span>Search runs, tasks, artifacts…</span><kbd><Command size={11} /> K</kbd></button>
         <div className="header-actions">
-          <span className="mode-badge"><span /> PROTOTYPE · MOCK</span>
+          <span className="mode-badge"><span /> {view === "orchestration" ? "LOCAL API · VERSIONED" : "PROTOTYPE · MOCK"}</span>
           <button className="icon-button" aria-label="通知示例"><Bell size={16} /><i>3</i></button>
           <button className="avatar-button" aria-label="演示用户">FR</button>
         </div>
@@ -114,9 +119,9 @@ export default function App() {
         <div className="sidebar-separator" />
         <div className="sidebar-context">
           <span className="nav-label">PROTOTYPE BOUNDARY</span>
-          <div><ShieldCheck size={16} /><span><strong>Kernel isolated</strong><small>No API connected</small></span></div>
+          <div><ShieldCheck size={16} /><span><strong>{view === "orchestration" ? "Plan API governed" : "Kernel isolated"}</strong><small>{view === "orchestration" ? "Agent proposes · user applies" : "No API connected"}</small></span></div>
           <div className="boundary-meter"><i /></div>
-          <p>UI state is disposable.<br />Engineering truth is not.</p>
+          <p>{view === "orchestration" ? <>Plan revisions are append-only.<br />Execution state stays isolated.</> : <>UI state is disposable.<br />Engineering truth is not.</>}</p>
         </div>
         <div className="sidebar-bottom"><button><HelpCircle size={16} /><span>Design guide</span></button><span>UI / 0.1.0</span></div>
       </aside>

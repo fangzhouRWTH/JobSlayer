@@ -136,6 +136,33 @@ class LocalIdentityTests(unittest.TestCase):
 
         self.assertFalse(verdict.permitted)
 
+    def test_planner_can_manage_task_plans_but_observer_cannot(self) -> None:
+        planner = self.provider.verify(
+            self._session(roles=("planner",)), now=self.now
+        )
+        observer = self.provider.verify(
+            self._session(roles=("observer",)), now=self.now
+        )
+        authorizer = RoleBasedAuthorizer()
+
+        allowed = authorizer.authorize(
+            AuthorizationRequest(
+                principal=planner,
+                action=AuthorizationAction.MANAGE_TASK_PLAN,
+            ),
+            now=self.now,
+        )
+        rejected = authorizer.authorize(
+            AuthorizationRequest(
+                principal=observer,
+                action=AuthorizationAction.MANAGE_TASK_PLAN,
+            ),
+            now=self.now,
+        )
+
+        self.assertTrue(allowed.permitted)
+        self.assertFalse(rejected.permitted)
+
     def test_issues_and_verifies_short_lived_approval_authority(self) -> None:
         authority = self.provider.issue_approval_authority(
             self._session(),

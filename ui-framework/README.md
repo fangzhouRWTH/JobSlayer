@@ -1,8 +1,10 @@
 # JobSlayer Workbench Interaction Prototype
 
-这是与 Python 控制平面隔离的 Stage 0 交互原型，用固定样例演示：
+这是 JobSlayer Web-first 工作台。大部分页面仍是 Stage 0 固定样例；Task Orchestration
+页面已经形成一个受限的本地纵向切片：
 
 - 总览索引与工作台导航；
+- 任务描述、多轮讨论、Agent 待应用提案、版本化拓扑、节点 CRUD/支线/子任务与定稿记录；
 - Workflow Studio、React Flow 图和 canonical mock IR；
 - Run Inspector、结构化事件、trace 与只读 xterm 输出；
 - Markdown/JSON/Monaco Diff 制品审查和人工门；
@@ -20,23 +22,41 @@
 POSIX 使用 `sh ./init.sh` 和 `sh ./init.sh -- npm --prefix ui-framework run dev`。
 已有 Node.js `>=22.12` 时也可在本目录直接运行 `npm ci`、`npm run dev`。
 
+Task Orchestration 还需要先启动默认 `127.0.0.1:8780` 的认证 API：
+
+```bash
+./jobslayer orchestration-api \
+  --identity-session .jobslayer/identity/planner-session.json \
+  --identity-key .jobslayer/identity/planner-key.json
+```
+
+完整身份准备和运行方法见[协作式任务编排](../docs/TASK_ORCHESTRATION.md)。
+
 打开 Vite 打印的 loopback URL。生产构建检查：
 
 ```powershell
 .\init.cmd -- npm --prefix ui-framework run check
 ```
 
-## 原型边界
+初始化完成后，根级 `jobslayer check` 也会离线执行同一 TypeScript + production build，
+因此外部 UI 依赖和 bundle 已属于仓库统一完成门禁，而不是旁路检查。
 
-- 所有数据来自 `src/mockData.ts`；
-- 不导入或修改 `src/jobslayer`；
-- 不调用 Agent、shell、Git、数据库或控制面 API；
-- 按钮只演示本地交互并显示未提交提示；
+## 页面边界
+
+- Workflow Studio、Run Inspector、Artifact Review 和 Observability 仍从 `src/mockData.ts`
+  读取固定样例；
+- Task Orchestration 通过 Vite same-origin proxy 调用认证 loopback API，计划 revision 由
+  Python 应用服务和追加式 store 拥有，浏览器不持久化权威计划；
+- 当前 PlanningAgent 是确定性本地 fixture，不调用 Codex、shell、Git 或执行工作流；
+- 讨论中的 Agent 图是待应用 proposal，只有用户显式应用/CRUD/定稿才产生新 revision；
 - React Flow JSON 不是 Workflow IR；
-- 人工决定不写入审计链，刷新后消失；
+- finalized plan 只是用户确认的设计制品，不等于 `TaskState.PLANNED` 或 Completed；
 - 本目录不替代现有 `supervision/ui` 和 `management/ui`。
 
-项目设计规则见 [`docs/INTERACTION_DESIGN_GUIDE.md`](../docs/INTERACTION_DESIGN_GUIDE.md)，架构边界见 [`ADR-0028`](../docs/adr/0028-isolated-web-workbench-interaction-prototype.md)。
+项目设计规则见 [`docs/INTERACTION_DESIGN_GUIDE.md`](../docs/INTERACTION_DESIGN_GUIDE.md)，
+产品边界见 [`ADR-0028`](../docs/adr/0028-isolated-web-workbench-interaction-prototype.md)，
+统一依赖门禁见 [`ADR-0030`](../docs/adr/0030-unified-gate-for-locked-ui-dependencies.md)。
+任务编排边界见 [`ADR-0031`](../docs/adr/0031-versioned-collaborative-task-orchestration.md)。
 
 ## 依赖口径
 

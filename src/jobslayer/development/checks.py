@@ -111,6 +111,21 @@ class DevelopmentCheckRunner:
                 argv=(python, "-m", "pip", "check"),
             ),
             DevelopmentCheckStep(
+                step_id="ui",
+                description="locked external UI dependencies and production build",
+                argv=(
+                    python,
+                    "scripts/bootstrap.py",
+                    "--offline",
+                    "--",
+                    "npm",
+                    "--prefix",
+                    "ui-framework",
+                    "run",
+                    "check",
+                ),
+            ),
+            DevelopmentCheckStep(
                 step_id="testbed",
                 description="BraveNewWorld testbed contract validation",
                 argv=(

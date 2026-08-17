@@ -54,16 +54,17 @@ class DevelopmentCheckRunnerTests(unittest.TestCase):
                 "tests",
                 "compile",
                 "dependencies",
+                "ui",
                 "testbed",
                 "runbook",
                 "codex-runbook",
                 "diff",
             ),
         )
-        self.assertEqual(len(invocations), 7)
+        self.assertEqual(len(invocations), 8)
         self.assertTrue(all(cwd == self.root.resolve() for _, cwd in invocations))
         self.assertFalse(report.passed)
-        self.assertIn("6/7 passed", stdout.getvalue())
+        self.assertIn("7/8 passed", stdout.getvalue())
         self.assertEqual(
             report.results[0].step.argv,
             (
@@ -74,6 +75,20 @@ class DevelopmentCheckRunnerTests(unittest.TestCase):
                 "-s",
                 "tests",
                 "-v",
+            ),
+        )
+        self.assertEqual(
+            report.results[3].step.argv,
+            (
+                "fixture-python",
+                "scripts/bootstrap.py",
+                "--offline",
+                "--",
+                "npm",
+                "--prefix",
+                "ui-framework",
+                "run",
+                "check",
             ),
         )
         self.assertEqual(

@@ -177,4 +177,7 @@ jobslayer.cmd / jobslayer
         -> public launcher -> CLI/application services
 ```
 
-初始化不复制 CLI 业务逻辑，正式命令也不承担系统软件安装。完整开发完成门禁仍是 `jobslayer check`。
+初始化不复制 CLI 业务逻辑，正式命令也不承担系统软件安装。完整开发完成门禁仍是
+`jobslayer check`；它会通过 bootstrap 的离线路径复用已校验的项目 Node/npm 与 lockfile
+依赖，执行 UI TypeScript 和 production build。依赖尚未准备时应先运行初始化，不由完成
+门禁临时联网改变依赖树。

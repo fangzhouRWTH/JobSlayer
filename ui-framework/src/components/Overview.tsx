@@ -8,6 +8,7 @@ import {
   FileSearch,
   GitBranch,
   Network,
+  ListTree,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -26,8 +27,16 @@ const demos: Array<{
   icon: typeof Network;
 }> = [
   {
-    id: "workflow",
+    id: "orchestration",
     number: "01",
+    title: "Task Orchestration",
+    summary: "通过多轮讨论形成可执行步骤，并把提案、CRUD、支线与最终路径记录为版本化拓扑。",
+    eyebrow: "DISCUSS",
+    icon: ListTree,
+  },
+  {
+    id: "workflow",
+    number: "02",
     title: "Workflow Studio",
     summary: "编辑图形、选择节点并检查与图编辑器解耦的 Workflow IR。",
     eyebrow: "AUTHOR",
@@ -35,7 +44,7 @@ const demos: Array<{
   },
   {
     id: "run",
-    number: "02",
+    number: "03",
     title: "Run Inspector",
     summary: "从任务、调用、工具和验证层级理解执行，不在纯日志中迷失。",
     eyebrow: "OBSERVE",
@@ -43,7 +52,7 @@ const demos: Array<{
   },
   {
     id: "artifact",
-    number: "03",
+    number: "04",
     title: "Artifact Review",
     summary: "把报告、Diff、元数据、验证和人工决定放进同一审查上下文。",
     eyebrow: "REVIEW",
@@ -51,7 +60,7 @@ const demos: Array<{
   },
   {
     id: "observability",
-    number: "04",
+    number: "05",
     title: "Observability",
     summary: "以 Trace、事件和治理指标解释系统，而非用 Agent 自信度代替证据。",
     eyebrow: "LEARN",
@@ -77,11 +86,11 @@ export function Overview({ onNavigate }: OverviewProps) {
           <h1>让复杂执行<br /><span>变得可理解。</span></h1>
           <p>
             JobSlayer Workbench 把工作流创作、执行观察、确定性验证和制品审查组织成一个连续的工程循环。
-            本原型只演示交互意图，不连接 Agent，也不拥有工作流状态。
+            任务编排纵向切片连接本地版本化计划 API；其他示例仍只演示交互意图，不拥有执行工作流状态。
           </p>
           <div className="hero-actions">
-            <button className="button button-primary" onClick={() => onNavigate("workflow")}>
-              进入示范工作台 <ArrowRight size={16} />
+            <button className="button button-primary" onClick={() => onNavigate("orchestration")}>
+              开始任务编排 <ArrowRight size={16} />
             </button>
             <button className="button button-quiet" onClick={() => onNavigate("artifact")}>
               查看人工审查
@@ -124,7 +133,7 @@ export function Overview({ onNavigate }: OverviewProps) {
 
       <section className="content-section">
         <div className="section-heading">
-          <div><span className="section-index">01 / CORE LOOP</span><h2>四个意图，一条工作流</h2></div>
+          <div><span className="section-index">01 / CORE LOOP</span><h2>从讨论到固化路径</h2></div>
           <p>从创作到复盘保持上下文连续；每个示例都可从左侧导航独立打开。</p>
         </div>
         <div className="demo-grid">

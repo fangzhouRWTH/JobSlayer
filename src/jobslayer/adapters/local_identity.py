@@ -475,6 +475,12 @@ class RoleBasedAuthorizer:
                 AuthorizationAction.MANAGE_WORKER,
             }
         ),
+        "planner": frozenset(
+            {
+                AuthorizationAction.VIEW_CONTROL_PLANE,
+                AuthorizationAction.MANAGE_TASK_PLAN,
+            }
+        ),
     }
     _ALL_ACTIONS = frozenset(AuthorizationAction)
 

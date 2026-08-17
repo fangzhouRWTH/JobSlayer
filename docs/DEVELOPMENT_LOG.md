@@ -1903,3 +1903,162 @@ identity、run/artifact 数据，也没有 commit、push 或部署。
 下一步推荐把 `init --check --json` 接入 IDE workspace onboarding 和 GitHub Actions 的
 环境诊断步骤，并在可用的 macOS x86_64/arm64 runner 上执行独立 checkout 的真实 init +
 UI build；Node 版本/checksum 后续升级必须作为显式 toolchain 决策评审。
+
+---
+
+## DEV-2026-08-17-18 — UI_Framework 合并复核与外部 UI 栈统一门禁
+
+- 状态：完成（本地依赖、production build 与统一门禁；远端 CI 待提交后触发）
+- 类型：merge assessment、frontend dependencies、development gate、CI、ADR
+
+### 合并事实与缺口
+
+1. `git fetch --all --prune` 后确认 `main`/`origin/main` 同为 merge commit
+   `dd50079`；GitHub PR #1 `UI_Framework -> main` 于 2026-08-17 02:19:36 UTC 合并，来源
+   commit 为 `6c4001b`。合并新增 `ui-framework/`、交互指南、ADR-0028 与跨平台初始化。
+2. Stage 0 已在实际组件中导入 React Flow、Monaco、xterm.js、ECharts、
+   `react-markdown`、Lucide 和 React/Vite/TypeScript，但原根级 `jobslayer check` 只有 7 个
+   Python/控制面步骤；GitHub matrix 也只执行 `pip install -e .`，前端可在完整门禁之外漂移。
+3. 依据新增 ADR-0030，外部 UI 库仍只拥有通用展示能力，不进入 `jobslayer.domain`，也不把
+   mock 写操作接入 Kernel；本轮只闭合依赖、production build 和完成信号，不越级宣称
+   Stage 1 read model 或 governed command 已完成。
+
+### 落实
+
+1. 执行 `sh ./init.sh`，按 `bootstrap/toolchains.json` 下载并校验 Node 24.19.0，使用
+   npm 11.17.0 和 `package-lock.json` 安装 138 packages。随后 `--check --json` 返回
+   Python、Node 与 UI 全部 `ready=true`。
+2. `DevelopmentCheckRunner` 新增第 4 个 `ui` 步骤，通过 bootstrap 的 `--offline` 路径运行
+   `npm --prefix ui-framework run check`；检查期间不联网升级依赖，TypeScript 或 Vite bundle
+   任一失败都会令根级完成门禁失败。对应单元测试锁定 8 步顺序、命令参数和汇总语义。
+3. `phase0-corpus.yml` 的 Ubuntu/Windows matrix 先执行 manifest 初始化，再从同一 bootstrap
+   环境调用 `jobslayer check`、语料构建与 readiness；PostgreSQL contract job 保持专用
+   Python extra 和独立契约测试，不承担无关 UI 初始化。
+4. 新增 ADR-0030，并同步统一入口、初始化、Workbench README、根 README、路线图和 ADR
+   索引；明确外部 UI build 已进入完成门禁，但页面仍为 `PROTOTYPE · MOCK`。
+
+### 变更文件
+
+- 实现与 CI：`src/jobslayer/development/checks.py`、
+  `tests/test_development_checks.py`、`.github/workflows/phase0-corpus.yml`；
+- 架构与文档：`docs/adr/0030-unified-gate-for-locked-ui-dependencies.md`、
+  `docs/adr/README.md`、`docs/UNIFIED_ENTRYPOINT.md`、`docs/INITIALIZATION.md`、
+  `docs/ROADMAP.md`、`ui-framework/README.md`、`README.md` 和本日志。
+
+### 精确验证证据
+
+1. `sh ./init.sh -- npm --prefix ui-framework run check`：TypeScript 7 `tsc --noEmit` 和
+   Vite 8.2.1 production build 通过，2716 modules transformed；路由级外部库 chunks 正常
+   生成。
+2. `sh ./init.sh -- npm --prefix ui-framework audit --audit-level=moderate` 返回
+   `found 0 vulnerabilities`；`npm outdated --json` 返回 `{}`，合并时锁定的直接依赖没有
+   可报告的新版本。
+3. `.venv/bin/python -m unittest tests.test_development_checks tests.test_bootstrap -v`：
+   12 项全部通过，用时 0.051 秒。
+4. 文档落盘前运行 `./jobslayer check`：8/8 全部通过；216 项 unittest `OK`，5 项因当前
+   未配置 PostgreSQL DSN 或 bubblewrap 而 skip；新增 UI 步骤离线复用已校验依赖并再次
+   完成 2716-module production build，其余 compile、pip、testbed、两套 runbook 与 Git
+   diff 步骤全部通过，用时 26.460 秒。
+5. 全部 ADR/文档落盘后再次运行 `./jobslayer check`：8/8 全部通过；216 项 unittest
+   `OK`、5 项 skip，UI production build 再次转换 2716 modules；完整命令退出码为 0，
+   用时 18.973 秒。最终 `git diff --check` 也返回 0。
+
+### 限制与下一步
+
+本轮没有把 Stage 0 mock data 替换为真实 read model，没有增加 WebSocket、身份或写命令，
+也没有执行浏览器视觉验收。`.github/workflows/phase0-corpus.yml` 的新初始化路径只有在这些
+本地变更获得明确提交/push 后才会产生远端 Ubuntu/Windows 证据；本轮不自行 commit、push
+或部署。下一步应先提交并观察双平台 CI，再单独设计 Stage 1 版本化只读 snapshot/event
+vertical slice，继续证明 React 工作台不会形成第二控制平面。
+
+---
+
+## DEV-2026-08-17-19 — 版本化协作式任务编排框架
+
+- 状态：完成（本地垂直切片、真实 HTTP/proxy 联调与统一门禁）
+- 类型：task orchestration、application service、local adapter、authenticated API、UI、ADR
+
+### 决策与边界
+
+1. 采用 ADR-0031：任务编排是执行前的版本化规划工件，不是 `TaskState` 的替代物。Agent
+   只能返回 provider-neutral 的完整候选图；用户必须显式应用候选、固化路径，且只有
+   JobSlayer 应用服务可以追加新修订。规划完成不会触发执行、验证、审批或
+   `WorkflowKernel.transition`，从而不建立第二控制平面。
+2. 图契约保持为可扩展 DAG：节点支持 task、milestone、validation 和 human gate，边支持
+   sequence、dependency、branch 和 subtask。每次修改都生成不可变修订，记录 actor、操作、
+   前一条哈希和当前 SHA-256 哈希；finalized 修订可继续派生新的 draft，同时保留最近一次固化
+   修订号，避免静默覆写已确认路径。
+3. 本地首个 agent adapter 是确定性的 `local-planning-fixture-v1`，用于离线开发和可重复测试；
+   它支持多轮细化、修改/删除、依赖、支线和子任务意图，但不冒充真实 Codex 集成。后续外部
+   provider 必须继续位于 `PlanningAgent` 协议之后，并把 raw interaction 留作工件。
+
+### 落实
+
+1. 新增 provider-neutral 编排模型、图验证、store/agent 协议，以及单进程 JSONL 本地存储；
+   存储采用逐计划 append-only hash chain、序号并发检查、临时文件原子发布和 `0600` 权限，
+   读取时会验证全链并拒绝篡改历史。
+2. 新增 `TaskOrchestrationService`：覆盖初始任务描述、Agent 候选、多轮讨论、显式应用、节点
+   CRUD、branch/subtask 分裂、固化和固化后派生修改；所有写操作都要求 expected revision，
+   stale writer 或候选基线不一致不会追加修订。
+3. 新增 loopback-only JSON API 和 `serve-task-orchestration` CLI。API 使用进程随机
+   `X-JobSlayer-Session`；启动时验证签名 identity session 与 `MANAGE_TASK_PLAN`，每次写操作
+   检查 principal 仍有效和随机 token，限制 JSON 大小/字段并设置 no-store、nosniff、DENY、
+   referrer 和 CSP 响应头；新增最小权限 `planner` role，observer 保持拒绝。
+4. React Workbench 新增 Task Orchestration 顶级页面：任务输入、讨论线程、候选/已应用拓扑、
+   节点选择与编辑、创建/删除、支线/子任务、显式应用、最终固化和修订/哈希历史均接到真实
+   本地 API。React Flow 中的位置仅为展示布局，不持久化为工程事实；Vite 只代理指定 API
+   前缀到 `127.0.0.1:8780`。
+5. README、交互指南、统一入口、路线图、专门运行手册和 ADR 索引已同步；新增测试覆盖允许/
+   拒绝权限、proposal 不直接修改、完整 CRUD/分裂/固化、并发冲突、候选基线冲突、DAG
+   cycle 拒绝、hash-chain 篡改和认证 API 全流程。
+
+### 变更文件
+
+- 领域契约与应用服务：`src/jobslayer/orchestration/__init__.py`、
+  `src/jobslayer/application/task_orchestration.py`；
+- adapters/API/CLI/identity：`src/jobslayer/adapters/local_orchestration.py`、
+  `src/jobslayer/adapters/local_planning_agent.py`、`src/jobslayer/orchestration/web.py`、
+  `src/jobslayer/cli.py`、`src/jobslayer/identity/__init__.py`、
+  `src/jobslayer/adapters/local_identity.py`；
+- 测试：`tests/test_orchestration.py`、`tests/test_orchestration_web.py`、
+  `tests/test_identity.py`；
+- UI：`ui-framework/src/components/TaskOrchestration.tsx`、`ui-framework/src/App.tsx`、
+  `ui-framework/src/components/CommandPalette.tsx`、`ui-framework/src/components/Overview.tsx`、
+  `ui-framework/src/types.ts`、`ui-framework/src/styles.css`、`ui-framework/vite.config.ts`、
+  `ui-framework/README.md`；
+- 架构与文档：`docs/TASK_ORCHESTRATION.md`、
+  `docs/adr/0031-versioned-collaborative-task-orchestration.md`、`docs/adr/README.md`、
+  `docs/INTERACTION_DESIGN_GUIDE.md`、`docs/UNIFIED_ENTRYPOINT.md`、`docs/ROADMAP.md`、
+  `README.md` 和本日志。
+
+### 精确验证证据
+
+1. `.venv/bin/python -m unittest tests.test_orchestration tests.test_orchestration_web
+   tests.test_identity tests.test_unified_entrypoint -v`：27 项全部通过，用时 1.073 秒。
+2. `sh ./init.sh -- npm --prefix ui-framework run check`：TypeScript `tsc --noEmit` 和
+   Vite 8.2.1 production build 通过，2717 modules transformed；生成独立
+   TaskOrchestration route chunk。
+3. 真实本地端到端联调：在临时目录签发 `planner` identity session，启动
+   `.venv/bin/python -m jobslayer serve-task-orchestration --port 8780` 和 Vite 4173；通过
+   Vite `/api/orchestration` proxy 获取 session、创建 `plan-e2e` 并读取 history，确认首条
+   `plan.created_with_agent_proposal` 修订、5 个候选节点、0 个已应用节点以及匹配哈希。随后
+   停止两个服务，确认 4173/8780 无 listener，并清理临时身份、状态和日志目录。
+4. 文档落盘前运行 `./jobslayer check`：8/8 全部通过；225 项 unittest `OK`，5 项因未配置
+   PostgreSQL DSN 或 bubblewrap 而 skip；UI production build 转换 2717 modules；compile、
+   dependency consistency、BraveNewWorld testbed、scripted/Codex runbook 和 Git diff 均通过，
+   完整命令退出码为 0，用时 19.556 秒。
+5. 本条开发日志落盘后再次运行 `./jobslayer check`：8/8 全部通过；225 项 unittest
+   `OK`、5 项 skip，UI production build 再次转换 2717 modules；完整命令退出码为 0，
+   用时 18.915 秒。随后 `git diff --check` 返回 0。
+
+### 限制与下一步
+
+当前没有真实 Codex/外部模型调用、provider raw-log artifact、图形拖拽布局持久化、通用边
+CRUD、多人事务存储、生产静态资源托管或 plan-to-workflow IR 编译；本地 JSONL store 只承诺
+单进程 writer。浏览器层完成了实际 HTTP/Vite proxy 联调和 production build，但没有执行
+截图式视觉验收。固化路径仍是规划证据，不代表任务完成、通过验证或获批执行。
+
+工作树同时保留前一轮尚未提交的 UI dependency unified-gate 变更和本轮编排变更；未获得
+commit/push 授权，因此没有创建提交、推送分支或触发远端 CI。下一步建议在明确外部调用预算、
+凭据和审计策略后，先实现 Codex planning adapter 与 raw interaction artifact，再设计
+transactional plan store 和显式 plan-to-workflow compilation/approval 边界。

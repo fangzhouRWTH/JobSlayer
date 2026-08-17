@@ -62,6 +62,7 @@ Control Plane decides the transition
 | 模块 | 核心问题 | 当前优先级 |
 |---|---|---|
 | Overview | 当前有哪些需要注意的项目、运行和人工门？ | 次要，保持简洁 |
+| Task Orchestration | 用户目标如何通过讨论变成可确认、可修订的任务拓扑？ | 最高，初步纵向切片 |
 | Workflow Studio | 要执行的 canonical Workflow IR 是什么？ | 最高 |
 | Runs / Run Inspector | 正在发生什么、阻塞在哪里、为什么重试？ | 最高 |
 | Artifacts / Review | 产生了什么、如何验证、由谁批准？ | 最高 |
@@ -70,7 +71,10 @@ Control Plane decides the transition
 | Observability | 成功、失败、成本、延迟和人工干预有什么模式？ | 逐步增强 |
 | Settings | 平台配置和权限管理 | 远程产品化时设计 |
 
-总览页是索引和态势入口，不承担深层配置。日常上下文应在 Workflow Studio、Run Inspector 和 Artifact Review 之间连续传递。
+总览页是索引和态势入口，不承担深层配置。执行前上下文先在 Task Orchestration 中通过
+讨论与 revision 固化；只有单独的受治理编译/创建动作才能把 finalized plan 转换为
+Workflow IR 或 `TaskSpec`。执行上下文继续在 Workflow Studio、Run Inspector 和
+Artifact Review 之间传递。
 
 ## 4. 不可破坏的界面边界
 
@@ -233,7 +237,17 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 - 清晰展示环境、数据来源、实时/暂停/离线和只读状态；
 - 原型、模拟数据和真实控制面数据必须有持久可见的区别。
 
-### 6.2 Workflow Studio
+### 6.2 Task Orchestration
+
+- 用户输入先形成版本化 plan，不直接创建执行任务；
+- 多轮讨论中的 Agent 输出是 `pending_proposal`，图上必须明确区分 proposed/applied；
+- 用户应用 proposal、节点 CRUD、支线或子任务时必须携带 `expected_revision`；
+- finalization 记录 actor、revision、时间和 hash，只表示确认了计划设计；
+- 定稿后的修改创建新 draft revision，不覆盖之前的 finalized revision；
+- React Flow 坐标属于 presentation metadata，系统只保存 provider-neutral 节点和语义边；
+- 真实 Codex、其他模型或未来多人 store 必须在 adapter 后接入，不能改变用户应用边界。
+
+### 6.3 Workflow Studio
 
 - 图与 canonical IR 是同一模型的两个视图；
 - 节点显示类型、执行状态、验证、owner 和风险，而不只显示 Agent 名称；
@@ -242,7 +256,7 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 - 修改重试、权限、超时等治理字段时说明其权限来源，不能由浏览器自行生效；
 - 运行按钮先形成可审查的 execution intent。
 
-### 6.3 Run Inspector
+### 6.4 Run Inspector
 
 必须快速回答：
 
@@ -255,7 +269,7 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 
 默认使用执行层级、事件表和 trace waterfall。无限文本流只作为次级终端视图。
 
-### 6.4 Artifact Viewer 与人工审查
+### 6.5 Artifact Viewer 与人工审查
 
 制品是一级对象，至少显示：
 
@@ -268,7 +282,7 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 
 人工审查把摘要、Diff、制品、验证、风险、来源上下文和 actor authority 放在一个页面。决定选项是结构化命令；rationale 不能代替选择、权限或验证。
 
-### 6.5 Observability
+### 6.6 Observability
 
 采用分布式系统的 trace、metric、log、event 概念，同时增加 artifact、decision、validation、cost、token 与 human intervention。仪表板只消费经过完整性校验的 read model；稳定遥测字段不包含 prompt、凭据和原始日志。
 
@@ -317,14 +331,15 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 
 现有 `src/jobslayer/supervision/ui` 和 `src/jobslayer/management/ui` 是 loopback、认证、最少依赖的真实本地界面，分别服务决定记录与只读 Dashboard；它们有既有安全和部署边界。
 
-`ui-framework/` 是隔离的长期交互方向原型：
+`ui-framework/` 是长期交互方向工作台；当前只有 Task Orchestration 接通了受限本地 API：
 
-- 使用固定 mock data；
+- Workflow Studio、Run Inspector、Artifact Review 与 Observability 使用固定 mock data；
+- Task Orchestration 调用 loopback 计划 API，权威 revision 位于 Python store；
 - 不导入 `src/jobslayer`；
-- 不注册 CLI、HTTP route、数据库或事件消费者；
+- React 源码不注册 CLI、数据库或事件消费者；API/CLI 位于独立 Python application/adapter；
 - 不取代 ADR-0007/ADR-0027 的现有本地界面；
-- 所有写按钮只更新浏览器组件状态并显示“未提交”；
-- 用来评审信息架构、视觉层级、交互语义和未来 API read/command model。
+- mock 页面写按钮仍只更新浏览器组件状态；编排写按钮提交有 revision 前置条件的计划命令；
+- finalized plan 不拥有执行状态，也不能直接驱动 Agent runtime。
 
 从原型进入真实接线前必须另立实施任务和 ADR，先定义 provider-neutral application API 与认证/幂等/并发语义，再由 adapter 把现有控制面投影给 UI。不能从 prototype component 反向塑造领域状态机。
 
@@ -348,6 +363,11 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 - 建立断线恢复的 event stream；
 - 保持所有 command UI 禁用；
 - 证明原型不成为第二控制平面。
+
+补充进展：ADR-0031 已为执行前 Task Orchestration 建立一个独立的本地 governed command
+slice，使用签名 planner 身份、expected revision、追加历史和 Agent proposal/application
+分离。它不替代本节尚未完成的 run/artifact/event read-only slice，也不把 plan 解释为执行
+工作流状态。
 
 ### Stage 2：Governed command slice
 

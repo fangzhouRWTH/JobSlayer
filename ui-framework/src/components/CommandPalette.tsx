@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Activity, BarChart3, FileSearch, Home, Network, Search, X } from "lucide-react";
+import { Activity, BarChart3, FileSearch, Home, ListTree, Network, Search, X } from "lucide-react";
 import type { ViewId } from "../types";
 
 interface CommandPaletteProps {
@@ -10,6 +10,7 @@ interface CommandPaletteProps {
 
 const commands: Array<{ id: ViewId; label: string; hint: string; icon: typeof Home }> = [
   { id: "overview", label: "打开原型目录", hint: "Overview", icon: Home },
+  { id: "orchestration", label: "打开任务编排", hint: "Discuss · Plan", icon: ListTree },
   { id: "workflow", label: "打开 Workflow Studio", hint: "Author", icon: Network },
   { id: "run", label: "检查 run_ui_028", hint: "Observe", icon: Activity },
   { id: "artifact", label: "审查 implementation-report.md", hint: "Review", icon: FileSearch },

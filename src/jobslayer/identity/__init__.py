@@ -27,6 +27,7 @@ class AuthorizationAction(str, Enum):
     CLEANUP_WORKSPACE = "cleanup_workspace"
     RECOVER_RUN = "recover_run"
     MANAGE_WORKER = "manage_worker"
+    MANAGE_TASK_PLAN = "manage_task_plan"
 
 
 class AuthenticatedPrincipal(DomainModel):
