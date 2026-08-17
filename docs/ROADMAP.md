@@ -46,6 +46,8 @@
 - [ ] Langfuse 或 Phoenix 二选一的观测验证；
 - [ ] Promptfoo 的模型/提示回归套件；
 - [x] 本地认证项目仪表板、证据面板和审批状态视图；
+- [~] Web-first 工程工作台交互框架（隔离的 Stage 0 原型已提供总索引、Workflow Studio、Run Inspector、Artifact Review 与 Observability；尚未接入 read model、事件流或任何写命令）；
+- [x] 跨平台开发环境初始化入口（仓库 venv、固定校验的用户级 Node LTS、lockfile UI install、只读 JSON 检测与离线/分组件模式）；
 - [ ] OpenHands 适配器的有界 PoC。
 
 退出条件进展：SQLite/PostgreSQL 已证明重启后状态和证据不丢失；scripted 与 fake-Codex adapter 已在完全相同任务/验证契约下形成确定性比较；使用者可在认证界面查看多运行状态、证据和审批结果，并在认证审查页创建决定。第二个真实付费执行器和远程审批平台仍是后续产品能力，不能由测试替身冒充。
