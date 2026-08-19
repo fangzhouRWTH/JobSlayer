@@ -36,6 +36,10 @@ from jobslayer.adapters.local_orchestration import (
     TaskPlanJournalError,
 )
 from jobslayer.adapters.local_planning_agent import LocalPlanningAgent
+from jobslayer.adapters.codex_planning_agent import (
+    CodexPlanningAgent,
+    CodexPlanningAgentConfigurationError,
+)
 from jobslayer.adapters.persistent_management import PersistentManagementQuery
 from jobslayer.adapters.local_artifacts import LocalArtifactRegistry
 from jobslayer.adapters.sqlite_state import SqliteControlPlaneStore
@@ -84,6 +88,7 @@ from jobslayer.orchestration.web import (
     TaskOrchestrationServerError,
     create_task_orchestration_server,
 )
+from jobslayer.orchestration import PlanningAgent
 from jobslayer.evaluation import ExecutorComparisonError
 
 
@@ -586,6 +591,12 @@ def _cmd_serve_task_orchestration(
     state_root: Path | None,
     identity_session: Path,
     identity_key: Path,
+    planning_agent_name: str,
+    allow_external_planning_agent: bool,
+    planning_artifact_root: Path | None,
+    codex_binary: str,
+    codex_model: str | None,
+    codex_timeout_seconds: float,
     port: int,
     open_browser: bool,
 ) -> int:
@@ -599,9 +610,21 @@ def _cmd_serve_task_orchestration(
         plan_root = state_root or (repository_root / ".jobslayer" / "orchestration")
         if not plan_root.is_absolute():
             plan_root = repository_root / plan_root
+        artifact_root = planning_artifact_root or (plan_root / "artifacts")
+        if not artifact_root.is_absolute():
+            artifact_root = repository_root / artifact_root
+        planning_agent = _planning_agent_for(
+            planning_agent_name,
+            repository_root=repository_root,
+            artifact_root=artifact_root,
+            allow_external=allow_external_planning_agent,
+            codex_binary=codex_binary,
+            codex_model=codex_model,
+            codex_timeout_seconds=codex_timeout_seconds,
+        )
         service = TaskOrchestrationService(
             LocalTaskPlanStore(plan_root),
-            LocalPlanningAgent(),
+            planning_agent,
             actor_id=principal.subject_id,
         )
         service.list_latest()
@@ -611,6 +634,7 @@ def _cmd_serve_task_orchestration(
         LocalIdentityError,
         TaskPlanJournalError,
         TaskOrchestrationServerError,
+        CodexPlanningAgentConfigurationError,
         OSError,
         ValueError,
     ) as exc:
@@ -621,6 +645,7 @@ def _cmd_serve_task_orchestration(
     ui_url = "http://127.0.0.1:4173/#/orchestration"
     print(f"Task orchestration API: {api_url}")
     print(f"authenticated planner: {principal.subject_id}")
+    print(f"planning adapter: {planning_agent.adapter_id}")
     print("append-only plan revisions; agent output remains a pending proposal")
     print("Workbench: sh ./init.sh -- npm --prefix ui-framework run dev")
     print(f"Open after Vite starts: {ui_url}")
@@ -633,6 +658,36 @@ def _cmd_serve_task_orchestration(
     finally:
         server.server_close()
     return 0
+
+
+def _planning_agent_for(
+    name: str,
+    *,
+    repository_root: Path,
+    artifact_root: Path,
+    allow_external: bool,
+    codex_binary: str,
+    codex_model: str | None,
+    codex_timeout_seconds: float,
+) -> PlanningAgent:
+    if name == "local":
+        return LocalPlanningAgent()
+    if name != "codex":
+        raise ValueError(f"unknown planning agent: {name}")
+    if not allow_external:
+        raise ValueError(
+            "Codex planning requires --allow-external-planning-agent"
+        )
+    if codex_model is None or not codex_model.strip():
+        raise ValueError("Codex planning requires an explicit --codex-model")
+    return CodexPlanningAgent(
+        repository_root,
+        LocalArtifactRegistry(artifact_root),
+        external_call_authorized=True,
+        codex_binary=codex_binary,
+        model=codex_model,
+        timeout_seconds=codex_timeout_seconds,
+    )
 
 
 def _cmd_create_identity_key(path: Path) -> int:
@@ -1139,6 +1194,37 @@ def build_parser() -> argparse.ArgumentParser:
     )
     orchestration.add_argument("--identity-session", type=Path, required=True)
     orchestration.add_argument("--identity-key", type=Path, required=True)
+    orchestration.add_argument(
+        "--planning-agent",
+        choices=("local", "codex"),
+        default="local",
+        help="proposal adapter; local remains deterministic and offline",
+    )
+    orchestration.add_argument(
+        "--allow-external-planning-agent",
+        action="store_true",
+        help="explicitly authorize external model calls for this server process",
+    )
+    orchestration.add_argument(
+        "--planning-artifact-root",
+        type=Path,
+        help="immutable raw planning-interaction artifact registry",
+    )
+    orchestration.add_argument(
+        "--codex-binary",
+        default="codex",
+        help="Codex CLI executable used only with --planning-agent codex",
+    )
+    orchestration.add_argument(
+        "--codex-model",
+        help="explicit Codex model used only with --planning-agent codex",
+    )
+    orchestration.add_argument(
+        "--codex-timeout-seconds",
+        type=float,
+        default=120,
+        help="single-attempt Codex planning timeout (1-900 seconds)",
+    )
     orchestration.add_argument("--port", type=int, default=8780)
     orchestration.add_argument("--open-browser", action="store_true")
 
@@ -1405,6 +1491,12 @@ def main(argv: list[str] | None = None) -> int:
             state_root=arguments.state_root,
             identity_session=arguments.identity_session,
             identity_key=arguments.identity_key,
+            planning_agent_name=arguments.planning_agent,
+            allow_external_planning_agent=arguments.allow_external_planning_agent,
+            planning_artifact_root=arguments.planning_artifact_root,
+            codex_binary=arguments.codex_binary,
+            codex_model=arguments.codex_model,
+            codex_timeout_seconds=arguments.codex_timeout_seconds,
             port=arguments.port,
             open_browser=arguments.open_browser,
         )

@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from uuid import uuid4
-
 from jobslayer.orchestration import (
     TaskPlanEdge,
     TaskPlanEdgeRelation,
     TaskPlanMessage,
     TaskPlanNode,
     TaskPlanNodeKind,
-    TaskPlanProposal,
+    TaskPlanProposalDraft,
 )
 
 
@@ -31,7 +28,7 @@ class LocalPlanningAgent:
         conversation: tuple[TaskPlanMessage, ...],
         user_message: str,
         selected_node_id: str | None,
-    ) -> TaskPlanProposal:
+    ) -> TaskPlanProposalDraft:
         del plan_id, conversation
         message = " ".join(user_message.split()).strip()
         if not message:
@@ -69,6 +66,12 @@ class LocalPlanningAgent:
                     description=message,
                     kind=selected.kind,
                     executor_hint=selected.executor_hint,
+                    acceptance_criteria=selected.acceptance_criteria,
+                    deliverables=selected.deliverables,
+                    constraints=selected.constraints,
+                    risks=selected.risks,
+                    verification_requirements=selected.verification_requirements,
+                    requires_human_decision=selected.requires_human_decision,
                     attributes=selected.attributes,
                 )
                 next_nodes = [
@@ -89,6 +92,13 @@ class LocalPlanningAgent:
                         else TaskPlanNodeKind.TASK
                     ),
                     executor_hint="unassigned",
+                    acceptance_criteria=(f"完成并确认：{self._title(message)}",),
+                    deliverables=(f"{self._title(message)}的可审查结果",),
+                    verification_requirements=(
+                        ("提供可重复执行的验证命令与通过证据",)
+                        if "验证" in message or "测试" in message
+                        else ()
+                    ),
                     attributes={"proposal_source": self.adapter_id},
                 )
                 next_nodes.append(addition)
@@ -110,14 +120,11 @@ class LocalPlanningAgent:
                     f"建议在“{selected.title}”之后增加{relation_label}“{addition.title}”。"
                     "提案尚未写入已应用计划。"
                 )
-        return TaskPlanProposal(
-            proposal_id=f"proposal-{uuid4().hex}",
-            based_on_revision=based_on_revision,
+        del based_on_revision
+        return TaskPlanProposalDraft(
             summary=summary,
-            agent_adapter=self.adapter_id,
             nodes=tuple(next_nodes),
             edges=tuple(next_edges),
-            created_at=datetime.now(UTC),
         )
 
     @staticmethod
@@ -126,11 +133,51 @@ class LocalPlanningAgent:
     ) -> tuple[tuple[TaskPlanNode, ...], tuple[TaskPlanEdge, ...]]:
         description = " ".join(task_description.split()).strip()
         phases = (
-            ("scope", "确认目标与边界", TaskPlanNodeKind.MILESTONE, "human + planner"),
-            ("design", "形成可执行方案", TaskPlanNodeKind.TASK, "planning agent"),
-            ("implement", "分步实施任务", TaskPlanNodeKind.TASK, "unassigned"),
-            ("verify", "执行确定性验证", TaskPlanNodeKind.VALIDATION, "verification engine"),
-            ("finalize", "用户确认最终路径", TaskPlanNodeKind.HUMAN_GATE, "authorized planner"),
+            (
+                "scope",
+                "确认目标与边界",
+                TaskPlanNodeKind.MILESTONE,
+                "human + planner",
+                ("目标、范围、约束和未决问题均已记录",),
+                ("经确认的任务边界",),
+                (),
+            ),
+            (
+                "design",
+                "形成可执行方案",
+                TaskPlanNodeKind.TASK,
+                "planning agent",
+                ("方案包含步骤、依赖、风险和验证路径",),
+                ("可审查的实施方案",),
+                (),
+            ),
+            (
+                "implement",
+                "分步实施任务",
+                TaskPlanNodeKind.TASK,
+                "unassigned",
+                ("所有计划内变更均形成可复核制品",),
+                ("计划要求的实现制品",),
+                (),
+            ),
+            (
+                "verify",
+                "执行确定性验证",
+                TaskPlanNodeKind.VALIDATION,
+                "verification engine",
+                ("所有必需验证均通过并保存结构化证据",),
+                (),
+                ("运行项目统一验证入口并记录精确结果",),
+            ),
+            (
+                "finalize",
+                "用户确认最终路径",
+                TaskPlanNodeKind.HUMAN_GATE,
+                "authorized planner",
+                ("授权用户已审阅计划差异并显式确认",),
+                (),
+                (),
+            ),
         )
         nodes = tuple(
             TaskPlanNode(
@@ -143,9 +190,21 @@ class LocalPlanningAgent:
                 ),
                 kind=kind,
                 executor_hint=executor,
+                acceptance_criteria=acceptance,
+                deliverables=deliverables,
+                verification_requirements=verification,
+                requires_human_decision=node_id == "finalize",
                 attributes={"proposal_source": LocalPlanningAgent.adapter_id},
             )
-            for node_id, title, kind, executor in phases
+            for (
+                node_id,
+                title,
+                kind,
+                executor,
+                acceptance,
+                deliverables,
+                verification,
+            ) in phases
         )
         edges = tuple(
             TaskPlanEdge(

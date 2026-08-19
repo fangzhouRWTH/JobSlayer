@@ -18,6 +18,8 @@ from jobslayer.adapters.local_orchestration import (
     TaskPlanRevisionConflictError,
 )
 from jobslayer.application.task_orchestration import (
+    ArchivedTaskPlanError,
+    IncompleteTaskPlanError,
     PendingTaskPlanProposalError,
     StaleTaskPlanRevisionError,
     TaskOrchestrationError,
@@ -26,7 +28,11 @@ from jobslayer.application.task_orchestration import (
     TaskPlanProposalMismatchError,
 )
 from jobslayer.identity import AuthenticatedPrincipal
-from jobslayer.orchestration import TaskPlanEdgeRelation, TaskPlanNodeKind
+from jobslayer.orchestration import (
+    PlanningAgentError,
+    TaskPlanEdgeRelation,
+    TaskPlanNodeKind,
+)
 
 
 class TaskOrchestrationServerError(RuntimeError):
@@ -67,7 +73,12 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                             "discussion": True,
                             "agent_proposals": True,
                             "node_crud": True,
+                            "edge_crud": True,
                             "branch_and_subtask": True,
+                            "proposal_rejection": True,
+                            "revision_derivation": True,
+                            "plan_archiving": True,
+                            "completeness_assessment": True,
                             "finalization": True,
                             "workflow_execution": False,
                         },
@@ -97,6 +108,13 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                                 record.model_dump(mode="json") for record in records
                             ],
                         },
+                    )
+                    return
+                if segments[4] == "assessment":
+                    assessment = self.server.orchestration_service.assess(plan_id)
+                    self._send_json(
+                        HTTPStatus.OK,
+                        assessment.model_dump(mode="json"),
                     )
                     return
             if len(segments) == 4 and segments[:3] == (*self.prefix, "plans"):
@@ -170,6 +188,20 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                 )
             elif (
                 method == "POST"
+                and len(segments) == 6
+                and segments[:3] == (*self.prefix, "plans")
+                and segments[4:] == ("proposals", "reject")
+            ):
+                self._keys(
+                    payload, required={"proposal_id", "expected_revision"}
+                )
+                record = service.reject_proposal(
+                    segments[3],
+                    self._string(payload, "proposal_id"),
+                    expected_revision=self._integer(payload, "expected_revision"),
+                )
+            elif (
+                method == "POST"
                 and len(segments) == 5
                 and segments[:3] == (*self.prefix, "plans")
                 and segments[4] == "nodes"
@@ -184,6 +216,12 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                         "source_node_id",
                         "relation",
                         "node_id",
+                        "acceptance_criteria",
+                        "deliverables",
+                        "constraints",
+                        "risks",
+                        "verification_requirements",
+                        "requires_human_decision",
                     },
                 )
                 record = service.create_node(
@@ -196,6 +234,46 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                     source_node_id=self._optional_string(payload, "source_node_id"),
                     relation=TaskPlanEdgeRelation(payload.get("relation", "sequence")),
                     node_id=self._optional_string(payload, "node_id"),
+                    acceptance_criteria=(
+                        self._string_tuple(payload, "acceptance_criteria") or ()
+                    ),
+                    deliverables=self._string_tuple(payload, "deliverables") or (),
+                    constraints=self._string_tuple(payload, "constraints") or (),
+                    risks=self._string_tuple(payload, "risks") or (),
+                    verification_requirements=(
+                        self._string_tuple(payload, "verification_requirements") or ()
+                    ),
+                    requires_human_decision=(
+                        self._boolean(payload, "requires_human_decision")
+                        if "requires_human_decision" in payload
+                        else False
+                    ),
+                )
+                status = HTTPStatus.CREATED
+            elif (
+                method == "POST"
+                and len(segments) == 5
+                and segments[:3] == (*self.prefix, "plans")
+                and segments[4] == "edges"
+            ):
+                self._keys(
+                    payload,
+                    required={
+                        "source_node_id",
+                        "target_node_id",
+                        "relation",
+                        "expected_revision",
+                    },
+                    optional={"label", "edge_id"},
+                )
+                record = service.create_edge(
+                    segments[3],
+                    expected_revision=self._integer(payload, "expected_revision"),
+                    source_node_id=self._string(payload, "source_node_id"),
+                    target_node_id=self._string(payload, "target_node_id"),
+                    relation=TaskPlanEdgeRelation(self._string(payload, "relation")),
+                    label=self._optional_string(payload, "label"),
+                    edge_id=self._optional_string(payload, "edge_id"),
                 )
                 status = HTTPStatus.CREATED
             elif (
@@ -237,6 +315,31 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                     expected_revision=self._integer(payload, "expected_revision"),
                 )
             elif (
+                method == "POST"
+                and len(segments) == 7
+                and segments[:3] == (*self.prefix, "plans")
+                and segments[4] == "revisions"
+                and segments[6] == "derive"
+            ):
+                self._keys(payload, required={"expected_revision"})
+                record = service.derive_from_revision(
+                    segments[3],
+                    self._path_integer(segments[5], "source revision"),
+                    expected_revision=self._integer(payload, "expected_revision"),
+                )
+            elif (
+                method == "POST"
+                and len(segments) == 5
+                and segments[:3] == (*self.prefix, "plans")
+                and segments[4] == "archive"
+            ):
+                self._keys(payload, required={"archived", "expected_revision"})
+                record = service.set_archived(
+                    segments[3],
+                    archived=self._boolean(payload, "archived"),
+                    expected_revision=self._integer(payload, "expected_revision"),
+                )
+            elif (
                 method == "PATCH"
                 and len(segments) == 6
                 and segments[:3] == (*self.prefix, "plans")
@@ -251,6 +354,14 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                         "executor_hint",
                         "expected_revision",
                     },
+                    optional={
+                        "acceptance_criteria",
+                        "deliverables",
+                        "constraints",
+                        "risks",
+                        "verification_requirements",
+                        "requires_human_decision",
+                    },
                 )
                 record = service.update_node(
                     segments[3],
@@ -260,6 +371,37 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                     description=self._string(payload, "description", allow_blank=True),
                     kind=TaskPlanNodeKind(self._string(payload, "kind")),
                     executor_hint=self._optional_string(payload, "executor_hint"),
+                    acceptance_criteria=self._string_tuple(
+                        payload, "acceptance_criteria"
+                    ),
+                    deliverables=self._string_tuple(payload, "deliverables"),
+                    constraints=self._string_tuple(payload, "constraints"),
+                    risks=self._string_tuple(payload, "risks"),
+                    verification_requirements=self._string_tuple(
+                        payload, "verification_requirements"
+                    ),
+                    requires_human_decision=(
+                        self._boolean(payload, "requires_human_decision")
+                        if "requires_human_decision" in payload
+                        else None
+                    ),
+                )
+            elif (
+                method == "PATCH"
+                and len(segments) == 6
+                and segments[:3] == (*self.prefix, "plans")
+                and segments[4] == "edges"
+            ):
+                self._keys(
+                    payload,
+                    required={"relation", "label", "expected_revision"},
+                )
+                record = service.update_edge(
+                    segments[3],
+                    segments[5],
+                    expected_revision=self._integer(payload, "expected_revision"),
+                    relation=TaskPlanEdgeRelation(self._string(payload, "relation")),
+                    label=self._optional_string(payload, "label"),
                 )
             elif (
                 method == "DELETE"
@@ -269,6 +411,18 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
             ):
                 self._keys(payload, required={"expected_revision"})
                 record = service.delete_node(
+                    segments[3],
+                    segments[5],
+                    expected_revision=self._integer(payload, "expected_revision"),
+                )
+            elif (
+                method == "DELETE"
+                and len(segments) == 6
+                and segments[:3] == (*self.prefix, "plans")
+                and segments[4] == "edges"
+            ):
+                self._keys(payload, required={"expected_revision"})
+                record = service.delete_edge(
                     segments[3],
                     segments[5],
                     expected_revision=self._integer(payload, "expected_revision"),
@@ -284,6 +438,8 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
             return
         except (
             PendingTaskPlanProposalError,
+            ArchivedTaskPlanError,
+            IncompleteTaskPlanError,
             StaleTaskPlanRevisionError,
             TaskPlanProposalMismatchError,
             TaskPlanRevisionConflictError,
@@ -292,6 +448,9 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
             return
         except TaskOrchestrationError as exc:
             self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        except PlanningAgentError as exc:
+            self._send_error_json(HTTPStatus.BAD_GATEWAY, str(exc))
             return
         except TaskPlanJournalError as exc:
             self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
@@ -370,6 +529,43 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
         if not isinstance(value, int) or isinstance(value, bool) or value < 1:
             raise ValueError(f"{name} must be a positive integer")
         return value
+
+    @staticmethod
+    def _path_integer(value: str, name: str) -> int:
+        try:
+            parsed = int(value)
+        except ValueError as exc:
+            raise ValueError(f"{name} must be a positive integer") from exc
+        if parsed < 1:
+            raise ValueError(f"{name} must be a positive integer")
+        return parsed
+
+    @staticmethod
+    def _boolean(payload: dict[str, Any], name: str) -> bool:
+        value = payload.get(name)
+        if not isinstance(value, bool):
+            raise ValueError(f"{name} must be a boolean")
+        return value
+
+    @staticmethod
+    def _string_tuple(
+        payload: dict[str, Any], name: str
+    ) -> tuple[str, ...] | None:
+        value = payload.get(name)
+        if value is None:
+            return None
+        if (
+            not isinstance(value, list)
+            or len(value) > 24
+            or any(
+                not isinstance(item, str)
+                or not item.strip()
+                or len(item) > 1_000
+                for item in value
+            )
+        ):
+            raise ValueError(f"{name} must be a bounded list of non-blank strings")
+        return tuple(value)
 
     def log_message(self, format: str, *args: Any) -> None:
         return

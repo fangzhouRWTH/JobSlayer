@@ -10,15 +10,19 @@ from jobslayer.domain.models import ActorType
 from jobslayer.orchestration import (
     DiscussionRole,
     PlanningAgent,
+    TaskPlanAssessment,
     TaskPlanEdge,
     TaskPlanEdgeRelation,
     TaskPlanMessage,
     TaskPlanNode,
     TaskPlanNodeKind,
+    TaskPlanProposal,
+    TaskPlanProposalDraft,
     TaskPlanRevisionRecord,
     TaskPlanSnapshot,
     TaskPlanStatus,
     TaskPlanStore,
+    assess_task_plan,
 )
 
 
@@ -39,6 +43,14 @@ class PendingTaskPlanProposalError(TaskOrchestrationError):
 
 
 class TaskPlanProposalMismatchError(TaskOrchestrationError):
+    pass
+
+
+class ArchivedTaskPlanError(TaskOrchestrationError):
+    pass
+
+
+class IncompleteTaskPlanError(TaskOrchestrationError):
     pass
 
 
@@ -77,6 +89,9 @@ class TaskOrchestrationService:
     def get(self, plan_id: str) -> TaskPlanRevisionRecord:
         return self.history(plan_id)[-1]
 
+    def assess(self, plan_id: str) -> TaskPlanAssessment:
+        return assess_task_plan(self.get(plan_id).snapshot)
+
     def create(
         self,
         task_description: str,
@@ -96,7 +111,7 @@ class TaskOrchestrationService:
             content=description,
             created_at=now,
         )
-        proposal = self.planning_agent.propose(
+        draft = self.planning_agent.propose(
             plan_id=identifier,
             task_description=description,
             based_on_revision=0,
@@ -106,6 +121,7 @@ class TaskOrchestrationService:
             user_message=description,
             selected_node_id=None,
         )
+        proposal = self._proposal_from_draft(draft, based_on_revision=0, created_at=now)
         agent_message = TaskPlanMessage(
             message_id=f"message-{uuid4().hex}",
             role=DiscussionRole.AGENT,
@@ -140,6 +156,7 @@ class TaskOrchestrationService:
         selected_node_id: str | None = None,
     ) -> TaskPlanRevisionRecord:
         latest = self._expected(plan_id, expected_revision).snapshot
+        self._require_active(latest)
         message = content.strip()
         if not message:
             raise ValueError("planning discussion message must not be blank")
@@ -161,7 +178,7 @@ class TaskOrchestrationService:
             created_at=now,
         )
         conversation = (*latest.conversation, user_message)
-        proposal = self.planning_agent.propose(
+        draft = self.planning_agent.propose(
             plan_id=latest.plan_id,
             task_description=latest.task_description,
             based_on_revision=latest.revision,
@@ -170,6 +187,11 @@ class TaskOrchestrationService:
             conversation=conversation,
             user_message=message,
             selected_node_id=selected_node_id,
+        )
+        proposal = self._proposal_from_draft(
+            draft,
+            based_on_revision=latest.revision,
+            created_at=now,
         )
         agent_message = TaskPlanMessage(
             message_id=f"message-{uuid4().hex}",
@@ -206,6 +228,21 @@ class TaskOrchestrationService:
         )
         return self._append(snapshot, "agent_proposal.applied_by_user")
 
+    def reject_proposal(
+        self,
+        plan_id: str,
+        proposal_id: str,
+        *,
+        expected_revision: int,
+    ) -> TaskPlanRevisionRecord:
+        latest = self._expected(plan_id, expected_revision).snapshot
+        self._require_active(latest)
+        proposal = latest.pending_proposal
+        if proposal is None or proposal.proposal_id != proposal_id:
+            raise TaskPlanProposalMismatchError("task-plan proposal is stale or mismatched")
+        snapshot = self._next_snapshot(latest, pending_proposal=None)
+        return self._append(snapshot, "agent_proposal.rejected_by_user")
+
     def create_node(
         self,
         plan_id: str,
@@ -218,6 +255,12 @@ class TaskOrchestrationService:
         source_node_id: str | None = None,
         relation: TaskPlanEdgeRelation = TaskPlanEdgeRelation.SEQUENCE,
         node_id: str | None = None,
+        acceptance_criteria: tuple[str, ...] = (),
+        deliverables: tuple[str, ...] = (),
+        constraints: tuple[str, ...] = (),
+        risks: tuple[str, ...] = (),
+        verification_requirements: tuple[str, ...] = (),
+        requires_human_decision: bool = False,
     ) -> TaskPlanRevisionRecord:
         latest = self._editable(plan_id, expected_revision)
         identifier = node_id or f"node-{uuid4().hex[:12]}"
@@ -233,6 +276,12 @@ class TaskOrchestrationService:
             description=description,
             kind=kind,
             executor_hint=executor_hint,
+            acceptance_criteria=acceptance_criteria,
+            deliverables=deliverables,
+            constraints=constraints,
+            risks=risks,
+            verification_requirements=verification_requirements,
+            requires_human_decision=requires_human_decision,
         )
         edges = list(latest.edges)
         if source_node_id is not None:
@@ -261,6 +310,12 @@ class TaskOrchestrationService:
         description: str,
         kind: TaskPlanNodeKind,
         executor_hint: str | None,
+        acceptance_criteria: tuple[str, ...] | None = None,
+        deliverables: tuple[str, ...] | None = None,
+        constraints: tuple[str, ...] | None = None,
+        risks: tuple[str, ...] | None = None,
+        verification_requirements: tuple[str, ...] | None = None,
+        requires_human_decision: bool | None = None,
     ) -> TaskPlanRevisionRecord:
         latest = self._editable(plan_id, expected_revision)
         current = next(
@@ -274,6 +329,24 @@ class TaskOrchestrationService:
             description=description,
             kind=kind,
             executor_hint=executor_hint,
+            acceptance_criteria=(
+                current.acceptance_criteria
+                if acceptance_criteria is None
+                else acceptance_criteria
+            ),
+            deliverables=(current.deliverables if deliverables is None else deliverables),
+            constraints=(current.constraints if constraints is None else constraints),
+            risks=(current.risks if risks is None else risks),
+            verification_requirements=(
+                current.verification_requirements
+                if verification_requirements is None
+                else verification_requirements
+            ),
+            requires_human_decision=(
+                current.requires_human_decision
+                if requires_human_decision is None
+                else requires_human_decision
+            ),
             attributes=current.attributes,
         )
         snapshot = self._next_snapshot(
@@ -330,6 +403,130 @@ class TaskOrchestrationService:
             relation=relation,
         )
 
+    def create_edge(
+        self,
+        plan_id: str,
+        *,
+        expected_revision: int,
+        source_node_id: str,
+        target_node_id: str,
+        relation: TaskPlanEdgeRelation,
+        label: str | None = None,
+        edge_id: str | None = None,
+    ) -> TaskPlanRevisionRecord:
+        latest = self._editable(plan_id, expected_revision)
+        identifier = edge_id or f"edge-{uuid4().hex[:16]}"
+        if any(edge.edge_id == identifier for edge in latest.edges):
+            raise TaskOrchestrationError("task-plan edge already exists")
+        edge = TaskPlanEdge(
+            edge_id=identifier,
+            source_node_id=source_node_id,
+            target_node_id=target_node_id,
+            relation=relation,
+            label=label,
+        )
+        snapshot = self._next_snapshot(latest, edges=(*latest.edges, edge))
+        return self._append(snapshot, f"edge.created:{edge.edge_id}")
+
+    def update_edge(
+        self,
+        plan_id: str,
+        edge_id: str,
+        *,
+        expected_revision: int,
+        relation: TaskPlanEdgeRelation,
+        label: str | None,
+    ) -> TaskPlanRevisionRecord:
+        latest = self._editable(plan_id, expected_revision)
+        current = next(
+            (edge for edge in latest.edges if edge.edge_id == edge_id), None
+        )
+        if current is None:
+            raise TaskPlanNotFoundError("task-plan edge does not exist")
+        replacement = current.model_copy(update={"relation": relation, "label": label})
+        snapshot = self._next_snapshot(
+            latest,
+            edges=tuple(
+                replacement if edge.edge_id == edge_id else edge
+                for edge in latest.edges
+            ),
+        )
+        return self._append(snapshot, f"edge.updated:{edge_id}")
+
+    def delete_edge(
+        self,
+        plan_id: str,
+        edge_id: str,
+        *,
+        expected_revision: int,
+    ) -> TaskPlanRevisionRecord:
+        latest = self._editable(plan_id, expected_revision)
+        if not any(edge.edge_id == edge_id for edge in latest.edges):
+            raise TaskPlanNotFoundError("task-plan edge does not exist")
+        snapshot = self._next_snapshot(
+            latest,
+            edges=tuple(edge for edge in latest.edges if edge.edge_id != edge_id),
+        )
+        return self._append(snapshot, f"edge.deleted:{edge_id}")
+
+    def derive_from_revision(
+        self,
+        plan_id: str,
+        source_revision: int,
+        *,
+        expected_revision: int,
+    ) -> TaskPlanRevisionRecord:
+        latest = self._editable(plan_id, expected_revision)
+        source = next(
+            (
+                record.snapshot
+                for record in self.history(plan_id)
+                if record.sequence == source_revision
+            ),
+            None,
+        )
+        if source is None:
+            raise TaskPlanNotFoundError("source task-plan revision does not exist")
+        system_message = TaskPlanMessage(
+            message_id=f"message-{uuid4().hex}",
+            role=DiscussionRole.SYSTEM,
+            content=f"用户从 revision {source_revision} 派生了新的活动草案。",
+            created_at=self._now(),
+        )
+        snapshot = self._next_snapshot(
+            latest,
+            task_description=source.task_description,
+            nodes=source.nodes,
+            edges=source.edges,
+            conversation=(*latest.conversation, system_message),
+            pending_proposal=None,
+        )
+        return self._append(snapshot, f"plan.derived_from_revision:{source_revision}")
+
+    def set_archived(
+        self,
+        plan_id: str,
+        *,
+        archived: bool,
+        expected_revision: int,
+    ) -> TaskPlanRevisionRecord:
+        latest = self._expected(plan_id, expected_revision).snapshot
+        if latest.pending_proposal is not None:
+            raise PendingTaskPlanProposalError(
+                "apply or reject the pending proposal before changing archive state"
+            )
+        if latest.is_archived == archived:
+            raise TaskOrchestrationError("task plan already has the requested archive state")
+        now = self._now()
+        snapshot = self._next_snapshot(
+            latest,
+            is_archived=archived,
+            archived_by=self.actor_id if archived else None,
+            archived_at=now.isoformat() if archived else None,
+        )
+        operation = "plan.archived_by_user" if archived else "plan.restored_by_user"
+        return self._append(snapshot, operation)
+
     def finalize(
         self,
         plan_id: str,
@@ -337,12 +534,21 @@ class TaskOrchestrationService:
         expected_revision: int,
     ) -> TaskPlanRevisionRecord:
         latest = self._expected(plan_id, expected_revision).snapshot
+        self._require_active(latest)
         if latest.pending_proposal is not None:
             raise PendingTaskPlanProposalError(
                 "apply or replace the pending proposal before finalization"
             )
         if not latest.nodes:
             raise TaskOrchestrationError("cannot finalize an empty task plan")
+        assessment = assess_task_plan(latest)
+        blockers = [
+            issue.message
+            for issue in assessment.issues
+            if issue.severity.value == "blocker"
+        ]
+        if blockers:
+            raise IncompleteTaskPlanError("; ".join(blockers))
         now = self._now()
         next_revision = latest.revision + 1
         snapshot = TaskPlanSnapshot.model_validate(
@@ -360,11 +566,17 @@ class TaskOrchestrationService:
 
     def _editable(self, plan_id: str, expected_revision: int) -> TaskPlanSnapshot:
         latest = self._expected(plan_id, expected_revision).snapshot
+        self._require_active(latest)
         if latest.pending_proposal is not None:
             raise PendingTaskPlanProposalError(
                 "apply or replace the pending proposal before direct node editing"
             )
         return latest
+
+    @staticmethod
+    def _require_active(snapshot: TaskPlanSnapshot) -> None:
+        if snapshot.is_archived:
+            raise ArchivedTaskPlanError("archived task plan is read-only")
 
     def _expected(
         self, plan_id: str, expected_revision: int
@@ -411,8 +623,25 @@ class TaskOrchestrationService:
             raise ValueError("task orchestration clock must return a timezone")
         return now
 
+    def _proposal_from_draft(
+        self,
+        draft: TaskPlanProposalDraft,
+        *,
+        based_on_revision: int,
+        created_at: datetime,
+    ) -> TaskPlanProposal:
+        return TaskPlanProposal(
+            **draft.model_dump(mode="python"),
+            proposal_id=f"proposal-{uuid4().hex}",
+            based_on_revision=based_on_revision,
+            agent_adapter=self.planning_agent.adapter_id,
+            created_at=created_at,
+        )
+
 
 __all__ = [
+    "ArchivedTaskPlanError",
+    "IncompleteTaskPlanError",
     "PendingTaskPlanProposalError",
     "StaleTaskPlanRevisionError",
     "TaskOrchestrationError",

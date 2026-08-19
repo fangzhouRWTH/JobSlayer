@@ -44,6 +44,12 @@ export interface TaskPlanNode {
   description: string;
   kind: TaskPlanNodeKind;
   executor_hint: string | null;
+  acceptance_criteria: string[];
+  deliverables: string[];
+  constraints: string[];
+  risks: string[];
+  verification_requirements: string[];
+  requires_human_decision: boolean;
   attributes: Record<string, string>;
 }
 
@@ -73,6 +79,8 @@ export interface TaskPlanProposal {
   agent_adapter: string;
   nodes: TaskPlanNode[];
   edges: TaskPlanEdge[];
+  agent_invocation_id: string | null;
+  evidence_artifact_ids: string[];
   created_at: string;
 }
 
@@ -89,6 +97,9 @@ export interface TaskPlanSnapshot {
   latest_finalized_revision: number | null;
   finalized_by: string | null;
   finalized_at: string | null;
+  is_archived: boolean;
+  archived_by: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -105,4 +116,22 @@ export interface TaskPlanRevisionRecord {
   occurred_at: string;
   previous_hash: string | null;
   record_hash: string;
+}
+
+export type TaskPlanIssueSeverity = "blocker" | "warning" | "info";
+
+export interface TaskPlanIssue {
+  schema_version: "1.0";
+  code: string;
+  severity: TaskPlanIssueSeverity;
+  message: string;
+  node_id: string | null;
+}
+
+export interface TaskPlanAssessment {
+  schema_version: "1.0";
+  plan_id: string;
+  revision: number;
+  ready_to_finalize: boolean;
+  issues: TaskPlanIssue[];
 }

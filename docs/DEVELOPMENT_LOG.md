@@ -2062,3 +2062,167 @@ CRUD、多人事务存储、生产静态资源托管或 plan-to-workflow IR 编�
 commit/push 授权，因此没有创建提交、推送分支或触发远端 CI。下一步建议在明确外部调用预算、
 凭据和审计策略后，先实现 Codex planning adapter 与 raw interaction artifact，再设计
 transactional plan store 和显式 plan-to-workflow compilation/approval 边界。
+
+---
+
+## DEV-2026-08-17-20 — 交互式任务规划工作台闭环完善
+
+- 状态：完成（本地契约、真实 HTTP/Vite proxy 联调与统一门禁；截图式视觉验收受环境限制）
+- 类型：task planning、application service、authenticated API、Workbench UI、兼容性、ADR
+
+### 决策与边界
+
+1. 采用 ADR-0032：在真实 Codex adapter 之前先稳定交互式规划契约和使用体验。新增结构化
+   节点信息、确定性完整度评估、语义边 CRUD、proposal reject、revision derive 与
+   archive/restore；所有写操作继续要求认证 planner、随机提交 token 和 `expected_revision`，
+   并追加新哈希链记录。
+2. plan assessment 只评估执行前设计质量。pending proposal、空图、归档状态和 validation
+   节点缺少验证要求是 blocker；warning/info 提示缺少人工门、验收标准、交付物或存在孤立
+   节点。finalization 拒绝 blocker，但不触发 `WorkflowKernel.transition`，也不声称执行验证通过。
+3. React Flow 拖动坐标按 plan 存在浏览器 local presentation metadata，不进入
+   `TaskPlanSnapshot`、JSONL 或未来 Workflow IR。Agent 候选仍以完整图应用或拒绝，不获得
+   逐项写权限。
+
+### 落实
+
+1. `TaskPlanNode` 增加验收标准、交付物、约束、风险、验证要求和人工决策标记；新增
+   `TaskPlanAssessment`/issue 契约与纯确定性评估。fixture 为初始五阶段图提供可用的结构化
+   内容，多轮提案更新时保留这些字段。
+2. `TaskOrchestrationService` 和 loopback API 新增 assessment、proposal reject、edge
+   create/update/delete、历史 revision 派生和 archive/restore。归档计划只读；历史派生、
+   归档和恢复都创建新 draft revision，保留 `latest_finalized_revision` 和完整历史。
+3. 新字段采用默认值兼容旧记录。`LocalTaskPlanStore` 读取时先对磁盘原始 JSON 精确计算旧
+   SHA-256，再进行当前模型升级和链校验，避免默认字段导致旧 revision 误报，同时不接受在
+   旧记录中注入新字段而不更新哈希。
+4. Workbench 新增多计划搜索/切换/归档、内联创建、proposal 图差异和应用/拒绝、完整度问题
+   导航、结构化节点 Inspector、React Flow 通用连线与 edge Inspector、浏览器本地布局、
+   revision compare 与从历史版本派生新草案。Workflow Studio 和执行内核保持隔离。
+5. README、交互指南、路线图、任务编排手册和 ADR 索引已经同步；本轮复用既有 React Flow、
+   React、Vite 和 Python 栈，没有修改 lockfile 或增加外部依赖。
+
+### 变更文件
+
+- 领域与应用：`src/jobslayer/orchestration/__init__.py`、
+  `src/jobslayer/application/task_orchestration.py`；
+- adapters/API：`src/jobslayer/adapters/local_orchestration.py`、
+  `src/jobslayer/adapters/local_planning_agent.py`、`src/jobslayer/orchestration/web.py`；
+- UI：`ui-framework/src/components/TaskOrchestration.tsx`、`ui-framework/src/taskPlan.ts`、
+  `ui-framework/src/types.ts`、`ui-framework/src/styles.css`、`ui-framework/README.md`；
+- 测试：`tests/test_orchestration.py`、`tests/test_orchestration_web.py`；
+- 文档：`docs/adr/0032-governed-interactive-planning-workbench.md`、`docs/adr/README.md`、
+  `docs/TASK_ORCHESTRATION.md`、`docs/INTERACTION_DESIGN_GUIDE.md`、`docs/ROADMAP.md`、
+  `README.md` 和本日志。
+
+### 精确验证证据
+
+1. `.\.venv\Scripts\python.exe -m unittest tests.test_orchestration
+   tests.test_orchestration_web -v`：13 项全部通过，用时 0.591 秒；覆盖 proposal 不直接改图、
+   apply/reject、结构化节点、边 CRUD 与环拒绝、finalization blocker、归档只读、历史派生、
+   stale revision、旧记录升级和原始哈希篡改拒绝。
+2. `.\init.cmd -- npm --prefix ui-framework run check`：TypeScript `tsc --noEmit` 与 Vite
+   8.2.1 production build 通过，2718 modules transformed；没有安装或升级依赖。
+3. 真实本地纵向联调：在隔离临时目录签发 30 分钟 `planner` identity，启动
+   `.\jobslayer.cmd orchestration-api --state-root <temp> --port 8780` 和 Vite 4173；所有请求经
+   `/api/orchestration` same-origin proxy 执行。`plan-ui-e2e` 连续形成 10 个 revision，覆盖创建、
+   应用五节点候选、讨论产生 `+1` 节点候选、拒绝后仍为五节点、edge create/update、从 v2
+   派生、assessment ready、v8 finalization、v9 archive 和 v10 restore；最终
+   `latest_finalized_revision=8`，history 数量为 10，末端 record hash 完全匹配。随后停止本轮
+   进程，确认 4173/8780 无 listener，并删除临时 key/session/state/log。
+4. 浏览器技能按本地 URL 完成连接恢复检查，但运行环境返回可用浏览器列表 `[]`，因此不能
+   生成截图式布局和点击验收证据；没有改用无关浏览器后端冒充验收。
+5. 文档落盘前运行 `.\jobslayer.cmd check`：8/8 全部通过；230 项 unittest `OK`、7 项因
+   Windows/POSIX 权限、未配置 PostgreSQL DSN 或 bubblewrap 而 skip；UI production build
+   转换 2718 modules，compile、dependency consistency、BraveNewWorld testbed、两套 runbook
+   与 Git diff 检查全部通过；完整命令退出码为 0，用时 99.5 秒。
+6. 本条开发日志落盘后再次运行 `.\jobslayer.cmd check`：8/8 全部通过；230 项 unittest
+   `OK`、7 项 skip，UI production build 再次转换 2718 modules；完整命令退出码为 0，
+   用时 98.6 秒。最终 `git diff --check` 返回 0。
+
+### 限制与下一步
+
+当前仍没有真实 Codex planning adapter、provider raw interaction artifact、逐项 proposal
+合并、多人事务 store、生产静态托管或 plan-to-Workflow IR 编译。浏览器本地布局是可丢弃
+展示数据；finalized plan 仍不代表任务已执行、验证、批准或完成。本轮没有修改
+`WorkflowKernel`、执行状态、运行权限或 Agent runtime，也没有 commit、push 或部署。
+
+下一步先在有可用浏览器的环境补一次桌面/窄屏截图式验收和键盘/可访问性检查；随后在明确
+外部调用预算、凭据、raw-log 制品与审计策略后实现真实 Codex `PlanningAgent` adapter，最后
+再设计显式、只预览的 plan-to-Workflow IR 确定性编译边界。
+
+---
+
+## DEV-2026-08-17-21 — 证据绑定的 Codex 规划适配器
+
+- 状态：完成（假 CLI 契约、相关回归与统一完整门禁；未发起真实/付费模型调用）
+- 类型：task planning、Codex adapter、artifact evidence、authenticated API、CLI、ADR
+
+### 决策与边界
+
+1. 采用 ADR-0033。`PlanningAgent` 现在返回非权威 `TaskPlanProposalDraft`；只有
+   `TaskOrchestrationService` 可以分配 `proposal_id`、绑定 base revision、adapter 和时间，模型
+   不能拥有权威 proposal envelope、计划 store 或应用/定稿决定。
+2. `CodexPlanningAgent` 使用官方非交互 `codex exec` JSONL、output Schema 和 final-message
+   文件，固定 read-only sandbox、ephemeral/ignore-user-config、单次调用、显式 model、超时和
+   prompt/output 上限。它复用最小 Codex 环境和跨平台 `ProcessSupervisor`，不继承 ambient API key。
+3. 每次已启动调用把精确 prompt、raw JSONL、stderr 和 final JSON 登记为四个内容寻址不可变
+   制品。成功 draft 保存 invocation/artifact ID；失败制品仍可查询，但 provider 故障返回 `502`
+   且不会创建或追加 plan revision。
+4. adapter 输出先通过严格字段 Schema，再重建 provider-neutral node/edge 并验证长度、枚举、
+   引用和 DAG 无环。JobSlayer 保留同 ID 节点已有 attributes。没有自动 retry，也没有把模型
+   叙述、usage 或置信度当作应用、验证或完成证据。
+5. `orchestration-api` 默认仍为离线 `LocalPlanningAgent`。真实 provider 必须同时指定
+   `--planning-agent codex`、`--allow-external-planning-agent` 和显式 `--codex-model`；本轮只运行
+   假 CLI，没有发起真实或付费调用，也没有增加 Python/npm 依赖。
+
+### 变更文件
+
+- 共享 Codex 进程边界与新 adapter：`src/jobslayer/adapters/codex_common.py`、
+  `src/jobslayer/adapters/codex_cli.py`、`src/jobslayer/adapters/codex_planning_agent.py`；
+- 规划契约/应用/API/CLI：`src/jobslayer/orchestration/__init__.py`、
+  `src/jobslayer/adapters/local_planning_agent.py`、
+  `src/jobslayer/application/task_orchestration.py`、`src/jobslayer/orchestration/web.py`、
+  `src/jobslayer/cli.py`；
+- 测试：`tests/test_codex_planning_agent.py`、`tests/test_orchestration_web.py`；
+- Workbench evidence 提示：`ui-framework/src/types.ts`、
+  `ui-framework/src/components/TaskOrchestration.tsx`、`ui-framework/src/styles.css`、
+  `ui-framework/README.md`；
+- 架构与文档：`docs/adr/0033-evidence-bound-codex-planning-adapter.md`、
+  `docs/adr/README.md`、`docs/TASK_ORCHESTRATION.md`、`docs/INTERACTION_DESIGN_GUIDE.md`、
+  `docs/ROADMAP.md`、`README.md` 和本日志。
+
+### 精确验证证据
+
+1. `codex exec --help`：本机 CLI 明确提供非交互 stdin prompt、`--json` JSONL、
+   `--output-schema`、`--output-last-message`、`--ephemeral`、`--ignore-user-config`、`--model`、
+   `--sandbox read-only` 和 `--cd`；该命令只读取帮助，没有调用模型。
+2. `.\.venv\Scripts\python.exe -m unittest tests.test_codex_planning_agent
+   tests.test_orchestration tests.test_orchestration_web tests.test_codex_cli
+   tests.test_unified_entrypoint -v`：38 项全部通过，用时 7.245 秒。覆盖 JobSlayer-owned proposal、
+   完整 raw artifact、ambient API key 隔离、显式 CLI gate、Schema/JSONL 拒绝、非零退出不重试、
+   超时终止、file-backed output 上限、provider `502` 不落 revision，以及既有 Codex executor 回归。
+3. `.\init.cmd -- npm --prefix ui-framework run check`：TypeScript `tsc --noEmit` 与 Vite 8.2.1
+   production build 通过，2718 modules transformed；没有安装或升级依赖。
+4. `git diff --check`：返回 0；仅显示既有工作树 CRLF/LF 转换提示，无 whitespace error。
+5. 本条初稿落盘后运行 `.\jobslayer.cmd check`：8/8 全部通过；240 项 unittest `OK`、
+   7 项因 Windows/POSIX 权限、未配置 PostgreSQL DSN 或 bubblewrap 而 skip；UI production
+   build 转换 2718 modules，compile、dependency consistency、BraveNewWorld testbed、两套
+   runbook 和 Git diff 检查全部通过；完整命令退出码为 0，用时 100.1 秒。
+6. 本条首轮结果回填后再次运行 `.\jobslayer.cmd check`：8/8 全部通过；240 项 unittest
+   `OK`、7 项 skip，UI production build 再次转换 2718 modules；完整命令退出码为 0，用时
+   100.1 秒。随后仅回填本项结果，并再次运行 `git diff --check`。
+7. 最终发现工作区实际位于 `main`，而约定的本地 `UI_Framework` 停在其严格祖先 `6c4001b` 且
+   无独有提交；将本地分支安全快进到已验证基线 `35a66cd` 后切换到 `UI_Framework`。未 commit、
+   push 或修改 `origin/UI_Framework`，所有未提交变更原样保留。
+
+### 限制与下一步
+
+当前没有执行真实/付费 Codex planning smoke test。CLI 能强制显式 model、单次调用、时间和 I/O
+上限，但当前 Codex CLI 接口不能由本 adapter 预先强制美元/token 上限；生产启用前仍需明确
+账户预算、短期凭据/授权和制品保留/访问策略。`CODEX_HOME` 登录上下文是当前允许的认证来源，
+ambient `OPENAI_API_KEY` 会被剥离。
+
+失败制品目前只能通过本地 registry 查询，Workbench 只显示 invocation 和 artifact 数量，尚无
+通用 Artifact Viewer API。多人事务 store、逐项 proposal 合并和 plan-to-Workflow IR 仍未实现；
+finalized plan 仍不代表执行、验证、批准或完成。下一步在用户明确真实调用预算后，对隔离的临时
+计划执行一次 read-only smoke test 并复核四类制品，然后优先把 planning artifacts 接到只读
+Artifact Viewer，而不是扩大模型权限。
