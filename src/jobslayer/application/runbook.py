@@ -49,6 +49,10 @@ class CodexCliConfig(_RunbookModel):
     """Fixed adapter selection; executable and credentials stay operator-owned."""
 
     adapter: Literal["codex_cli"] = "codex_cli"
+    model: str | None = Field(default=None, min_length=1, max_length=160)
+    reasoning_effort: Literal[
+        "none", "low", "medium", "high", "xhigh", "max"
+    ] | None = None
 
 
 class LocalTaskRunbook(_RunbookModel):
@@ -86,8 +90,10 @@ class LocalTaskRunbook(_RunbookModel):
             if spec.output_schema != "unified_diff":
                 raise ValueError("scripted_patch output_schema must be unified_diff")
         else:
-            if spec.model_profile != "default":
-                raise ValueError("codex_cli currently requires the default model profile")
+            if spec.model_profile != "default" and self.executor.model is None:
+                raise ValueError(
+                    "a non-default Codex model profile requires an explicit model"
+                )
             if spec.permission_profile != "workspace_write":
                 raise ValueError("codex_cli implementation runs require workspace_write")
             if spec.output_schema != "none":

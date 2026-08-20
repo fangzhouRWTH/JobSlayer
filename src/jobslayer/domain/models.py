@@ -36,6 +36,8 @@ class TaskState(str, Enum):
     FAILED = "failed"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+    GATE_APPROVED = "gate_approved"
+    DELIVERABLE_ACCEPTED = "deliverable_accepted"
 
 
 class ActorType(str, Enum):

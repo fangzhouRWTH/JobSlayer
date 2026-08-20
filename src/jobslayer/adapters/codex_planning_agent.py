@@ -99,6 +99,7 @@ class CodexPlanningAgent:
         external_call_authorized: bool = False,
         codex_binary: str | os.PathLike[str] | Sequence[str] = "codex",
         model: str | None = None,
+        reasoning_effort: str | None = None,
         timeout_seconds: float = 120,
         max_prompt_bytes: int = 512 * 1024,
         max_output_bytes: int = 4 * 1024 * 1024,
@@ -122,6 +123,17 @@ class CodexPlanningAgent:
             raise CodexPlanningAgentConfigurationError(
                 "Codex planning model must be omitted or non-blank"
             )
+        if reasoning_effort is not None and reasoning_effort not in {
+            "none",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max",
+        }:
+            raise CodexPlanningAgentConfigurationError(
+                "unsupported Codex planning reasoning effort"
+            )
         if timeout_seconds < 1 or timeout_seconds > 900:
             raise CodexPlanningAgentConfigurationError(
                 "Codex planning timeout must be between 1 and 900 seconds"
@@ -139,6 +151,7 @@ class CodexPlanningAgent:
         self.external_call_authorized = external_call_authorized
         self.codex_command = command
         self.model = model.strip() if model is not None else None
+        self.reasoning_effort = reasoning_effort
         self.timeout_seconds = timeout_seconds
         self.max_prompt_bytes = max_prompt_bytes
         self.max_output_bytes = max_output_bytes
@@ -311,6 +324,13 @@ class CodexPlanningAgent:
         ]
         if self.model is not None:
             command.extend(("--model", self.model))
+        if self.reasoning_effort is not None:
+            command.extend(
+                (
+                    "--config",
+                    f'model_reasoning_effort="{self.reasoning_effort}"',
+                )
+            )
         command.append("-")
         return command
 

@@ -42,12 +42,16 @@
 - [~] 制品注册表和对象存储接口（提供方无关协议与本地内容寻址 adapter 已完成；远程对象存储、权限和保留策略待实现）；
 - [ ] Dagger 构建/测试定义；
 - [~] 基于风险、错误类型和预算的有界重试（预算预留/扣减/超限取消、attempt/repair 上限已完成；自动修复编排待实现）；
+- [~] 小时级任务本地持久控制面（provider-neutral start identity、多维 hard/soft/observe/unavailable
+  预算、append-only SQLite event/checkpoint、lease orphan 接管和显式 retry，以及 API 重启可定位的
+  TaskManager 本机 Codex worker、运行级 worktree 与原始证据已完成；长任务服务与 TaskManager run 的
+  统一 lease/checkpoint、机器重启恢复、后台调度与共享事务装配待实现）；
 - [~] OpenTelemetry 统一运行层级（provider-neutral sink、官方 API adapter 与无敏感标量事件已完成；生产 exporter 和跨进程 trace 传播待实现）；
 - [ ] Langfuse 或 Phoenix 二选一的观测验证；
 - [ ] Promptfoo 的模型/提示回归套件；
 - [x] 本地认证项目仪表板、证据面板和审批状态视图；
-- [~] Web-first 工程工作台交互框架（隔离的 Stage 0 原型已使用 lockfile 外部组件并进入根级/CI production build 门禁；总索引、Workflow Studio、Run Inspector、Artifact Review 与 Observability 尚未接入 read model、事件流或任何写命令）；
-- [~] 协作式任务编排（本地纵向切片已支持多计划管理、认证讨论、proposal/diff/apply/reject、结构化节点、语义边 CRUD、版本化 DAG、完整度门禁、历史比较/派生、归档和追加式定稿；Codex planning adapter 已完成显式 opt-in、结构化输出与 raw artifact 假 CLI 契约验证，真实预算授权 smoke test、多人事务 store 与 plan-to-Workflow IR 编译仍后置）；
+- [~] Web-first 工程工作台交互框架（主入口已收紧为真实 TaskManager 双栏应用，使用 React Flow 展示 revision-bound DAG，并接入任务切换、Backlog、总日志、Agent 对话和 plan-bound run 状态/证据；原 Stage 0 实验页保留为直接访问的 legacy lab，尚未全部接入统一真相）；
+- [~] 协作式任务编排（TaskManager facade/API 已支持多任务摘要、认证讨论、proposal apply/reject、完整度门禁、execution target ID + source bundle hash 固化、Backlog、完整审计日志，以及 finalized revision 到唯一 governed run 的装配、Kernel 节点历史、持久 Codex start-or-locate 和证据反馈；首个 BraveNewWorld 悬架 target 已绑定固定 bnw-0、允许/禁止路径、`gpt-5.6-sol/xhigh` 预算和两条 `./bnw` 门禁，错配图会确定性阻断；真实计划 proposal 已由用户应用；下一步是 human-gate/verifier/reviewer 完成路径、失败制品全局索引、多人事务 store 与更通用 Workflow IR 编译）；
 - [x] 跨平台开发环境初始化入口（仓库 venv、固定校验的用户级 Node LTS、lockfile UI install、只读 JSON 检测与离线/分组件模式）；
 - [ ] OpenHands 适配器的有界 PoC。
 
@@ -70,7 +74,8 @@
 
 ## Phase 3 — 持久与分布式执行
 
-仅在出现小时/天级任务、服务重启恢复、远程 GPU 或并行训练的真实需求后引入：
+小时级任务需求已经出现，因此先用现有 SQLite/artifact/lease 验证本地控制面契约，不提前增加
+分布式依赖。仅在服务级调度、天级任务、远程 GPU 或并行训练有退出证据后引入：
 
 - [ ] Temporal 持久工作流；
 - [ ] Ray 仿真/训练任务；

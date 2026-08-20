@@ -31,7 +31,12 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
 - 只读多运行 Dashboard、持久证据/事件视图、无敏感字段遥测和确定性执行器比较；
 - 认证的协作式任务编排：多计划管理、多轮讨论、Agent 候选图差异与应用/拒绝、结构化
   节点和语义边 CRUD、完整度评估、历史派生、归档、追加式 revision 与用户定稿哈希；另提供
-  显式 opt-in、结构化输出和原始交互制品绑定的 Codex planning adapter，本地 fixture 仍为默认；
+  显式 opt-in、结构化输出和原始交互制品绑定的 Codex planning adapter，以及认证、去存储 URI、
+  哈希验证的有界规划证据查看器；本地 fixture 仍为默认；
+- 聚焦的 TaskManager 主应用：统一任务摘要、revision-bound DAG/Backlog/总日志、完整 Agent
+  对话、proposal 决定与任务流固化，以源包哈希锁定 BraveNewWorld target，并把 finalized revision
+  装配为 hash-chained、Kernel-owned 的节点运行；显式启用的 durable 本机 Codex worker 支持 API
+  重启后 start-or-locate、运行级隔离 worktree 和原始证据，默认仍禁用 dispatch，且不伪造完成；
 - 一个可运行的闭环演示和标准库测试；
 - 项目指导、架构决策和分阶段路线图。
 
@@ -98,6 +103,18 @@ POSIX（Linux/macOS/WSL）公共命令示例：
   --open-browser
 ```
 
+TaskManager 本地双栏应用需要 planner 身份，随后分别启动 API 与 Vite：
+
+```bash
+./jobslayer task-manager-api \
+  --identity-session .jobslayer/identity/task-manager-session.json \
+  --identity-key .jobslayer/identity/task-manager-key.json
+sh ./init.sh -- npm --prefix ui-framework run dev
+```
+
+打开 `http://127.0.0.1:4173/#/task-manager`。身份创建、Codex opt-in 和接口说明见
+[TaskManager 聚焦应用](docs/TASK_MANAGER.md)。
+
 Windows PowerShell 使用原生 Python，不要求 WSL：
 
 ```powershell
@@ -129,6 +146,8 @@ Draft -> Planned -> Implementing -> Verifying -> Reviewing
 - [项目开发指导](docs/PROJECT_GUIDE.md)
 - [交互设计与前后端协作指南](docs/INTERACTION_DESIGN_GUIDE.md)
 - [协作式任务编排](docs/TASK_ORCHESTRATION.md)
+- [TaskManager 聚焦应用](docs/TASK_MANAGER.md)
+- [长任务执行与恢复](docs/LONG_RUNNING_EXECUTION.md)
 - [Workbench Stage 0 交互原型](ui-framework/README.md)
 - [跨平台开发环境初始化](docs/INITIALIZATION.md)
 - [初步实施路线图](docs/ROADMAP.md)

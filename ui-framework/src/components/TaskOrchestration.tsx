@@ -17,8 +17,11 @@ import {
   AlertTriangle,
   Archive,
   Bot,
+  Braces,
   Check,
   CirclePlus,
+  FileSearch,
+  FileText,
   GitBranch,
   GitCompare,
   Info,
@@ -39,6 +42,8 @@ import {
 } from "lucide-react";
 import { diffPlanGraphs, joinLines, splitLines } from "../taskPlan";
 import type {
+  PlanningArtifactDescriptor,
+  PlanningArtifactPreview,
   TaskPlanAssessment,
   TaskPlanEdge,
   TaskPlanEdgeRelation,
@@ -58,6 +63,7 @@ interface OrchestrationSession {
     edge_crud: boolean;
     revision_derivation: boolean;
     completeness_assessment: boolean;
+    planning_artifact_viewer: boolean;
   };
 }
 
@@ -92,6 +98,19 @@ const relationColors: Record<TaskPlanEdgeRelation, string> = {
   branch: "#f2c86b",
   subtask: "#b9ff66",
 };
+
+const artifactLabels: Record<string, string> = {
+  "task_plan.agent.prompt": "PROMPT",
+  "task_plan.agent.raw_events": "RAW JSONL",
+  "task_plan.agent.stderr": "STDERR",
+  "task_plan.agent.final_output": "FINAL JSON",
+};
+
+function formatBytes(size: number): string {
+  if (size < 1_024) return `${size} B`;
+  if (size < 1_024 * 1_024) return `${(size / 1_024).toFixed(1)} KiB`;
+  return `${(size / (1_024 * 1_024)).toFixed(1)} MiB`;
+}
 
 function PlanNodeCard({ data, selected }: NodeProps<PlanGraphNode>) {
   const Icon = data.kind === "human_gate" ? LockKeyhole : data.kind === "validation" ? ShieldCheck : data.kind === "milestone" ? GitBranch : ListTree;
@@ -198,6 +217,11 @@ export function TaskOrchestration({ onNotice }: TaskOrchestrationProps) {
   const [record, setRecord] = useState<TaskPlanRevisionRecord | null>(null);
   const [history, setHistory] = useState<TaskPlanRevisionRecord[]>([]);
   const [assessment, setAssessment] = useState<TaskPlanAssessment | null>(null);
+  const [planningArtifacts, setPlanningArtifacts] = useState<PlanningArtifactDescriptor[]>([]);
+  const [artifactPreview, setArtifactPreview] = useState<PlanningArtifactPreview | null>(null);
+  const [artifactError, setArtifactError] = useState<string | null>(null);
+  const [showArtifactViewer, setShowArtifactViewer] = useState(false);
+  const [artifactBusy, setArtifactBusy] = useState(false);
   const [layoutPositions, setLayoutPositions] = useState<LayoutPositions>({});
   const [taskDescription, setTaskDescription] = useState("");
   const [discussion, setDiscussion] = useState("");
@@ -231,7 +255,26 @@ export function TaskOrchestration({ onNotice }: TaskOrchestrationProps) {
     return listing.plans;
   };
 
-  const loadPlan = async (planId: string) => {
+  const refreshArtifacts = async (
+    planId: string,
+    activeSession: OrchestrationSession | null = session,
+  ): Promise<PlanningArtifactDescriptor[]> => {
+    if (!activeSession?.capabilities.planning_artifact_viewer) {
+      setPlanningArtifacts([]);
+      return [];
+    }
+    const result = await api<{ artifacts: PlanningArtifactDescriptor[] }>(
+      `/plans/${encodeURIComponent(planId)}/artifacts`,
+      { token: activeSession.submission_token },
+    );
+    setPlanningArtifacts(result.artifacts);
+    return result.artifacts;
+  };
+
+  const loadPlan = async (
+    planId: string,
+    activeSession: OrchestrationSession | null = session,
+  ) => {
     const [next, result, nextAssessment] = await Promise.all([
       api<TaskPlanRevisionRecord>(`/plans/${encodeURIComponent(planId)}`),
       api<{ history: TaskPlanRevisionRecord[] }>(`/plans/${encodeURIComponent(planId)}/history`),
@@ -241,11 +284,22 @@ export function TaskOrchestration({ onNotice }: TaskOrchestrationProps) {
     setRecord(next);
     setHistory(result.history);
     setAssessment(nextAssessment);
+    setPlanningArtifacts([]);
+    setArtifactPreview(null);
+    setArtifactError(null);
+    setShowArtifactViewer(false);
     setSelectedId(null);
     setSelectedEdgeId(null);
     setCompareRevision(result.history.at(-2)?.sequence ?? result.history.at(-1)?.sequence ?? null);
     setShowPlanManager(false);
     setError(null);
+    if (activeSession?.capabilities.planning_artifact_viewer) {
+      try {
+        await refreshArtifacts(planId, activeSession);
+      } catch (caught) {
+        setArtifactError(caught instanceof Error ? caught.message : "规划制品列表读取失败");
+      }
+    }
   };
 
   useEffect(() => {
@@ -261,7 +315,7 @@ export function TaskOrchestration({ onNotice }: TaskOrchestrationProps) {
           .filter((item) => !item.snapshot.is_archived)
           .sort((left, right) => left.occurred_at.localeCompare(right.occurred_at))
           .at(-1) ?? [...listing.plans].sort((left, right) => left.occurred_at.localeCompare(right.occurred_at)).at(-1) ?? null;
-        if (latest) await loadPlan(latest.plan_id);
+        if (latest) await loadPlan(latest.plan_id, nextSession);
       } catch (caught) {
         if (active) setError(caught instanceof Error ? caught.message : "任务编排 API 不可用");
       }
@@ -336,6 +390,11 @@ export function TaskOrchestration({ onNotice }: TaskOrchestrationProps) {
     setCompareRevision((current) => current ?? result.history.at(-2)?.sequence ?? null);
     setError(null);
     onNotice(notice);
+    if (session?.capabilities.planning_artifact_viewer) {
+      void refreshArtifacts(next.plan_id, session).catch((caught) => {
+        setArtifactError(caught instanceof Error ? caught.message : "规划制品列表读取失败");
+      });
+    }
   };
 
   const mutate = async (
@@ -352,6 +411,9 @@ export function TaskOrchestration({ onNotice }: TaskOrchestrationProps) {
       return next;
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "编排命令失败");
+      if (snapshot && session?.capabilities.planning_artifact_viewer) {
+        void refreshArtifacts(snapshot.plan_id, session).catch(() => undefined);
+      }
       return null;
     } finally {
       setBusy(false);
@@ -520,6 +582,36 @@ export function TaskOrchestration({ onNotice }: TaskOrchestrationProps) {
     try { window.localStorage.setItem(layoutKey(snapshot.plan_id), JSON.stringify(next)); } catch { /* view metadata remains in memory */ }
   };
 
+  const loadArtifactPreview = async (artifact: PlanningArtifactDescriptor) => {
+    if (!snapshot || !session) return;
+    setArtifactBusy(true);
+    setArtifactError(null);
+    try {
+      const preview = await api<PlanningArtifactPreview>(
+        `/plans/${encodeURIComponent(snapshot.plan_id)}/artifacts/${encodeURIComponent(artifact.artifact_id)}`,
+        { token: session.submission_token },
+      );
+      setArtifactPreview(preview);
+    } catch (caught) {
+      setArtifactPreview(null);
+      setArtifactError(caught instanceof Error ? caught.message : "规划制品读取失败");
+    } finally {
+      setArtifactBusy(false);
+    }
+  };
+
+  const openArtifactViewer = async () => {
+    if (!snapshot || !session) return;
+    setShowArtifactViewer(true);
+    try {
+      const artifacts = await refreshArtifacts(snapshot.plan_id, session);
+      const selected = artifacts.find((item) => item.artifact_id === artifactPreview?.artifact.artifact_id) ?? artifacts[0];
+      if (selected) await loadArtifactPreview(selected);
+    } catch (caught) {
+      setArtifactError(caught instanceof Error ? caught.message : "规划制品列表读取失败");
+    }
+  };
+
   const archived = Boolean(snapshot?.is_archived);
   const editingDisabled = busy || pending || archived;
 
@@ -532,6 +624,7 @@ export function TaskOrchestration({ onNotice }: TaskOrchestrationProps) {
         </div>
         <div className="page-actions">
           <button className="button button-quiet" onClick={() => setShowPlanManager((value) => !value)}><ListTree size={15} /> 计划库 · {plans.length}</button>
+          {session?.capabilities.planning_artifact_viewer && snapshot && <button className="button button-quiet" onClick={() => void openArtifactViewer()}><FileSearch size={15} /> 规划证据 · {planningArtifacts.length}</button>}
           <button className="button button-quiet" onClick={() => { setShowCreate((value) => !value); setShowPlanManager(false); }}><CirclePlus size={15} /> 新计划</button>
           {snapshot && <button className="button button-quiet" disabled={busy || pending} onClick={toggleArchive}>{archived ? <RotateCcw size={15} /> : <Archive size={15} />} {archived ? "恢复" : "归档"}</button>}
           <button className="button button-primary" disabled={busy || !snapshot || !assessment?.ready_to_finalize || snapshot.status === "finalized" || archived} onClick={finalizePlan}><LockKeyhole size={15} /> 固化最终路径</button>
@@ -564,6 +657,39 @@ export function TaskOrchestration({ onNotice }: TaskOrchestrationProps) {
           <textarea value={taskDescription} onChange={(event) => setTaskDescription(event.target.value)} placeholder="描述希望完成的目标、范围、约束和验收方向……" rows={4} autoFocus />
           <button className="button button-primary" disabled={!session || busy || !taskDescription.trim()}><CirclePlus size={15} /> 创建并生成提案</button>
         </form>
+      )}
+
+      {showArtifactViewer && snapshot && (
+        <section className="planning-artifact-viewer panel-surface" role="region" aria-label="规划制品查看器">
+          <header>
+            <div><FileSearch size={18} /><span><strong>Planning Artifact Viewer</strong><small>{snapshot.plan_id} · 只读、完整性校验后的文本预览</small></span></div>
+            <button aria-label="关闭规划制品查看器" onClick={() => setShowArtifactViewer(false)}><X size={16} /></button>
+          </header>
+          <div className="planning-artifact-layout">
+            <aside>
+              <div className="panel-label">IMMUTABLE EVIDENCE · {planningArtifacts.length}</div>
+              {planningArtifacts.map((artifact) => {
+                const Icon = artifact.artifact_type === "task_plan.agent.final_output" ? Braces : artifact.artifact_type === "task_plan.agent.raw_events" ? FileText : MessageSquareText;
+                return <button key={artifact.artifact_id} className={artifactPreview?.artifact.artifact_id === artifact.artifact_id ? "active" : ""} onClick={() => void loadArtifactPreview(artifact)}>
+                  <span className="artifact-file-icon"><Icon size={15} /></span>
+                  <span><strong>{artifactLabels[artifact.artifact_type] ?? artifact.artifact_type}</strong><small>{formatBytes(artifact.size_bytes)} · {artifact.sha256.slice(0, 12)}</small></span>
+                  <i>{artifact.invocation_id?.slice(0, 12) ?? "no-run"}</i>
+                </button>;
+              })}
+              {!planningArtifacts.length && <p>当前计划没有外部规划制品。本地 fixture 不会伪造模型证据。</p>}
+            </aside>
+            <main>
+              {artifactBusy ? <div className="planning-artifact-empty"><span /><strong>正在校验内容哈希</strong></div> : artifactError ? <div className="planning-artifact-error"><AlertTriangle size={18} /><strong>无法显示制品</strong><p>{artifactError}</p></div> : artifactPreview ? <>
+                <div className="planning-artifact-meta">
+                  <span><b>{artifactLabels[artifactPreview.artifact.artifact_type] ?? artifactPreview.artifact.artifact_type}</b><small>{artifactPreview.artifact.producer} · {artifactPreview.artifact.invocation_id ?? "no invocation"}</small></span>
+                  <span><ShieldCheck size={13} /> SHA-256 VERIFIED</span>
+                </div>
+                <pre>{artifactPreview.content || "（空制品）"}</pre>
+                <footer><code>{artifactPreview.artifact.sha256}</code><span>{formatBytes(artifactPreview.preview_size_bytes)} preview{artifactPreview.truncated ? " · TRUNCATED" : " · COMPLETE"}</span></footer>
+              </> : <div className="planning-artifact-empty"><FileSearch size={24} /><strong>选择一项规划证据</strong><small>存储 URI 不会暴露给浏览器。</small></div>}
+            </main>
+          </div>
+        </section>
       )}
 
       <div className={`orchestration-banner ${!session ? "offline" : archived ? "archived" : ""}`}>

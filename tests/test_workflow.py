@@ -137,6 +137,102 @@ class WorkflowKernelTests(unittest.TestCase):
             self.transition(TaskState.IMPLEMENTING, ActorType.AGENT)
         self.assertEqual(self.kernel.current_state(self.task_id), TaskState.PLANNED)
 
+    def test_human_can_approve_a_plan_review_gate_with_evidence(self) -> None:
+        self.transition(TaskState.PLANNED)
+        self.transition(TaskState.PLAN_REVIEW)
+        self.kernel.transition(
+            task_id=self.task_id,
+            to_state=TaskState.GATE_APPROVED,
+            actor_type=ActorType.HUMAN,
+            actor_id="scope-owner",
+            reason="the finalized scope is explicit",
+            evidence_ids=("artifact-scope-decision",),
+        )
+
+        self.assertEqual(
+            self.kernel.current_state(self.task_id),
+            TaskState.GATE_APPROVED,
+        )
+        self.assertEqual(
+            self.kernel.history(self.task_id)[-1].evidence_ids,
+            ("artifact-scope-decision",),
+        )
+
+    def test_gate_approval_rejects_agent_or_missing_evidence(self) -> None:
+        self.transition(TaskState.PLANNED)
+        self.transition(TaskState.PLAN_REVIEW)
+
+        with self.assertRaises(AuthorizationError):
+            self.kernel.transition(
+                task_id=self.task_id,
+                to_state=TaskState.GATE_APPROVED,
+                actor_type=ActorType.AGENT,
+                actor_id="agent",
+                reason="self approval is forbidden",
+                evidence_ids=("artifact-agent-claim",),
+            )
+        with self.assertRaises(VerificationGateError):
+            self.kernel.transition(
+                task_id=self.task_id,
+                to_state=TaskState.GATE_APPROVED,
+                actor_type=ActorType.HUMAN,
+                actor_id="scope-owner",
+                reason="missing evidence",
+            )
+        self.assertEqual(
+            self.kernel.current_state(self.task_id),
+            TaskState.PLAN_REVIEW,
+        )
+
+    def test_human_can_accept_a_verified_stage_deliverable(self) -> None:
+        self.reach_verifying()
+        passing = report(self.task_id)
+        self.transition(TaskState.REVIEWING, verification_report=passing)
+        self.kernel.transition(
+            task_id=self.task_id,
+            to_state=TaskState.DELIVERABLE_ACCEPTED,
+            actor_type=ActorType.HUMAN,
+            actor_id="stage-reviewer",
+            reason="verified artifact deliverables satisfy the reviewed criteria",
+            verification_report=passing,
+            evidence_ids=("artifact-stage-review",),
+        )
+
+        self.assertEqual(
+            self.kernel.current_state(self.task_id),
+            TaskState.DELIVERABLE_ACCEPTED,
+        )
+        self.assertIn(
+            "artifact-stage-review",
+            self.kernel.history(self.task_id)[-1].evidence_ids,
+        )
+
+    def test_deliverable_acceptance_rejects_agent_or_missing_evidence(self) -> None:
+        self.reach_verifying()
+        passing = report(self.task_id)
+        self.transition(TaskState.REVIEWING, verification_report=passing)
+
+        with self.assertRaises(AuthorizationError):
+            self.kernel.transition(
+                task_id=self.task_id,
+                to_state=TaskState.DELIVERABLE_ACCEPTED,
+                actor_type=ActorType.AGENT,
+                actor_id="self-reviewing-agent",
+                reason="must not self-accept",
+                verification_report=passing,
+                evidence_ids=("artifact-agent-review",),
+            )
+        with self.assertRaises(VerificationGateError):
+            self.kernel.transition(
+                task_id=self.task_id,
+                to_state=TaskState.DELIVERABLE_ACCEPTED,
+                actor_type=ActorType.HUMAN,
+                actor_id="stage-reviewer",
+                reason="missing immutable review evidence",
+                verification_report=passing,
+            )
+        self.assertEqual(self.kernel.current_state(self.task_id), TaskState.REVIEWING)
+
     def test_agent_cannot_complete(self) -> None:
         passing = self.reach_merge_review()
         self.transition(TaskState.INTEGRATING, ActorType.HUMAN, passing)

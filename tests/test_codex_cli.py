@@ -352,6 +352,28 @@ class CodexCliExecutorTests(unittest.TestCase):
         self.assertEqual(cwd, Path(self.manifest.path))
         self.assertEqual(environment, {"PATH": os.defpath})
 
+    def test_explicit_model_profile_includes_xhigh_reasoning_configuration(self) -> None:
+        executor = CodexCliExecutor(
+            self.manager,
+            Path(self.temporary_directory.name) / "profile-artifacts",
+            codex_binary=(sys.executable, str(self.fake_codex)),
+            model_profiles={"gpt-5.6-sol-xhigh": "gpt-5.6-sol"},
+            reasoning_efforts={"gpt-5.6-sol-xhigh": "xhigh"},
+        )
+        invocation = self.invocation("run-profile", "fake task")
+        invocation = invocation.model_copy(
+            update={
+                "run_spec": invocation.run_spec.model_copy(
+                    update={"model_profile": "gpt-5.6-sol-xhigh"}
+                )
+            }
+        )
+
+        command = executor._command_for(invocation, self.manifest)
+
+        self.assertEqual(command[command.index("--model") + 1], "gpt-5.6-sol")
+        self.assertIn('model_reasoning_effort="xhigh"', command)
+
 
 if __name__ == "__main__":
     unittest.main()

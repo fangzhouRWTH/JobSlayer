@@ -207,6 +207,67 @@ class TaskOrchestrationService:
         )
         return self._append(snapshot, "discussion.proposal_recorded")
 
+    def set_execution_target(
+        self,
+        plan_id: str,
+        target_id: str,
+        source_bundle_sha256: str,
+        *,
+        expected_revision: int,
+    ) -> TaskPlanRevisionRecord:
+        latest = self._expected(plan_id, expected_revision).snapshot
+        self._require_active(latest)
+        if latest.pending_proposal is not None:
+            raise PendingTaskPlanProposalError(
+                "apply or reject the pending proposal before selecting an execution target"
+            )
+        identifier = target_id.strip()
+        if not identifier:
+            raise ValueError("execution target id must not be blank")
+        digest = source_bundle_sha256.strip()
+        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+            raise ValueError("execution target source bundle needs a sha256 digest")
+        if (
+            latest.execution_target_id == identifier
+            and latest.execution_target_source_sha256 == digest
+        ):
+            raise TaskOrchestrationError(
+                "task plan already has the requested execution target"
+            )
+        snapshot = self._next_snapshot(
+            latest,
+            execution_target_id=identifier,
+            execution_target_source_sha256=digest,
+        )
+        return self._append(
+            snapshot,
+            f"plan.execution_target_selected:{identifier}",
+        )
+
+    def pin_execution_target_source(
+        self,
+        plan_id: str,
+        source_bundle_sha256: str,
+        *,
+        expected_revision: int,
+    ) -> TaskPlanRevisionRecord:
+        """Append a one-way source pin for a legacy selected target."""
+
+        latest = self._expected(plan_id, expected_revision).snapshot
+        self._require_active(latest)
+        if latest.execution_target_id is None:
+            raise TaskOrchestrationError("task plan has no execution target to pin")
+        if latest.execution_target_source_sha256 is not None:
+            raise TaskOrchestrationError("task plan execution target is already source-pinned")
+        digest = source_bundle_sha256.strip()
+        if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+            raise ValueError("execution target source bundle needs a sha256 digest")
+        snapshot = self._next_snapshot(
+            latest,
+            execution_target_source_sha256=digest,
+        )
+        return self._append(snapshot, "plan.execution_target_source_pinned")
+
     def apply_proposal(
         self,
         plan_id: str,

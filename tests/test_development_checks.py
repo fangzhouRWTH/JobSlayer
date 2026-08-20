@@ -58,13 +58,14 @@ class DevelopmentCheckRunnerTests(unittest.TestCase):
                 "testbed",
                 "runbook",
                 "codex-runbook",
+                "codex-suspension-runbook",
                 "diff",
             ),
         )
-        self.assertEqual(len(invocations), 8)
+        self.assertEqual(len(invocations), 9)
         self.assertTrue(all(cwd == self.root.resolve() for _, cwd in invocations))
         self.assertFalse(report.passed)
-        self.assertIn("7/8 passed", stdout.getvalue())
+        self.assertIn("8/9 passed", stdout.getvalue())
         self.assertEqual(
             report.results[0].step.argv,
             (

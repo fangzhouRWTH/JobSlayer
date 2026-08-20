@@ -204,6 +204,15 @@ class TaskPlanSnapshot(DomainModel):
     plan_id: str = Field(pattern=IDENTIFIER_PATTERN, max_length=128)
     revision: int = Field(ge=1)
     task_description: str = Field(min_length=1, max_length=12_000)
+    execution_target_id: str | None = Field(
+        default=None,
+        pattern=IDENTIFIER_PATTERN,
+        max_length=128,
+    )
+    execution_target_source_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     status: TaskPlanStatus = TaskPlanStatus.DRAFT
     nodes: tuple[TaskPlanNode, ...] = ()
     edges: tuple[TaskPlanEdge, ...] = ()

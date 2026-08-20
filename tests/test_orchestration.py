@@ -16,6 +16,7 @@ from jobslayer.adapters.local_planning_agent import LocalPlanningAgent
 from jobslayer.application.task_orchestration import (
     ArchivedTaskPlanError,
     IncompleteTaskPlanError,
+    PendingTaskPlanProposalError,
     StaleTaskPlanRevisionError,
     TaskOrchestrationService,
     TaskPlanProposalMismatchError,
@@ -43,6 +44,47 @@ class TaskOrchestrationTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
+
+    def test_execution_target_selection_is_revisioned_and_rejects_unsafe_writes(self) -> None:
+        created = self.service.create("绑定外部执行目标", plan_id="plan-target")
+        with self.assertRaises(PendingTaskPlanProposalError):
+            self.service.set_execution_target(
+                created.plan_id,
+                "brave-new-world-suspension-v1",
+                "a" * 64,
+                expected_revision=created.sequence,
+            )
+        self.assertEqual(self.service.get(created.plan_id), created)
+
+        proposal = created.snapshot.pending_proposal
+        assert proposal is not None
+        applied = self.service.apply_proposal(
+            created.plan_id,
+            proposal.proposal_id,
+            expected_revision=created.sequence,
+        )
+        selected = self.service.set_execution_target(
+            created.plan_id,
+            "brave-new-world-suspension-v1",
+            "a" * 64,
+            expected_revision=applied.sequence,
+        )
+        self.assertEqual(
+            selected.snapshot.execution_target_id,
+            "brave-new-world-suspension-v1",
+        )
+        self.assertEqual(
+            selected.operation,
+            "plan.execution_target_selected:brave-new-world-suspension-v1",
+        )
+        with self.assertRaises(StaleTaskPlanRevisionError):
+            self.service.set_execution_target(
+                created.plan_id,
+                "another-target",
+                "b" * 64,
+                expected_revision=applied.sequence,
+            )
+        self.assertEqual(self.service.get(created.plan_id), selected)
 
     def test_discussion_proposes_graph_but_only_user_application_changes_plan(self) -> None:
         created = self.service.create(

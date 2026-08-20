@@ -159,6 +159,19 @@ class DevelopmentCheckRunner:
                 ),
             ),
             DevelopmentCheckStep(
+                step_id="codex-suspension-runbook",
+                description=(
+                    "BraveNewWorld suspension target, budgets, and validation binding"
+                ),
+                argv=(
+                    python,
+                    "-m",
+                    "jobslayer",
+                    "validate-runbook",
+                    "runbooks/bnw-suspension-visualization-001-codex.json",
+                ),
+            ),
+            DevelopmentCheckStep(
                 step_id="diff",
                 description="normalized Git whitespace and conflict-marker validation",
                 argv=("git", "-c", "core.autocrlf=true", "diff", "--check"),

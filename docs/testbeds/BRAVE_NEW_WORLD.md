@@ -221,6 +221,21 @@ BraveNewWorld/
 
 加入 PID 与差速机器人，并从真实开发历史中整理难度递增的任务。目标是验证单文件、跨模块、数值回归、UI 和权限边界任务。
 
+悬架可视化现作为 TaskManager 的第一个 source-pinned BNW 执行目标先行验证编排闭环：
+
+- target：`brave-new-world-suspension-v1`；
+- task：`tasks/bnw-suspension-visualization-001.json`；
+- runbook：`runbooks/bnw-suspension-visualization-001-codex.json`；
+- validation profile：`validation-profiles/brave-new-world-suspension-v1.json`；
+- 固定 base：`bnw-0` / `fb43878c9f0164deef272e55969c0fc134a6d6a3`；
+- 实现范围：`src/brave_new_world/`、`tests/`、`scenarios/`、`docs/`、`README.md`；
+- 禁止范围：`.github/`、`AGENTS.md`、`bnw`、`pyproject.toml`；
+- 必需门禁：`./bnw run-scenario scenarios/suspension-quarter-car.json` 与 `./bnw check`。
+
+2026-08-19 已用本机登录 Codex `gpt-5.6-sol/xhigh` 只读修订计划，形成 11 nodes/11 edges 的
+pending proposal，并通过 target preflight。该结果没有修改 BraveNewWorld、没有启动 execution
+adapter，也没有应用、固化或完成任务图；下一步由用户审查候选图。
+
 ### BNW-3：评估集稳定化
 
 固定一组基线 commit、任务版本和保留验证，将结果接入 JobSlayer 的执行器比较、失败分析和方法回归。

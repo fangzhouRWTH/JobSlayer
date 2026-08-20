@@ -1,15 +1,11 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import {
-  Activity,
-  BarChart3,
   Bell,
   Command,
-  FileSearch,
   HelpCircle,
   Home,
   Menu,
   Network,
-  ListTree,
   Search,
   ShieldCheck,
   X,
@@ -19,21 +15,20 @@ import { Overview } from "./components/Overview";
 import type { ViewId } from "./types";
 
 const WorkflowStudio = lazy(() => import("./components/WorkflowStudio").then((module) => ({ default: module.WorkflowStudio })));
+const TaskManager = lazy(() => import("./components/TaskManager").then((module) => ({ default: module.TaskManager })));
 const TaskOrchestration = lazy(() => import("./components/TaskOrchestration").then((module) => ({ default: module.TaskOrchestration })));
 const RunInspector = lazy(() => import("./components/RunInspector").then((module) => ({ default: module.RunInspector })));
 const ArtifactReview = lazy(() => import("./components/ArtifactReview").then((module) => ({ default: module.ArtifactReview })));
 const Observability = lazy(() => import("./components/Observability").then((module) => ({ default: module.Observability })));
 
 const navItems: Array<{ id: ViewId; label: string; icon: typeof Home }> = [
-  { id: "overview", label: "Prototype index", icon: Home },
-  { id: "orchestration", label: "Task Orchestration", icon: ListTree },
-  { id: "workflow", label: "Workflow Studio", icon: Network },
-  { id: "run", label: "Run Inspector", icon: Activity },
-  { id: "artifact", label: "Artifact Review", icon: FileSearch },
-  { id: "observability", label: "Observability", icon: BarChart3 },
+  { id: "task-manager", label: "TaskManager", icon: Network },
 ];
 
+const availableViews: ViewId[] = ["task-manager", "overview", "orchestration", "workflow", "run", "artifact", "observability"];
+
 const viewLabels: Record<ViewId, string> = {
+  "task-manager": "TaskManager",
   overview: "Interaction Prototype",
   orchestration: "Task Orchestration",
   workflow: "Workflow Studio",
@@ -45,7 +40,7 @@ const viewLabels: Record<ViewId, string> = {
 export default function App() {
   const [view, setView] = useState<ViewId>(() => {
     const hash = window.location.hash.replace("#/", "") as ViewId;
-    return navItems.some((item) => item.id === hash) ? hash : "overview";
+    return availableViews.includes(hash) ? hash : "task-manager";
   });
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
@@ -67,7 +62,7 @@ export default function App() {
     };
     const onHash = () => {
       const hash = window.location.hash.replace("#/", "") as ViewId;
-      if (navItems.some((item) => item.id === hash)) setView(hash);
+      if (availableViews.includes(hash)) setView(hash);
     };
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("hashchange", onHash);
@@ -81,6 +76,7 @@ export default function App() {
   }, [notice]);
 
   const content = useMemo(() => {
+    if (view === "task-manager") return <TaskManager onNotice={setNotice} />;
     if (view === "orchestration") return <TaskOrchestration onNotice={setNotice} />;
     if (view === "workflow") return <WorkflowStudio onNotice={setNotice} />;
     if (view === "run") return <RunInspector onNotice={setNotice} />;
@@ -93,14 +89,14 @@ export default function App() {
     <div className="app-shell">
       <header className="global-header">
         <button className="mobile-menu" aria-label="打开导航" onClick={() => setMobileNav(true)}><Menu size={19} /></button>
-        <button className="brand" onClick={() => navigate("overview")} aria-label="回到原型目录">
+        <button className="brand" onClick={() => navigate("task-manager")} aria-label="回到 TaskManager">
           <span className="brand-mark">JS</span>
           <span><strong>JOBSLAYER</strong><small>ENGINEERING WORKBENCH</small></span>
         </button>
         <div className="breadcrumb"><span>BraveNewWorld</span><i>/</i><strong>{viewLabels[view]}</strong></div>
-        <button className="global-search" onClick={() => setPaletteOpen(true)}><Search size={15} /><span>Search runs, tasks, artifacts…</span><kbd><Command size={11} /> K</kbd></button>
+        <button className="global-search" onClick={() => setPaletteOpen(true)}><Search size={15} /><span>Search tasks, backlog, logs…</span><kbd><Command size={11} /> K</kbd></button>
         <div className="header-actions">
-          <span className="mode-badge"><span /> {view === "orchestration" ? "LOCAL API · VERSIONED" : "PROTOTYPE · MOCK"}</span>
+          <span className="mode-badge"><span /> {view === "task-manager" || view === "orchestration" ? "LOCAL API · VERSIONED" : "LEGACY LAB · MOCK"}</span>
           <button className="icon-button" aria-label="通知示例"><Bell size={16} /><i>3</i></button>
           <button className="avatar-button" aria-label="演示用户">FR</button>
         </div>
@@ -109,19 +105,19 @@ export default function App() {
       <aside className={`global-sidebar ${mobileNav ? "mobile-open" : ""}`}>
         <div className="mobile-sidebar-head"><span>NAVIGATION</span><button aria-label="关闭导航" onClick={() => setMobileNav(false)}><X size={18} /></button></div>
         <nav aria-label="原型页面">
-          <span className="nav-label">WORKBENCH</span>
+          <span className="nav-label">PRIMARY APPLICATION</span>
           {navItems.map((item) => { const Icon = item.icon; return (
             <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigate(item.id)} aria-current={view === item.id ? "page" : undefined}>
-              <Icon size={17} /><span>{item.label}</span>{item.id === "run" && <i className="nav-live" />}
+              <Icon size={17} /><span>{item.label}</span><i className="nav-live" />
             </button>
           ); })}
         </nav>
         <div className="sidebar-separator" />
         <div className="sidebar-context">
-          <span className="nav-label">PROTOTYPE BOUNDARY</span>
-          <div><ShieldCheck size={16} /><span><strong>{view === "orchestration" ? "Plan API governed" : "Kernel isolated"}</strong><small>{view === "orchestration" ? "Agent proposes · user applies" : "No API connected"}</small></span></div>
+          <span className="nav-label">AUTHORITY BOUNDARY</span>
+          <div><ShieldCheck size={16} /><span><strong>{view === "task-manager" ? "Task truth governed" : view === "orchestration" ? "Plan API governed" : "Legacy lab isolated"}</strong><small>{view === "task-manager" || view === "orchestration" ? "Agent proposes · user applies" : "No API connected"}</small></span></div>
           <div className="boundary-meter"><i /></div>
-          <p>{view === "orchestration" ? <>Plan revisions are append-only.<br />Execution state stays isolated.</> : <>UI state is disposable.<br />Engineering truth is not.</>}</p>
+          <p>{view === "task-manager" || view === "orchestration" ? <>Plan revisions are append-only.<br />Execution is capability-gated.</> : <>Legacy routes remain direct-only.<br />They do not own truth.</>}</p>
         </div>
         <div className="sidebar-bottom"><button><HelpCircle size={16} /><span>Design guide</span></button><span>UI / 0.1.0</span></div>
       </aside>

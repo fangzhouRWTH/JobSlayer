@@ -2226,3 +2226,1053 @@ ambient `OPENAI_API_KEY` 会被剥离。
 finalized plan 仍不代表执行、验证、批准或完成。下一步在用户明确真实调用预算后，对隔离的临时
 计划执行一次 read-only smoke test 并复核四类制品，然后优先把 planning artifacts 接到只读
 Artifact Viewer，而不是扩大模型权限。
+
+---
+
+## DEV-2026-08-19-22 — 认证、有界的规划制品查看器
+
+- 状态：完成（本地应用/API/UI 垂直切片、真实 CLI/API 联调与统一完整门禁）
+- 类型：planning evidence、artifact query、authenticated read API、Workbench UI、ADR
+
+### 决策与边界
+
+1. 采用 ADR-0034。规划证据通过独立 `PlanningArtifactQuery` application service 读取既有
+   `ArtifactRegistry`，不让 HTTP handler 或浏览器直接访问 backing file URI，也不增加制品修改、
+   删除或工作流命令能力。
+2. 查询只允许 ADR-0033 定义的 prompt、raw JSONL、stderr 和 final JSON 四类
+   `task_plan.agent.*` 制品，并同时绑定 `plan_id`。registry 会对完整对象复核大小和 SHA-256；
+   浏览器最多接收 1 MiB UTF-8 文本预览以及 COMPLETE/TRUNCATED 标记。
+3. 两个只读 GET 仍要求未过期 planner session 和进程随机 `X-JobSlayer-Session`。公共 descriptor
+   仅包含 artifact/invocation ID、类型、producer、大小、哈希、时间和 metadata，明确排除宿主
+   `uri`。制品文本继续按不可信纯文本渲染，不能成为 proposal 应用、验证或完成证据。
+
+### 落实
+
+1. 新增 `PlanningArtifactDescriptor`、`PlanningArtifactPreview` 和 query service；实现允许类型
+   过滤、plan binding、稳定排序、完整性失败关闭、去 URI 投影和有界预览。
+2. task orchestration loopback API 新增
+   `GET /plans/{plan_id}/artifacts` 与
+   `GET /plans/{plan_id}/artifacts/{artifact_id}`，session capability 明确报告 viewer 是否配置；
+   CLI 无论使用 local fixture 还是显式 Codex adapter，都为同一 artifact root 配置只读 query。
+3. Interactive Task Planning 顶栏新增“规划证据”入口。查看器列出四类证据、invocation、大小与
+   SHA-256，并显示哈希验证后的纯文本；本地 fixture 的空列表明确说明不会伪造模型证据。
+4. README、编排手册、交互指南、路线图和 ADR 索引已同步。本轮复用现有 React/Lucide/CSS 和
+   artifact registry，没有修改 lockfile、增加基础设施依赖或调用外部模型。
+
+### 变更文件
+
+- 应用/API/CLI：`src/jobslayer/application/planning_artifacts.py`、
+  `src/jobslayer/orchestration/web.py`、`src/jobslayer/cli.py`；
+- 测试：`tests/test_planning_artifacts.py`、`tests/test_orchestration_web.py`；
+- Workbench：`ui-framework/src/components/TaskOrchestration.tsx`、
+  `ui-framework/src/types.ts`、`ui-framework/src/styles.css`、`ui-framework/README.md`；
+- 架构/文档：`docs/adr/0034-authenticated-bounded-planning-artifact-viewer.md`、
+  `docs/adr/README.md`、`docs/TASK_ORCHESTRATION.md`、
+  `docs/INTERACTION_DESIGN_GUIDE.md`、`docs/ROADMAP.md`、`README.md` 和本日志。
+
+### 精确验证证据
+
+1. `.venv/bin/python -m unittest tests.test_planning_artifacts
+   tests.test_orchestration_web tests.test_codex_planning_agent
+   tests.test_unified_entrypoint -v`：25 项全部通过，用时 2.476 秒。覆盖允许类型过滤、去 URI、
+   plan binding、1 MiB 截断、篡改拒绝、GET token、错误 plan 404，以及 Codex/CLI 既有回归。
+2. `sh ./init.sh -- npm --prefix ui-framework run check`：TypeScript `tsc --noEmit` 与 Vite
+   8.2.1 production build 通过，2718 modules transformed；TaskOrchestration lazy chunk 为
+   32.46 kB，未安装或升级依赖。
+3. 真实 CLI/API 联调：在 `/tmp/jobslayer-planning-viewer-e2e.*` 签发短期 planner identity，
+   启动 `./jobslayer orchestration-api`，创建 `plan-viewer-e2e`，通过真实
+   `LocalArtifactRegistry` 登记 final-output 制品，再用带 session token 的两个 GET 校验列表和
+   内容。断言 artifact 数量为 1、`content_verified=true`、`truncated=false`、内容匹配且列表/
+   preview 均无 `uri`；随后 TERM 本轮服务、确认 8780 无 listener 并删除全部临时文件。
+4. `git diff --check`：返回 0。
+5. 本条开发日志落盘后运行 `./jobslayer check`：8/8 全部通过；244 项 unittest `OK`，
+   5 项因未配置 PostgreSQL DSN 或 bubblewrap 而 skip；UI production build 转换 2718
+   modules，compile、dependency consistency、BraveNewWorld testbed、scripted/Codex runbook 和
+   Git diff 均通过；完整命令退出码为 0，用时 20.590 秒。随后再次运行
+   `git diff --check` 返回 0。
+6. 最终复核时将可选的 artifact list refresh 与核心 plan accept/load 成功路径解耦：读取证据
+   失败只进入 viewer 自身的错误状态，不再把已经成功的计划命令表现为失败。该边界调整后再次
+   运行 `./jobslayer check`：8/8 全部通过；244 项 unittest 用时 19.189 秒，`OK
+   (skipped=5)`；UI production build 转换 2718 modules；完整命令退出码为 0，用时 21 秒。
+   随后运行 `git diff --check` 返回 0。
+
+### 限制与下一步
+
+当前查看器只覆盖已有 plan ID 的 Codex 规划文本证据，不是通用 run Artifact Review read
+model；首次创建在 revision 落盘前失败时留下的未知/孤立 plan 证据仍只能直接查询 registry。
+没有 raw download/range、二进制/PDF、远程对象存储、retention policy 或 operator-wide failure
+index。预览上限为 1 MiB，完整对象仍会先读取并校验。顶级 Artifact Review 页面继续使用固定
+样例；本轮完成 TypeScript/build 和 HTTP 联调，但没有浏览器截图式视觉验收。
+
+本轮没有执行真实/付费 Codex 调用，没有修改 WorkflowKernel、TaskState、执行权限、验证或完成
+规则，也没有 commit、push 或部署。下一步仍需用户明确 `--codex-model`、单次调用预算和登录/
+制品保留策略后运行一次隔离 read-only Codex planning smoke test；若继续避免外部调用，则先设计
+operator-wide 失败制品索引或 plan-to-Workflow IR 的确定性只预览编译契约。
+
+## DEV-2026-08-19-23 — GPT-5.6 Sol/xhigh 真实规划 smoke 首次尝试
+
+- 状态：受阻（本机 Codex CLI 版本不支持目标模型；等待操作者批准升级后重试）
+- 类型：explicit model policy、reasoning effort、real external smoke、failure evidence
+- 关联决策：[ADR-0033](adr/0033-evidence-bound-codex-planning-adapter.md) 的
+  “2026-08-19 补充：显式 reasoning effort”
+
+### 决策与实现
+
+1. 操作者明确授权使用本机 `CODEX_HOME` 登录、`gpt-5.6-sol`、`xhigh` 和合理的单次调用预算。
+   首次 smoke 采用 1 次调用、300 秒 wall timeout、read-only sandbox、ephemeral session、无重试；
+   prompt 实际为 2,055 bytes。API 等价预算参考按约 20k input + 8k output tokens 估算不超过
+   0.35 美元，但 Codex 订阅调用不等同于逐 token API 扣费，且当前 CLI 不能预先强制美元/token
+   上限，因此硬护栏仍是调用次数、timeout、prompt/output bytes 和结构化 Schema。
+2. 发现 adapter 固定 `--ignore-user-config` 后不会继承本机 `model_reasoning_effort`。新增可选
+   `--codex-reasoning-effort`，只允许 `none/low/medium/high/xhigh/max`，并以经过 strict-config
+   验证的单次 `model_reasoning_effort=...` override 传入 Codex CLI；登录上下文仍来自本机
+   `CODEX_HOME`。省略参数时继续使用模型默认值，不隐式读取 ambient 行为配置。
+3. 测试补充 xhigh 参数传递、CLI parser 和非法 effort 拒绝；编排手册与 ADR-0033 已同步。
+
+### 真实 smoke 证据
+
+1. 本机预检：`codex-cli 0.142.4`；本机用户级 npm registry 查询到当前
+   `@openai/codex 0.148.0`。启动隔离 loopback API 时显式传入
+   `--codex-model gpt-5.6-sol --codex-reasoning-effort xhigh
+   --codex-timeout-seconds 300`，服务正常启动。
+2. 向 `POST /api/orchestration/plans` 仅提交一次
+   `plan-real-codex-smoke-001`。约 12 秒后 adapter 返回 502，未重试。raw JSONL 明确返回 HTTP
+   400：`gpt-5.6-sol` 要求更新版本的 Codex CLI；同时报告旧 models cache 缺少
+   `base_instructions`。没有 `turn.completed` usage，故没有可报告 token 消耗。
+3. 失败调用仍登记 prompt、raw events、stderr、空 final output 四类不可变制品，完整读取后大小/
+   SHA-256 全部验证通过。隔离 `LocalTaskPlanStore.list_plan_ids()` 为空，证明失败没有创建权威
+   revision。服务已正常停止并确认 8781 无 listener。
+4. 受限现场保留在 `/tmp/jobslayer-codex-smoke.XidGPg`：目录 mode 700，identity key/session mode
+   600。升级/重试获批前不删除，以保留可核验失败证据。
+
+### 变更与验证
+
+- 变更：`src/jobslayer/adapters/codex_planning_agent.py`、`src/jobslayer/cli.py`、
+  `tests/test_codex_planning_agent.py`、`docs/TASK_ORCHESTRATION.md`、
+  `docs/adr/0033-evidence-bound-codex-planning-adapter.md` 和本日志。
+- `.venv/bin/python -m unittest tests.test_codex_planning_agent
+  tests.test_unified_entrypoint -v`：17 项全部通过，用时 2.159 秒。
+- `git diff --check`：返回 0。
+
+### 当前阻塞与下一步
+
+更新用户级全局 Codex CLI 会修改仓库外环境，不在首次单次模型调用授权内。等待操作者明确批准
+将 `/home/fangzhou/.npm-global` 中的 `@openai/codex` 从 0.142.4 更新至 0.148.0；批准后先验证
+版本和登录可用性，再按同一模型/effort/300 秒护栏只重试一次，核对 usage、四类制品、pending
+proposal、空权威图与 append-only revision，最后运行完整 `./jobslayer check`。
+
+## DEV-2026-08-19-24 — GPT-5.6 Sol/xhigh 真实规划 smoke 成功闭环
+
+- 状态：完成（更新后单次重试、真实认证 API/制品/审计核验与本地回归）
+- 类型：real Codex planning、subscription login、structured proposal、budget evidence
+- 纠正/承接：DEV-2026-08-19-23 的版本阻塞已由操作者更新本机 CLI 后解除；该失败记录不重写
+- 关联决策：[ADR-0033](adr/0033-evidence-bound-codex-planning-adapter.md) 的
+  “2026-08-19 实测补充：GPT-5.6 Sol/xhigh”
+
+### 更新预检与调用护栏
+
+1. `codex --version` 返回 `codex-cli 0.148.0`，`codex login status` 返回
+   `Logged in using ChatGPT`，用户级 npm 安装也确认 `@openai/codex@0.148.0`。没有读取或输出
+   登录凭据。
+2. 沿用 DEV-23 的隔离目录和同一 plan ID，只授权一次重试。真实服务显式配置
+   `gpt-5.6-sol`、`xhigh`、300 秒 timeout、read-only sandbox、ephemeral、strict config、
+   `--ignore-user-config` 和本机 `CODEX_HOME` 登录；没有自动或并行重试。
+3. 输入仍是“只规划、不实施”的 operator-wide 规划失败制品索引任务，明确 JobSlayer-owned
+   state/completion、append-only audit、provider-neutral domain、无新基础设施依赖、确定性验证
+   和人工确认约束。
+
+### 成功证据与控制面结果
+
+1. 唯一重试约 202 秒成功返回 `plan.created_with_agent_proposal`，首条 revision sequence 为 1。
+   proposal 由 `codex-cli-planning-v1` 生成 11 个节点和 16 条边，包含 2 个 validation 节点与
+   1 个 `requires_human_decision=true` 的 human gate；领域重建已通过字段、引用与 DAG 校验。
+2. revision snapshot 的权威 nodes/edges 均为空，只保存 pending proposal；没有执行
+   proposal apply/reject/finalize。确定性 assessment 只返回 `proposal.pending` blocker，
+   `ready_to_finalize=false`。history 只有 sequence 1、`previous_hash=null`，读取时 record hash
+   重新验证通过。
+3. 成功 invocation 为 `planning-c406595badc44b819d196498dbad4365`，proposal 精确绑定它的四个
+   artifact ID。连同 DEV-23 的失败 invocation，共 2 次 invocation/8 个制品/49,986 bytes；
+   每组均精确包含 prompt、raw JSONL、stderr、final output。通过真实认证 artifact GET 与本地
+   registry 完整读取双重验证大小和 SHA-256；descriptor/preview 均不包含 backing `uri`。
+4. `turn.completed` usage 为 input 15,254、cached input 0、cache-write input 0、output 9,402、
+   reasoning output 4,142 tokens。按官方 API 公布的每百万 input 5 美元/output 30 美元只作等价
+   估值约 0.35833 美元；ChatGPT 月订阅的实际额度/计量不由 JobSlayer 推断。output 略高于预估
+   8k，证明当前调用次数、timeout、bytes/Schema 是硬护栏，而 token/美元仍只是外部授权预算。
+5. 成功后同一 plan ID 使 plan-bound viewer 能同时列出首次失败与本次成功的 8 个制品；这不
+   解决“只有失败、从未形成 plan revision”时的 operator-wide 孤立制品发现问题。
+6. API 服务已正常停止，并确认 8781 无 listener。受限现场继续保留在
+   `/tmp/jobslayer-codex-smoke.XidGPg`；目录 mode 700，短期 identity key/session mode 600。
+
+### 文档与验证
+
+- `docs/TASK_ORCHESTRATION.md`、`docs/ROADMAP.md`、
+  `docs/INTERACTION_DESIGN_GUIDE.md` 和 ADR-0033 已从“尚未真实 planning smoke”更新为本次
+  证据，同时保留默认 local fixture、显式 opt-in 和生产预算/凭据/保留限制。
+- `.venv/bin/python -m unittest tests.test_codex_planning_agent
+  tests.test_planning_artifacts tests.test_orchestration_web
+  tests.test_unified_entrypoint -v`：26 项全部通过，用时 2.669 秒。
+- `git diff --check`：返回 0。
+
+### 限制与下一步
+
+本次只证明一个显式授权的 planning proposal 路径，不把外部调用加入离线 CI，不应用模型提案，
+也不把计划当成执行/验证/批准/完成。当前 Codex CLI 仍没有由该 adapter 预先强制的 token/美元
+上限；模型/CLI 兼容关系由外部服务演进，项目没有根据一次失败硬编码版本映射。现场在 `/tmp`
+且没有生产 retention/远程对象存储。下一步优先实现 operator-wide 失败制品索引，或把已确认
+计划确定性编译为只预览 Workflow IR；仍未执行 commit、push 或部署。
+
+### 最终统一门禁
+
+- 本条日志落盘后运行 `./jobslayer check`：8/8 全部通过；245 项 unittest 用时 19.235 秒，
+  `OK (skipped=5)`；UI production build 转换 2718 modules；compile、dependency consistency、
+  BraveNewWorld testbed、scripted/Codex runbook 和 Git diff 全部通过。完整命令退出码为 0，用时
+  21 秒。随后再次运行 `git diff --check` 返回 0。
+
+## DEV-2026-08-19-25 — 小时级 Agent 工作的本地可恢复控制面
+
+- 状态：完成（provider-neutral 契约、SQLite event/checkpoint、lease 恢复和确定性门禁）
+- 类型：long-running execution、multidimensional budget、checkpoint、recovery、ADR
+- 关联决策：[ADR-0035](adr/0035-provider-neutral-resumable-long-running-control-plane.md)
+
+### 决策与边界
+
+1. 不把 token、工具调用、墙钟或订阅费用互相换算。policy 对 task/attempt elapsed、model/tool/wait、
+   input/output token、cost 和 tool calls 分别声明 hard、soft、observe-only 或 unavailable；
+   JobSlayer 本地派生 task/attempt elapsed 两个 hard gate，非 metered 账户禁止 cost hard gate。
+2. 每个 attempt 在任何 provider side effect 前持久化唯一 `provider_start_key`。adapter 必须用
+   `start_or_locate` 幂等启动或找回同一外部 run；explicit retry 才增加 attempt 并生成新 key，
+   orphan takeover 不增加 attempt。
+3. start 与 observation 必须先登记绑定 task/run 且哈希可验证的 raw artifact。normalized cursor、
+   usage 或 provider terminal status 不能脱离原始证据改变控制面状态。
+4. 新的 long-run status 只表示运行控制面，不是 `TaskState`，不会调用或绕过 WorkflowKernel、
+   verification、approval 和 completion。checkpoint 同样只证明进度，不证明任务完成。
+5. 采用已有 SQLite、`LocalArtifactRegistry` 和 `SqliteWorkerLeaseStore`，不增加依赖。事件按连续
+   sequence 和 SHA-256 chain 追加；event/checkpoint update/delete 由 trigger 拒绝，projection
+   读取时与 event truth 复核。
+6. 推荐本地订阅基线记录为 task 8h hard、attempt 3h hard、2 attempts、90s lease、30s 内 poll、
+   15min checkpoint、20min stall warning、output 100k/tool calls 400 soft，其他来源指标只观测，
+   cost unavailable。它是可收紧的起点，不是一次 prompt 的固定或账户侧配额。
+
+### 落实与变更文件
+
+1. `src/jobslayer/long_running/__init__.py` 新增 policy、usage、persisted start request、provider
+   reference/observation、run handle、checkpoint、hash-chained event、store 和 resumable adapter
+   contracts。
+2. `src/jobslayer/application/long_running_execution.py` 实现 admit/start request/bind/observe/
+   checkpoint/cancel/finish/recover/explicit retry；hard overage 先持久化 lease cancellation，
+   takeover 要求旧 lease 过期、provider identity/证据/单调 cursor 与预算全部成立。
+3. `src/jobslayer/adapters/sqlite_long_runs.py` 实现 WAL/FULL synchronous SQLite projection、
+   append-only events/checkpoints、optimistic version、hash-chain 和篡改失败关闭；
+   `src/jobslayer/workers/__init__.py` 在 lease port 暴露恢复所需的只读 `get`。
+4. `tests/test_long_running_execution.py` 新增 10 项测试，覆盖有效/无效 policy、完整 lifecycle、
+   start key 崩溃窗口、provider identity、允许/拒绝转换、hard cancel、soft/stall warning、artifact
+   ownership、restart orphan takeover、bounded retry、append-only trigger 和 projection tamper。
+5. 新增 `docs/LONG_RUNNING_EXECUTION.md` 与 ADR-0035，并同步 README、ADR 索引、路线图和任务编排
+   手册。现有规划 adapter 没有被冒充成支持 start-or-locate。
+
+### 精确验证证据
+
+1. `.venv/bin/python -m unittest -v tests.test_long_running_execution`：10 项全部通过，用时
+   2.528 秒。
+2. `.venv/bin/python -m unittest -v tests.test_long_running_execution
+   tests.test_worker_leases tests.test_governed_executor tests.test_transactional_execution`：21 项全部
+   通过，用时 4.706 秒，覆盖新增控制面和既有 lease/governed/transactional 回归。
+3. `.venv/bin/python -m compileall -q src tests` 与 `git diff --check`：均返回 0。
+4. 本条日志落盘后运行 `./jobslayer check`：8/8 全部通过；255 项 unittest 用时
+   21.422 秒，`OK (skipped=5)`；UI production build 转换 2718 modules；compile、dependency
+   consistency、BraveNewWorld testbed、scripted/Codex runbook 和 Git diff 全部通过。完整命令
+   退出码为 0，用时 23.2 秒。
+
+### 限制与下一步
+
+本轮没有外部模型调用、自动 retry、后台 daemon/scheduler、远程对象存储或分布式依赖。long-run
+event store 与 worker lease store 当前是两个本地 SQLite 事务边界；bind 有补偿，但两个提交间的
+进程崩溃仍要 reconciliation，不能宣称 exactly-once。具体 executor 只有实现持久
+`start_or_locate` 才能宣称可恢复；当前同步 `CodexPlanningAgent` 中断后不能自动 attach。
+
+下一步按用户确认的方案 prompt 验证“输入/讨论 → Codex pending proposal → DAG/assessment/raw
+artifacts → 用户 apply/finalize”的任务图闭环。首次验证不自动应用、不自动重试，也不把 plan
+finalized 当成 workflow completed；长任务装配与 prompt→图产品闭环分别验收。
+
+## DEV-2026-08-19-26 — 悬挂系统方案 prompt 到可视任务图真实闭环
+
+- 状态：完成（真实 pending proposal、制品/审计核验与 Workbench 交互端在线）
+- 类型：real planning prompt、task graph、artifact verification、interactive Workbench
+- 关联决策：[ADR-0033](adr/0033-evidence-bound-codex-planning-adapter.md)、
+  [ADR-0034](adr/0034-authenticated-bounded-planning-artifact-viewer.md)；长任务边界继续遵循
+  [ADR-0035](adr/0035-provider-neutral-resumable-long-running-control-plane.md)
+
+### 调用授权与护栏
+
+1. 操作者提供精确任务描述“开发一个悬挂系统可视化案例。”并要求随后开启可视化交互端。本轮
+   只授权生成任务图，不授权 apply、finalize、执行节点、修改案例代码或把计划标记完成。
+2. 官方模型页面确认 `gpt-5.6-sol` 支持 structured outputs，reasoning effort 包含 `xhigh`；
+   本机 `codex-cli 0.148.0` 与 ChatGPT login status 正常。真实 API 显式配置 model
+   `gpt-5.6-sol`、effort `xhigh`、read-only、ephemeral、单次调用和 900 秒 timeout；无自动 retry。
+3. 规划状态隔离在 `.jobslayer/orchestration-suspension-demo`，使用 480 分钟短期 planner session；
+   API 仅绑定 `127.0.0.1:8780`，Vite 仅绑定 `127.0.0.1:4173`。
+4. 首次本地 HTTP 客户端错误继承代理环境，使 `/session` 在进入 JobSlayer 前返回 `502`；artifact
+   数量为 0，证明没有启动 provider 或消费模型调用。诊断后立即重启 API 轮换进程随机提交 token，
+   并用显式 no-proxy 客户端提交；这不是模型 retry。
+
+### 闭环结果与证据
+
+1. 唯一 provider invocation `planning-73af8530ed7f41fbb2218782fdbee021` 约 108 秒成功。
+   plan `suspension-visualization-case-20260819` 追加 sequence 1、operation
+   `plan.created_with_agent_proposal`，record hash 为
+   `157d3bdb0724b06224f972e3d78bfc682f45f2aa2bda9e85d7e7e4f35b5e86d2`。
+2. proposal `proposal-988ab7290dab47ba954a6dcda2c6bb03` 包含 11 nodes/11 edges，其中
+   3 个 validation、2 个 human gate，边为 7 条 sequence 和 4 条 dependency。范围门禁建议先
+   确认被动式四分之一车辆二自由度案例，再规划确定性模型、交互可视化、测试、文档、完整验证和
+   授权完成决策。
+3. revision 的权威 nodes/edges 均为 0；assessment 只有 `proposal.pending` blocker，
+   `ready_to_finalize=false`。没有 apply/reject/finalize，没有调用 WorkflowKernel 或执行任何节点。
+4. 同一 invocation 精确登记四类制品，共 42,112 bytes；prompt 1,009 bytes、raw JSONL
+   21,189 bytes、stderr 0 bytes、final JSON 19,914 bytes。registry 完整读取和认证 viewer preview
+   均复核大小/SHA-256，proposal evidence ID 与四个 manifest 一致，公共 descriptor/preview 无
+   backing `uri`。
+5. `turn.completed` usage 为 input 15,014、cached/cache-write input 0、output 6,421、reasoning
+   output 1,552 tokens。该数字只记录一次调用用量，不推断 ChatGPT 月订阅美元余额。
+6. Workbench `http://127.0.0.1:4173/#/orchestration` 已启动；通过 Vite 同源代理读取 session、plans
+   和上述 11 节点 proposal 均为 HTTP 200，agent adapter 为 `codex-cli-planning-v1`，artifact
+   viewer capability 为 true。API 与 UI 在本条完成时保持运行，供操作者交互审查。
+
+### 验证与限制
+
+1. `LocalTaskPlanStore.history(plan_id)` 重新验证 sequence、previous hash 与 record hash；独立脚本
+   断言权威空图、proposal 11/11、四类 manifest 集合、证据 ID、完整内容 hash、prompt 原文、
+   assessment blocker 和 viewer 去 URI 全部一致。
+2. UI 端到端探测断言根页面、代理 session、plans 均为 HTTP 200，目标计划唯一且 pending nodes
+   为 11；`ss` 确认只有 loopback 4173/8780 listener。
+3. 本次没有把同步 `CodexPlanningAgent` 接成 ADR-0035 的 `start_or_locate` adapter；控制器或本地
+   CLI 中断仍不能宣称跨重启 attach。当前成果是 prompt→pending DAG→证据→人工审查闭环。
+4. 本条日志落盘后运行 `./jobslayer check`：8/8 全部通过；255 项 unittest 用时
+   21.623 秒，`OK (skipped=5)`；UI production build 转换 2718 modules；compile、dependency
+   consistency、BraveNewWorld testbed、scripted/Codex runbook 和 Git diff 全部通过。完整命令
+   退出码为 0，用时 23.4 秒；API 与 Vite 服务未被门禁中断。
+
+## DEV-2026-08-19-27 — 主线收紧为 TaskManager 聚焦应用
+
+- 状态：完成（聚焦产品面、真实 planning 闭环、明确执行边界和完整门禁）
+- 类型：focused product surface、application facade、authenticated API、React Flow UI
+- 关联决策：[ADR-0036](adr/0036-focused-task-manager-product-surface.md)
+
+### 决策与边界
+
+1. TaskManager 第一阶段是同一仓库/进程内的独立 application facade、API namespace 和 UI route，
+   不是微服务。它复用 `TaskOrchestrationService` 的追加式计划真相，不建立第二份可写状态，也不
+   提前增加数据库、队列或后台调度依赖。
+2. read contract 预留 running/verifying/completed 等执行阶段，但当前 projector 只产生
+   proposal_pending/planning/ready/archived。未装配执行 adapter 时，session capability 和 detail
+   都明确返回 unavailable/blocker；UI 禁用执行按钮，不把 finalized 计划伪装成 run。
+3. 主 Web 产品面收紧为左侧 DAG/Backlog/总 Log、右侧信息/Agent 的双栏结构。候选图、已应用图、
+   assessment、完整对话和 append-only revision log 来自同一个 detail；原实验室 hash routes 保留，
+   但移出主导航。
+4. 未来 run 必须绑定用户固化的 plan id、revision 和 record hash，规划调整形成新 revision；执行、
+   验证、批准和完成仍必须进入既有 application service 与 `WorkflowKernel.transition`。
+
+### 落实与变更文件
+
+1. 新增 `src/jobslayer/task_manager/__init__.py` 的 provider-neutral task/node stage、summary、
+   Backlog、log 和 revision-bound detail contracts；新增
+   `src/jobslayer/application/task_manager.py`，把 planning snapshot/assessment/history 投影为统一
+   多任务 read model，并复用原 create/discuss/apply/reject/finalize 命令。
+2. `src/jobslayer/orchestration/web.py` 新增认证的 `/api/task-manager` session/tasks/detail/artifact
+   读取和写命令；任务读取也要求进程随机 token。旧 `/api/orchestration` 保持兼容。CLI 新增
+   `task-manager-api` alias，启动提示和浏览器入口改为聚焦应用。
+3. 新增 `ui-framework/src/components/TaskManager.tsx`，接入 React Flow DAG、任务切换、候选图决定、
+   Backlog、总 Log、节点详情、完整 Agent 对话和固化动作；`App.tsx` 默认/主导航改为 TaskManager，
+   Vite 增加 same-origin proxy，types/styles/command palette 同步。高级实验页未删除。
+4. 新增 `tests/test_task_manager.py`，扩展 `tests/test_orchestration_web.py` 和
+   `tests/test_codex_planning_agent.py`，覆盖 proposal→applied→finalized 允许路径、过期 revision 拒绝、
+   完整 conversation/log、明确执行 blocker、TaskManager read authentication 和 CLI alias。
+5. 新增 `docs/TASK_MANAGER.md` 与 ADR-0036，并同步 README、路线图、ADR 索引和 UI 运行说明。
+
+### 当前验证证据
+
+1. `.venv/bin/python -m unittest tests.test_task_manager tests.test_orchestration_web`：9 项全部通过。
+2. `.venv/bin/python -m unittest tests.test_task_manager tests.test_orchestration_web
+   tests.test_codex_planning_agent`：19 项全部通过；实现阶段用时 1.867 秒，最终清理后复跑用时
+   1.941 秒。
+3. `sh ./init.sh -- npm --prefix ui-framework run build`：TypeScript 和 Vite production build 通过，
+   Node 24.19.0/npm 11.17.0，转换 2719 modules；TaskManager lazy chunk 17.36 kB（gzip 5.92 kB）。
+   系统 Node 18 直接运行 Vite 不满足项目 `>=22.12` 要求，因此最终证据使用仓库统一初始化入口。
+4. `./jobslayer check`：8/8 全部通过；258 项 unittest 用时 21.415 秒，`OK (skipped=5)`；
+   Python compile、dependency consistency、UI TypeScript/Vite production build（2719 modules）、
+   BraveNewWorld testbed、scripted/Codex runbook 和 Git diff 全部通过。完整命令退出码为 0，用时
+   23.2 秒。
+5. 完整门禁后用 `/tmp/jobslayer-task-manager-smoke.*` 临时身份和独立 state 启动
+   `task-manager-api`/Vite，经 `http://127.0.0.1:4173/api/task-manager` same-origin proxy 创建
+   `task-manager-runtime-smoke`：revision 1、proposal_pending、5 nodes、5 backlog、execution false
+   与明确 blocker；headless Chrome 1600×1000 实际渲染并人工检查双栏、候选 DAG 和对话。随后
+   关闭 8780/4173 listener 并删除全部临时身份、state、artifact、浏览器 profile 和截图。
+
+### 限制与下一步
+
+当前没有执行 TaskManager 节点、创建 workflow run、自动 apply proposal、自动 retry 或自动完成；
+Backlog 中 finalized 节点保持 ready，并明确等待 governed execution adapter。TaskManager 第一阶段
+也没有把旧实验室的 node/edge 表单全部搬入主产品面，精细调整先通过带 selected-node context 的
+Agent discussion 完成。
+
+下一步实现 finalized revision 到受治理 run assembly 的单向编译/绑定：每个节点映射稳定 task
+identity，执行事件和原始制品投影回 TaskManager，允许/拒绝转换经过 Kernel，verification 和授权
+approval 仍是完成硬门禁。完成前不得启用“开始执行”。
+
+## DEV-2026-08-19-28 — TaskManager 固化计划到受治理运行装配与反馈投影
+
+- 状态：完成（plan-bound run 装配、Kernel 节点历史、幂等执行端口、API/UI 投影）
+- 类型：governed run assembly、provider-neutral executor port、evidence feedback、TaskManager UI
+- 关联决策：[ADR-0037](adr/0037-plan-bound-task-manager-run-assembly.md)，产品边界继续遵循
+  [ADR-0036](adr/0036-focused-task-manager-product-surface.md) 与
+  [ADR-0035](adr/0035-provider-neutral-resumable-long-running-control-plane.md)
+
+### 决策与边界
+
+1. run 必须绑定 active finalized plan 的精确 `plan_id + revision + record_hash`；同一固化 revision
+   只能装配一次。规划后续调整不会改写已经装配的 run。
+2. 装配为每个 DAG node 派生稳定 workflow task id，并只通过 `WorkflowKernel.transition` 写入
+   `Draft -> Planned`。每个节点保存可验证的 transition chain；provider success 只推进到
+   `Verifying`，不允许 executor 自行完成。
+3. 每次外部启动先在 run journal 持久化稳定 `provider_start_key`，再调用 provider-neutral
+   `start_or_locate`；崩溃/连接失败恢复复用相同 key，只有显式 retry 才产生新 attempt identity。
+4. provider reference/observation 必须携带非空、task/run-bound、hash-verified artifact evidence；
+   normalized status 或 cursor 不能脱离原始证据推进状态。
+5. 默认 `task-manager-api` 启用本地 run store 和装配 capability，但不装配具体 executor。UI 可以
+   创建/恢复 run，却不会调用本机 Codex；节点执行接口还要求 `EXECUTE_TASK`，planner-only session
+   被确定性拒绝。
+6. 没有从通用 DAG 猜测 repository、base commit、允许写路径、validation profile 或预算。真实
+   Codex executor 必须等这些 execution binding 被显式固化后再接入。
+
+### 落实与变更文件
+
+1. 新增 `src/jobslayer/task_manager/execution.py`，定义 run/node snapshot、stage、provider request、
+   reference、observation、executor/store protocols；扩展 `src/jobslayer/task_manager/__init__.py` 的
+   TaskManager detail 绑定。
+2. 新增 `src/jobslayer/adapters/local_task_manager_runs.py`，实现 immutable plan binding、连续
+   revision、SHA-256 previous-hash chain 与原子完整 generation 发布。
+3. 新增 `src/jobslayer/application/task_manager_execution.py`，实现 assemble/start-or-locate/observe/
+   retry 的治理服务；更新 `src/jobslayer/application/task_manager.py`，把 planning 和 execution truth
+   投影为 DAG、Backlog、总 Log、capability 和 blocker。
+4. 更新 `src/jobslayer/orchestration/web.py`，新增 run assembly 与 node start/observe/retry API，
+   区分 403 权限、409 stale/state、502 provider/evidence 和 503 capability；更新
+   `src/jobslayer/cli.py`，默认建立 `<state-root>/task-manager-runs`，但 executor 保持未配置。
+5. 更新 `ui-framework/src/types.ts`、`components/TaskManager.tsx` 和 `styles.css`。复用已经锁定的外部
+   React Flow 库显示 READY/WAITING/RUNNING/VERIFYING 状态，在状态栏显示 run revision，在节点面板
+   显示 workflow/provider evidence，并按真实 capability 启用 run assembly 或节点命令。
+6. 新增 `tests/test_task_manager_execution.py`，扩展 `tests/test_task_manager.py` 和
+   `tests/test_orchestration_web.py`；新增 ADR-0037，并同步 README、TaskManager 手册、交互指南、
+   路线图、Workbench README 与 ADR 索引。
+
+### 精确验证证据
+
+1. `PYTHONPATH=src .venv/bin/python -m unittest -v tests.test_task_manager_execution`：5 项全部通过，
+   覆盖允许装配/启动/反馈路径，以及未 finalized、stale revision、依赖未完成、无 adapter、journal
+   篡改和 provider start 崩溃恢复拒绝路径。
+2. `PYTHONPATH=src .venv/bin/python -m unittest -v tests.test_task_manager_execution
+   tests.test_orchestration_web`：12 项全部通过，用时 0.742 秒；API 覆盖 run assembly capability、
+   planner 越权执行 403 和 authenticated detail 投影。
+3. `sh ./init.sh -- npm --prefix ui-framework run build`：TypeScript 与 Vite production build 通过，
+   Node 24.19.0/npm 11.17.0，转换 2719 modules；TaskManager chunk 19.78 kB（gzip 6.58 kB）。
+4. `PYTHONPATH=src .venv/bin/python -m compileall -q src tests` 与 `git diff --check`：均返回 0。
+5. 本条日志落盘后最终运行 `./jobslayer check`：8/8 全部通过；263 项 unittest 用时 21.471 秒，
+   `OK (skipped=5)`；compile、dependency consistency、UI production build（2719 modules）、
+   BraveNewWorld testbed、scripted/Codex runbook 和 Git diff 全部通过。
+
+### 限制与下一步
+
+当前没有 concrete TaskManager executor、自动轮询/调度、确定性 verifier/reviewer 推进、human-gate
+决定或完成路径；所以默认 run 最多装配到 `Ready`，测试 adapter 的 success 也只到 `Verifying`。
+run JSONL 与 artifact registry 是两个本地事务边界，依靠稳定 start key 和重放缩小崩溃窗口，不宣称
+exactly-once。当前 UI 只能显示当前 plan revision 精确绑定的 run，历史 run 全局检索仍待补充。
+
+下一步先定义 plan-to-execution binding：显式固化 repository/base commit、allowed/forbidden paths、
+validation profile、风险与长任务 budget，然后让第一个 Codex `start_or_locate` adapter 复用
+ADR-0035 的 lease/checkpoint/recovery 控制面。随后接 verifier/reviewer/human gate，使首个节点能够在
+真实证据和授权下通过完整 Kernel 路径，而不是放宽当前门禁。
+
+## DEV-2026-08-19-29 — BraveNewWorld 悬架目标源绑定与候选 DAG 修订
+
+- 状态：完成（目标源绑定、BNW 预检、真实 pending DAG、API/UI 与完整门禁）
+- 类型：execution target binding、BNW compiler gate、Codex profile、TaskManager API/UI、真实 planning
+- 关联决策：[ADR-0038](adr/0038-source-pinned-bravenewworld-execution-target.md)，并继续遵循
+  [ADR-0037](adr/0037-plan-bound-task-manager-run-assembly.md) 与
+  [ADR-0035](adr/0035-provider-neutral-resumable-long-running-control-plane.md)
+
+### 决策与边界
+
+1. 首个 TaskManager 真实目标固定为 `brave-new-world-suspension-v1`。目标不是由 DAG 文本推断，而是
+   host 显式映射到 source-controlled runbook，再严格绑定 testbed、task、validation profile 和
+   invocation。
+2. 四个输入文件分别计算 SHA-256，并合成为 source bundle
+   `0e0bf2c72e3217676ba35789f876dfaa87901df28f7d879d6674a540b93eb994`。计划保存 target ID 与该
+   hash；run 装配会嵌入完整 binding，后续 revision 禁止改写。
+3. 本地 BraveNewWorld inspection 确认 checkout clean、HEAD/tag 都是
+   `fb43878c9f0164deef272e55969c0fc134a6d6a3`、origin 已登记。target preflight 阻止 JobSlayer
+   自身命令/领域指令，并要求图中包含悬架场景命令和完整 `./bnw check`。
+4. 源控 runbook 显式选择本机登录 Codex 的 `gpt-5.6-sol/xhigh`，单次三小时、一次 attempt、
+   300k input、50k output、4 MiB context；任务的 10 USD 是内部预算元数据，不宣称订阅余额可见或
+   已被精确扣减。
+5. 当前不接 execution adapter，不改 BraveNewWorld 源码，不创建 run，不自动 apply/finalize。
+   真实模型只在 BNW checkout 上以 read-only planning adapter 生成 pending proposal。
+
+### 落实与变更文件
+
+1. 新增 `tasks/bnw-suspension-visualization-001.json`、
+   `validation-profiles/brave-new-world-suspension-v1.json` 和
+   `runbooks/bnw-suspension-visualization-001-codex.json`，固定二自由度被动四分之一车辆范围、允许/
+   禁止路径、确定性场景/API/UI 同源要求、真实指标、验证命令和长任务预算。
+2. 新增 `src/jobslayer/task_manager/binding.py` 与
+   `src/jobslayer/adapters/local_task_manager_targets.py`；扩展 orchestration snapshot/服务、
+   TaskManager run/request、run journal 和 execution service，使 target selection、source pin、基线
+   inspection、target assessment 与 immutable run binding 全部进入应用真相。
+3. 扩展 `src/jobslayer/application/runbook.py`、`adapters/codex_cli.py` 和
+   `application/local_run.py`，把显式模型和 reasoning effort 从 runbook 映射为 Codex CLI 参数，同时
+   保持默认 profile 兼容。
+4. 扩展 `src/jobslayer/orchestration/web.py` 和 `src/jobslayer/cli.py`，新增认证 targets 读取、target
+   选择命令和 capability，并在默认 TaskManager startup 时解析 BNW 目标；基线或源输入无效会启动
+   失败关闭。
+5. 扩展 TaskManager read contract 和 `ui-framework/src/components/TaskManager.tsx`/types/styles，
+   显示 target、基线、模型、时限、验证命令与 source hash；target blocker 会禁用固化/装配。
+6. 新增 `tests/test_task_manager_targets.py` 与 `tests/task_manager_fixtures.py`；扩展 orchestration、
+   run assembly、Web API、Codex CLI 和 development-check tests，覆盖选择允许路径、pending/stale
+   拒绝、source drift/cross-project 阻断、binding 不可变与 `xhigh` 参数。
+7. 新增 ADR-0038，并同步 README、TaskManager 手册、路线图、BraveNewWorld 方案和 ADR 索引；统一
+   `./jobslayer check` 增加第三个真实 Codex runbook 校验，门禁由 8 步增加到 9 步。
+
+### 真实计划闭环证据
+
+1. 现有 `suspension-visualization-case-20260819` 先追加 target selection，再由一次只读
+   `gpt-5.6-sol/xhigh` invocation `planning-fd1aadbe254145248a996c8eb9039251` 生成 proposal
+   `proposal-d640723e393f4ffe9d7cbc4b5f49fe95`，最后以追加 revision 5 固定 source bundle。当前 record
+   hash 为 `5f8957c3dd865228a1cc6e6cb7d1d838dd3bf51018ebac57a7d18bcdf15081ab`。
+2. 新候选图为 11 nodes/11 edges，移除了 `./jobslayer check`、`jobslayer.domain` 和
+   `WorkflowKernel` 等跨项目内容，包含两条精确 BNW 命令；target assessment 为 `ready=true`、
+   issues 0。proposal 保持 pending，权威已应用 DAG 尚未改变。
+3. invocation 登记四类 hash-verified 制品，共 130,631 bytes：prompt 24,412、raw JSONL 74,584、
+   stderr 0、final output 31,635。usage 为 input 163,648、cached input 128,512、output 13,477、
+   reasoning output 4,206、cache-write input 0；这里只记录一次实际调用，不换算订阅美元余额。
+
+### 验证、限制与下一步
+
+1. `PYTHONPATH=src .venv/bin/python -m unittest -v tests.test_orchestration
+   tests.test_task_manager_targets tests.test_task_manager_execution tests.test_orchestration_web`：24 项全部
+   通过，用时 1.133 秒；覆盖目标选择允许/拒绝与 run binding 主路径。
+2. `PYTHONPATH=src .venv/bin/python -m unittest -v tests.test_orchestration
+   tests.test_task_manager_targets tests.test_codex_cli tests.test_task_manager_execution
+   tests.test_orchestration_web`：修复单个时间字段断言前 33 项中 32 项通过；修复后相关目标测试单独
+   通过。该中间结果不作为最终完成门禁。
+3. `./jobslayer check`：9/9 全部通过，退出码 0，用时 23.6 秒；267 项 unittest 用时
+   21.817 秒，`OK (skipped=5)`；Python compile、dependency consistency、UI TypeScript/Vite
+   production build（2719 modules）、BraveNewWorld testbed、scripted runbook、既有 Codex runbook、
+   新悬架 Codex runbook 和 Git diff 全部通过。当前明确限制是没有 concrete TaskManager
+   `start_or_locate` Codex adapter、自动 checkpoint/reattach、确定性 verifier/reviewer、human-gate
+   决定或完成路径。
+4. 下一步必须由用户审查并 apply/reject 当前 proposal。只有 apply 后 target assessment、完整度检查
+   和显式 finalize 都通过，才能装配 run；之后再实现真实可恢复 executor，不能复用旧的进程内
+   Codex adapter 冒充长任务恢复能力。
+5. 上述日志结果回填后再次运行 `./jobslayer check`：9/9 全部通过，退出码 0，用时 24.2 秒；
+   267 项 unittest 用时 22.393 秒，`OK (skipped=5)`，其余门禁结果与首轮一致。
+6. 用已有 `suspension-demo-planner` 短期身份启动新版 loopback API 8780 和 Vite 4173；经 Vite
+   same-origin proxy 读取 session/targets/tasks/detail 均为 HTTP 200。真实 detail 为 revision 5、
+   `proposal_pending`、proposal `proposal-d640723e393f4ffe9d7cbc4b5f49fe95`、11 nodes、目标基线
+   ready、target issues 0；根 HTML 为 HTTP 200。两个 listener 在本条完成时保留，供用户审查；
+   external execution adapter 仍明确未连接。
+
+## DEV-2026-08-19-30 — 用户应用真实 DAG 与可恢复 TaskManager Codex worker
+
+- 状态：完成（proposal apply 已核验、持久 start-or-locate、run worktree、原始证据、RBAC/CLI 门禁）
+- 类型：real plan decision、durable Codex adapter、detached worker、node dispatch gate、TaskManager UI
+- 关联决策：[ADR-0039](adr/0039-durable-task-manager-codex-worker.md)，并继续遵循
+  [ADR-0038](adr/0038-source-pinned-bravenewworld-execution-target.md)、
+  [ADR-0037](adr/0037-plan-bound-task-manager-run-assembly.md) 与
+  [ADR-0035](adr/0035-provider-neutral-resumable-long-running-control-plane.md)
+
+### 真实计划状态与决策
+
+1. 用户在可视化端应用 proposal 后，读取 append-only plan store 核验最新 revision 6：operation
+   `agent_proposal.applied_by_user`、record hash
+   `a69d110f4b860a30fff260b9d32072774213ed7238e5ab8b0bf18922186a6ab5`、11 nodes/11 edges、无
+   pending proposal，target 仍为 `brave-new-world-suspension-v1`。计划仍是 `draft`，本条没有代替
+   用户点击固化、没有装配 run，也没有运行或修改 BraveNewWorld。
+2. `validation` node 现在确定性拒绝 Agent dispatch，与既有 `human_gate` 拒绝路径并列；UI 也禁用
+   两类节点的 executor 按钮并显示专用治理路径。普通 task/milestone 的既有允许路径没有放宽
+   `WorkflowKernel`、依赖、revision 或 evidence 门禁。
+3. concrete adapter 采用稳定 `provider_start_key` 和 provider id。完整 request、合成 prompt、launch
+   argv、worktree manifest 与 evidence 在启动前落盘；独立 worker 用 create-exclusive claim 确保
+   重放只有一个 Codex 进程获得启动权。相同 key 与不同请求/launch/prompt 绑定时失败关闭。
+4. 每个 TaskManager run 从 target 固定 commit 建立一个独立 Git worktree，顺序 node 共享该 workspace；
+   原始 Codex JSONL、stderr 和 terminal result 保留并登记为 task/run-bound 内容寻址制品。normalized
+   observation 用内容 cursor 持久化，相同 cursor 重读返回完全相同的 evidence 与时间。
+5. API 只有同时提供 `--allow-external-task-execution` 和签名 session 的 `executor` 权限才实例化
+   adapter；默认仍不连接。实际 model/reasoning 不再只藏在 profile 名中，而是以
+   `executor_model=gpt-5.6-sol`、`executor_reasoning_effort=xhigh` 进入 source-pinned binding 和 UI。
+
+### 落实与变更文件
+
+1. 新增 `src/jobslayer/adapters/task_manager_codex.py` 与
+   `src/jobslayer/adapters/task_manager_codex_worker.py`；新增
+   `tests/test_task_manager_codex.py`，覆盖真实 detached fake-Codex 进程、API adapter 重建定位、单次
+   启动、稳定 observation、证据哈希、隔离 worktree、request drift 与非 task 拒绝。
+2. 更新 `src/jobslayer/application/task_manager_execution.py`、`application/task_manager.py` 与
+   `tests/test_task_manager_execution.py`，补充 executor/target adapter 匹配及 validation/human gate
+   拒绝；所有 workflow state 仍只经 `WorkflowKernel.transition`。
+3. 更新 `src/jobslayer/task_manager/binding.py`、`adapters/local_task_manager_targets.py`、
+   `tests/test_task_manager_targets.py` 和 `src/jobslayer/cli.py`，固化/展示实际模型配置，并加入双重
+   opt-in + RBAC 执行开关。
+4. 更新 `ui-framework/src/types.ts` 与 `components/TaskManager.tsx`，显示精确 model/reasoning，并为
+   validation/human gate 显示不可交给 Agent 的准确状态；新增 ADR-0039，同步 TaskManager 手册、
+   README、ROADMAP 和 ADR 索引。
+
+### 验证证据、限制与下一步
+
+1. `PYTHONPATH=src .venv/bin/python -m unittest -v tests.test_task_manager_codex
+   tests.test_task_manager_execution tests.test_task_manager_targets tests.test_orchestration_web`：18 项全部
+   通过，用时 1.701 秒。detached fake Codex 的重启定位用例证明同一 start key 只有一次外部启动；
+   node kind 测试同时覆盖允许的既有 executor 路径和 validation/human gate 拒绝路径。
+2. `PYTHONPATH=src .venv/bin/python -m compileall -q src tests`、`git diff --check` 均返回 0；
+   `sh ./init.sh -- npm --prefix ui-framework run build` 通过，转换 2719 modules，TaskManager chunk
+   21.57 kB（gzip 7.09 kB）。
+3. `./jobslayer check`：9/9 全部通过，退出码 0，用时 24.8 秒；271 项 unittest 用时
+   22.961 秒，`OK (skipped=5)`；compile、dependency consistency、UI production build（2719
+   modules）、BraveNewWorld testbed、三份 runbook binding 和 Git diff 门禁全部通过。结果回填后对
+   最终工作树再次运行同一命令，仍为 9/9、退出码 0，用时 24.2 秒。
+4. 当前 adapter 解决 API 进程重启，不宣称机器重启后透明续跑；worker 消失且没有 terminal evidence
+   会失败关闭并要求新 attempt。wall-clock timeout 是硬限制，token/成本是输入和事后证据，不伪称能
+   精确读取或预扣 200 美元订阅余额。
+5. 下一步是实现首个 `human_gate` 授权决定以及 validation/verifier/reviewer/integration 完成路径。
+   当前真实计划故意停在 draft，现有 planner-only session 也不能启用执行；需要用户显式固化计划并
+   换用同时具备 `planner`、`executor` 的短期 session 后，才能装配和启动普通 task node。
+6. 用现有 planner-only 签名 session 重启 loopback API 8780，Vite 4173 保持运行。经 same-origin
+   proxy 实测 session/detail HTTP 200：真实 revision 6、无 pending proposal、plan/target assessment
+   均 ready、UI 收到精确 `gpt-5.6-sol/xhigh`；`task_execution=false`、`execution_available=false`，
+   blocker 仍要求用户先固化计划。没有提供 executor opt-in，也没有产生 BNW worktree 或外部调用。
+
+## DEV-2026-08-19-31 — 固化运行装配与根人工范围门禁
+
+- 状态：完成（真实 run 装配、根门禁应用、首个 durable Codex 节点启动与证据反馈）
+- 类型：real finalized run、RBAC executor opt-in、human gate state、decision evidence、TaskManager UI
+- 关联决策：[ADR-0040](adr/0040-plan-finalization-bound-root-human-gate.md)，并继续遵循
+  [ADR-0039](adr/0039-durable-task-manager-codex-worker.md) 与
+  [ADR-0037](adr/0037-plan-bound-task-manager-run-assembly.md)
+
+### 真实状态与授权边界
+
+1. 用户在 UI 显式固化并明确允许启用执行后，核验计划 revision 7：operation
+   `plan.finalized_by_user`、record hash
+   `3ec6c00c7a374ce3b019d66f450898c90af3aa63f6a6c041175eb2e1c08ff0fd`、status finalized、
+   `latest_finalized_revision=7`、11 nodes/11 edges、target/source pin 未变化且 assessment ready。
+2. 按用户授权创建 create-only、8 小时本地签名 session `suspension-demo-operator`，角色严格为
+   `planner + executor`；重启 API 时显式提供 `--allow-external-task-execution`。live session/detail
+   显示 `task_execution=true`、durable Codex connected；没有增加 approver、reviewer 或 admin 权限。
+3. 通过 API 为 revision 7 装配唯一 run `tmrun-f7891eb4a2cd4f0ca1aff2dec8073064`。run revision 1
+   精确绑定上述 plan hash，stage ready；装配不调用 Codex、不创建 BNW worktree。首节点
+   `scope-decision` 是 human gate，因此没有自动启动外部执行。
+
+### 决策与实现
+
+1. 新增 `TaskState.GATE_APPROVED` 终态，专门表达受治理的人类门禁已批准；它不是 `Completed`，不
+   代表代码实现、验证、集成或整个 run 完成。只有 human/policy 能从 `PlanReview` 进入，且必须有
+   immutable evidence；Agent 自批和无证据批准由 `WorkflowKernel` 拒绝。
+2. 新 run 装配把 human gate 经 Kernel 置为 `PlanReview`。依赖满足规则仅接受代码节点
+   `Completed` 或门禁 `GateApproved`；旧 run 中仍为 `Planned` 的根门禁会先追加 `PlanReview`，不
+   改写既有 revision。
+3. 新增 `confirm_scope_gate` 应用命令和 HTTP route。它只接受无依赖根 human gate、非空理由和
+   planner 权限，把 plan id/revision/hash、node、actor、理由与时间登记为 task/run-bound 内容寻址
+   制品，再经 Kernel 追加 `GateApproved`。尾部最终验收门禁有依赖，确定性拒绝复用该路径。
+4. UI 为根门禁显示理由输入与“确认已固化范围”；validation 和非根 human gate 继续禁用 executor。
+   更新 `domain/models.py`、`workflow/kernel.py`、TaskManager execution/facade/web/read model、前端
+   types/component/styles、测试、TaskManager 手册、ADR-0040 与 ADR 索引。
+
+### 当前验证与下一步
+
+1. `PYTHONPATH=src .venv/bin/python -m unittest -v tests.test_workflow
+   tests.test_task_manager_execution tests.test_task_manager tests.test_orchestration_web`：30 项全部通过，
+   用时 1.831 秒；同时覆盖 GateApproved 允许路径、Agent/无证据拒绝、root gate evidence、依赖解锁
+   及非根 final gate 拒绝。
+2. `PYTHONPATH=src .venv/bin/python -m compileall -q src tests`、`git diff --check` 返回 0；UI production
+   build 通过，转换 2719 modules，TaskManager chunk 22.35 kB（gzip 7.31 kB）。
+3. `./jobslayer check`：9/9 全部通过，退出码 0，用时 25.5 秒；compile、dependency consistency、
+   UI production build（2719 modules）、BraveNewWorld testbed、三份 runbook binding 和 Git diff
+   门禁全部通过。回填真实执行证据后再次运行，仍为 9/9、退出码 0，用时 24.7 秒；最终单独运行
+   `PYTHONPATH=src .venv/bin/python -m unittest discover -s tests`，274 项用时 22.426 秒，
+   `OK (skipped=5)`。
+4. 重启 API 加载门禁实现后，将用户“已固化，并允许启用执行”的明确指令连同详细固定范围理由写入
+   `scope-decision`。真实 run revision 2 的该节点经三条 Kernel transition 进入 `gate_approved`；最后
+   一条证据绑定 plan hash 与 `artifact-fe88170abf50437e88e0bf7ec0bae47c`，下一节点变为 READY。
+5. 随后授权 `repository-reconnaissance`，形成稳定 start key
+   `tmstart-4c17541f9ee74d437be1d710ca677a9c`、provider run
+   `codex-task-9627fb237b0b581db70b19767ef3c6ce0781ee8a44e016f6a77cbf9dbfc58a88` 和 start evidence
+   `artifact-ca25ffc5485c473eb94bc6ce9e013f2d`。实际命令为本机登录 Codex
+   `gpt-5.6-sol/xhigh`，运行在独立 worktree `tmws-346d2d5f7e292c0a8bfdd744`。
+6. provider 以 exit 0、无 timeout、无 protocol failure 终止；usage 为 input 193,026、cached input
+   152,832、output 8,209、reasoning output 3,470、cache-write input 0。最终观察把 run 推进到 revision
+   8、node `Verifying`，携带原始 JSONL 与 observation evidence。报告确认 BNW-0 head/tag、主检出和
+   run worktree 都无变更，定位契约/CLI/scenario/HTTP/UI/测试的真实扩展点，并通过 7 项契约测试与
+   4 项一阶数值测试。
+7. worker 的 workspace-write sandbox 禁止创建 loopback socket；Agent 明确记录该限制，没有把动态
+   HTTP 探测的 `PermissionError` 误报为产品失败。HTTP 面仍只有源码与既有回归证据，本节点没有运行
+   会写 bytecode 的完整 `./bnw check`，符合只读勘察范围。
+8. 当前不会自动启动 `simulation-visualization-design`：勘察节点已到 `Verifying`，但 TaskManager 尚无
+   把节点 acceptance criteria 编译成确定性 verification report、review 与中间阶段验收的实现。
+   provider success 仍不等于 workflow completion；下一步应补这条路径，而不是直接把节点标为完成。
+9. 终态观察落盘后再次停止并重启 TaskManager API。重新读取仍得到 run revision 8、stage
+   `verifying`、相同 provider run/start key、`succeeded` observation 与内容 cursor；没有产生新的
+   Codex 进程或重复启动证据，验证本次真实运行可跨 API 进程恢复查询。
+
+## DEV-2026-08-19-32 — 确定性阶段验证与 Reviewer 交付物接受
+
+- 状态：完成（无源码差异的阶段性交付物闭环；源码集成与 validation 专用执行仍待后续）
+- 类型：workflow terminal state、structured workspace evidence、RBAC reviewer、TaskManager API/UI
+- 关联决策：[ADR-0041](adr/0041-verified-artifact-deliverable-acceptance.md)，并继续遵循
+  [ADR-0039](adr/0039-durable-task-manager-codex-worker.md) 与
+  [ADR-0040](adr/0040-plan-finalization-bound-root-human-gate.md)
+
+### 决策与实现
+
+1. 新增 `TaskState.DELIVERABLE_ACCEPTED` 终态，专门表达无源码差异的 task/milestone 已先通过
+   `VerificationReport`，再由 human/policy reviewer 以不可变证据接受。它不是源码 `Completed`、
+   source integration 或最终 run approval；Agent、自缺失 report 或无 review evidence 的转换均由
+   `WorkflowKernel` 拒绝。
+2. 扩展 provider-neutral executor contract，adapter 只返回 source commit、workspace inspection、changed
+   paths、可选 patch hash 和 task/run-bound artifacts。TaskManager verifier 自己校验 provider terminal、
+   workspace binding、路径策略与 evidence integrity，才把 `Verifying` 推进到 `Reviewing` 或
+   `Repairing`；adapter 不拥有 pass/fail。
+3. `accept_node_review` 把 plan id/revision/hash、node、report、交付物、验收标准、reviewer 和理由登记为
+   review artifact，再经 Kernel 进入 `DeliverableAccepted`。只要 changed paths 非空、patch hash 存在
+   或 workspace 不 clean，就确定性拒绝 artifact-only 路径，保留既有源码 review/integration 门禁。
+4. 增加 `verify` 与 `accept-review` HTTP 命令；前者要求 `EXECUTE_TASK`，后者要求
+   `REVIEW_IMPLEMENTATION`。UI 按 `Verifying -> Reviewing` 显示两步操作、接受理由、check 数量、差异
+   数量和 review artifact；validation 与 human gate 仍走专用路径。
+5. 新增可选 run snapshot 字段后，真实旧 journal 首次重启按设计拒绝了 revision 1 hash 重算。修复为
+   history verification 使用 `exclude_unset` 重建原记录字段面：不改写旧 JSONL，也不把新增默认字段
+   追溯加入旧 hash。新增回归测试模拟 pre-verification schema 并证明原 hash 保持可读。
+
+### 真实运行与授权证据
+
+1. 根据用户“接受勘察结果并允许中间 reviewer 路径”的确认，create-only 签发 8 小时 session
+   `suspension-demo-reviewer`，角色严格为 `planner + executor + reviewer`；未授予 approver、admin、
+   decision application 或 source integration 权限。
+2. API 用新 session 恢复既有 run 后，对 `repository-reconnaissance` 运行确定性验证。run revision 9
+   的四项 required checks（provider terminal、workspace binding、changed-path policy、immutable evidence）
+   全部 passed；workspace changed paths 为空且 clean，report
+   `tmverify-b442d7abbb354cf1b9800e7eb62d046b` 及 artifact
+   `artifact-5130592e54fa433daf32f0537a20f4a5` 已绑定到 workflow task/run。
+3. 将用户确认、四项 passing checks 和无源码差异事实写入 reviewer evidence
+   `artifact-12a19f2b66e54c6da849e8405000441a`。run revision 10 中勘察节点经 Kernel 进入
+   `deliverable_accepted`，run 回到 `ready`，且 `simulation-visualization-design` 成为唯一就绪后继。
+4. 随后授权 `simulation-visualization-design`，稳定 start key 为
+   `tmstart-0ddd680f38d547cbccbf2a52c546b4b0`，provider run 为
+   `codex-task-55a4ed2a07ebc857e8020b609d381a8fdac5250cb00c9ced7c6df3679aadb18e`。provider
+   exit 0、无 timeout、无 protocol failure；usage 为 input 561,745、cached input 477,696、output
+   23,238、reasoning output 10,736、cache-write input 0。run revision 20 的节点进入 `Verifying`。
+5. 设计节点只在隔离 BNW worktree 追加 `docs/DEVELOPMENT_LOG.md` 并新增 proposed ADR
+   `docs/adr/0002-quarter-car-simulation-contract.md`，没有修改实现、测试或主检出。报告固定二自由度
+   方程、SI 单位、RK4 边界、版本化联合契约、统一分派、轨迹/指标/hash、兼容矩阵和视觉缩放边界；
+   12 项非 socket 基线测试、编译和 diff 检查通过，完整 `./bnw check` 的 4 项 HTTP 测试因 Agent
+   sandbox 禁止 loopback socket 而未通过，未被误报为产品回归。
+6. 对该节点运行确定性 verifier 后，run revision 21 的四项 required checks 全部 passed；报告
+   `tmverify-3f6fb04c00d44c7e85333de0935f2477`、artifact
+   `artifact-6a7b33a72c7e41cbbeb69409c6e9c8b7` 与 patch SHA-256
+   `cecd4021d9afadc05d65463dc878b078f22a7761fae4e343434e8ffbe38d35d0` 已登记。changed paths 精确为
+   上述两份允许路径文档，workspace 因候选差异不 clean，节点停在 `Reviewing`。
+
+### 验证与限制
+
+1. 聚焦测试覆盖允许路径以及 Agent/缺 evidence/源码差异拒绝路径、真实 Git workspace evidence、旧
+   schema hash 兼容和 reviewer RBAC；UI TypeScript 与 production build 通过，转换 2719 modules，
+   TaskManager chunk 23.92 kB（gzip 7.76 kB）。
+2. `PYTHONPATH=src .venv/bin/python -m compileall -q src tests` 与 `git diff --check` 返回 0。
+3. `./jobslayer check`：9/9 全部通过，退出码 0，用时 25.6 秒；279 项 unittest 用时 23.815 秒，
+   `OK (skipped=5)`，compile、dependency consistency、UI production build、BraveNewWorld testbed、
+   三份 runbook binding 和 Git diff 门禁全部通过。
+4. 当前 reviewer session 没有 approver 或 source integration 权限，TaskManager 也尚未暴露源码 review
+   package、批准与精确 patch integration 命令。因此不会把设计节点转为 `DeliverableAccepted`，也不会
+   修改 BNW 主检出。下一步需用户明确授权落实源码 review/integration 路径及后续批准边界。
+
+## DEV-2026-08-19-33 — 独立源码审查、审批与隔离运行分支检查点
+
+- 状态：完成（实现、全量门禁及真实设计节点独立审查/审批/checkpoint 均已验证）
+- 类型：source review package、independent approval、idempotent Git checkpoint、RBAC、TaskManager UI
+- 关联决策：[ADR-0042](adr/0042-independent-source-review-and-isolated-run-checkpoint.md)，并继续遵循
+  [ADR-0037](adr/0037-plan-bound-task-manager-run-assembly.md)、
+  [ADR-0039](adr/0039-durable-task-manager-codex-worker.md) 与
+  [ADR-0041](adr/0041-verified-artifact-deliverable-acceptance.md)
+
+### 授权边界与实现
+
+1. 用户明确允许继续落实 `source reviewer review -> independent Approver approval -> exact patch
+   checkpoint in isolated run branch`；范围明确不含 BraveNewWorld 主干 merge/checkout mutation、push
+   或 deploy，并要求使用独立、短期、最小权限 approver session。
+2. 新增 provider-neutral `ManagedCheckpointRequest/Result` 和 `TaskManagerSourceIntegrator`；run node
+   原子持久化 `ReviewReport`、review/approval artifacts、独立 approver、integration key 与
+   `SourceIntegrationResult`。所有状态仍只经 Kernel 的
+   `Reviewing -> MergeReview -> Integrating -> Completed` 推进。
+3. `review_source_node` 只接受 passing report 所绑定的非空 source patch；
+   `approve_source_checkpoint` 确定性拒绝 reviewer 自批，并在任何 Git 副作用前把 stable key、精确
+   plan/review/report/patch/path/target/ref 和理由追加到 run 哈希链；`integrate_source_checkpoint` 再逐项
+   比对 adapter result，证据不一致时失败关闭。
+4. 新增 `LocalTaskManagerGitCheckpointIntegrator`：canonical request create-once，同 key 输入漂移拒绝；
+   只对既有 run worktree 的 reviewed paths 执行 Git add/commit；重试校验唯一 parent、branch、clean
+   tree 与 patch hash/path 后返回同一 durable result。adapter 不 checkout/merge 主干，不 push/deploy。
+5. durable Codex verification 改为相对当前 run-branch HEAD 采集 node-local patch，使前一节点检查点完成
+   后，后续节点不会把整个历史累计差异误当成自己的 patch。
+6. HTTP/UI 增加 `review-source`、`approve-checkpoint`、`integrate-checkpoint`，分别要求
+   `REVIEW_IMPLEMENTATION`、`APPLY_DECISION`、`INTEGRATE_SOURCE`；CLI 增加显式
+   `--allow-task-manager-checkpoint-integration`。server 只要求 control-plane view 身份，所有 planning
+   mutation 改为逐命令检查 `MANAGE_TASK_PLAN`，因此 approver-only session 不能修改计划。
+
+### 验证、真实应用与下一步
+
+1. `sh ./init.sh -- python -m unittest tests.test_task_manager_execution
+   tests.test_task_manager_codex tests.test_orchestration_web`：22 项全部通过，用时 2.774 秒。覆盖完整允许
+   路径、reviewer 自批拒绝、planner API 越权拒绝、真实临时 Git repo 的 exact commit、同请求幂等、
+   同 key request drift 拒绝，以及主检出 HEAD/status 不变。
+2. `sh ./init.sh -- python -m compileall -q src tests` 返回 0；
+   `sh ./init.sh -- npm --prefix ui-framework run build` 通过，转换 2719 modules，TaskManager chunk
+   25.23 kB（gzip 8.17 kB）。
+3. 主要变更文件：`src/jobslayer/task_manager/execution.py`、
+   `application/task_manager_execution.py`、`application/task_manager.py`、
+   `adapters/task_manager_codex.py`、`adapters/task_manager_git_checkpoint.py`、`orchestration/web.py`、
+   `cli.py`、`ui-framework/src/types.ts`、`ui-framework/src/components/TaskManager.tsx`、三份聚焦测试、
+   TaskManager 手册、ADR-0042 与 ADR 索引。
+4. 本路径只形成隔离运行分支 checkpoint，不声明项目主干已集成或可发布；跨机器调度、远端 push、
+   deployment 和最终 human gate 仍不在本次范围。
+5. 首次 `./jobslayer check`：9/9 全部通过，退出码 0，用时 25.9 秒；281 项 unittest 用时
+   23.843 秒，`OK (skipped=5)`；compile、dependency consistency、UI production build、BNW testbed、
+   三份 runbook binding 和 diff 门禁全部通过。
+6. 重启现有 `planner + executor + reviewer` API 加载新链路；Reviewer 逐项检查两份文档差异后，将
+   report `tmverify-3f6fb04c00d44c7e85333de0935f2477`、patch
+   `cecd4021d9afadc05d65463dc878b078f22a7761fae4e343434e8ffbe38d35d0` 与两条 changed paths 固化为
+   review `tmreview-5e00d0045f8d43c0b6036a7b37f1c4f6` / artifact
+   `artifact-61a55b4cff7e46b98aec563006314ce9`。run revision 22 进入 `MergeReview`；该 session 的 approval
+   capability 为 false。
+7. create-only 签发 60 分钟 `suspension-demo-approver` session，角色严格只有 `approver`。实测其
+   planning/discussion/execution/review capability 全为 false，只有 checkpoint approval/integration 为
+   true。审批把限定为隔离分支、明确排除 main/push/deploy 的理由写入 artifact
+   `artifact-85ea894193984e6db6f846a8a5ad19f9`，并在 Git 副作用前将 stable key
+   `tmintegrate-56120a58e8172cd392b0476387d86366` 追加为 run revision 23 `Integrating`；此时 worktree
+   HEAD 仍是 `fb43878c9f0164deef272e55969c0fc134a6d6a3` 且两份差异仍未提交。
+8. integration 将精确 reviewed patch 提交到已有分支
+   `jobslayer/tmws-346d2d5f7e292c0a8bfdd744`，commit
+   `60e1af0fb7cdc96cad427f24570b2c8fa42477f2` 的唯一 parent 是固定 `bnw-0` baseline，changed paths 仅
+   `docs/DEVELOPMENT_LOG.md` 与 `docs/adr/0002-quarter-car-simulation-contract.md`；integration artifact
+   为 `artifact-58b4155f4c084757bbcd1142baf9cec7`。run revision 24 的设计节点经 Kernel 进入
+   `Completed`；重复同命令保持 revision 24 和同一 commit，worktree clean。
+9. 全程检查 BraveNewWorld 主检出仍在 `fb43878c9f0164deef272e55969c0fc134a6d6a3` 且 status clean；没有
+   checkout/merge main、push 或 deploy。随后停止 approver API，恢复原 reviewer/executor API；run stage
+   为 ready，`suspension-simulation-model` 是唯一 READY 后继。下一步可在再次通过完整门禁后授权该
+   模型实现节点，其 verification patch 将以 `60e1af0...` 当前 run-branch HEAD 为 node-local base。
+10. 回填上述真实证据后再次运行 `./jobslayer check`：9/9 全部通过，退出码 0，用时 26.7 秒；281 项
+    unittest 用时 24.743 秒，`OK (skipped=5)`，其余 compile/dependencies/UI/testbed/runbooks/diff 门禁
+    同样全部通过。
+
+## DEV-2026-08-19-34 — 悬架内核与交互可视化的真实执行闭环
+
+- 状态：进行中（内核与 UI 两个源码节点均已完成独立 review/approval/checkpoint；后续测试、文档、全库验证与最终人工门禁仍按 DAG 推进）
+- 类型：durable Codex execution、deterministic verification、browser evidence、independent checkpoint
+- 继续遵循：[ADR-0039](adr/0039-durable-task-manager-codex-worker.md)、
+  [ADR-0041](adr/0041-verified-artifact-deliverable-acceptance.md) 与
+  [ADR-0042](adr/0042-independent-source-review-and-isolated-run-checkpoint.md)
+
+### `suspension-simulation-model` 真实执行与检查点
+
+1. 从已完成的设计检查点 `60e1af0fb7cdc96cad427f24570b2c8fa42477f2` 授权模型节点，start key
+   `tmstart-d65faf12ad8ecc43ab47d5fba798494a`、provider run
+   `codex-task-c8d4b2ca05b11cd2955b81d530add4a8e31c8b8b80cc9198226b86123217af7d`。本机登录
+   Codex `gpt-5.6-sol/xhigh` 从 10:49:10 UTC 运行至 11:00:28 UTC，exit 0、无 timeout 或 protocol
+   failure；usage 为 input 1,634,346、cached input 1,515,264、output 34,798、reasoning output
+   12,096、cache-write input 0。
+2. 节点实现严格四分之一车辆契约、确定性余弦凸包、固定步长 RK4、公共分派、版本化场景及
+   CLI/HTTP/manifest 路由，并保留一阶兼容。默认悬架场景为 2501 点，trace hash
+   `0aa84b98b3e635d2d7aee9489b6ec49f71e341952eeefd98d725b64538b6fdbf`。宿主 `./bnw check`
+   为 4/4，36/36 unittest 通过；worker 中唯一 4 项失败是 sandbox 禁止 loopback socket，未被误报。
+3. verifier report `tmverify-d3b50a591e61413fbf3a5a8ae5e5f308` 将 13 个允许路径和 patch
+   `b27d0d6af62c59aaf0541da2142855a091c295d7614e8bc20170e011ff474142` 绑定到 source commit
+   `60e1af0...`。Reviewer 固化 review `tmreview-551de7fdc15e4e65bbd9db6470cde092` / artifact
+   `artifact-47555033b1054bb29308a02609432337`；独立 approver-only session 固化 approval artifact
+   `artifact-1ed3af24733d4db5951139800845cb57` 和 integration key
+   `tmintegrate-c1bbaba62d45aeffdcb5f5e706f922c3`。
+4. 精确补丁提交为隔离分支 commit `063f443710dc54db56077d8056245663b5a7d319`，integration artifact
+   `artifact-0b81d8cd57274bc6b638d70d55afce97`；重复 integrate 保持 run revision 31、相同 commit 和
+   integration ID `tmintegration-cd22f156ac567bac026fa7df8aa46ec8`。
+
+### `interactive-visualization-case` 真实执行与浏览器复核
+
+1. 依赖完成后授权 UI 节点，start key `tmstart-01149d9fe948de5c219aded2613f7f57`、provider run
+   `codex-task-188db211725610a744a1bbd4f319de8ca400128de89a79eee63daec41d3e68b8`。Codex 从
+   11:05:09 UTC 运行至 11:20:31 UTC，exit 0、无 timeout 或 protocol failure；usage 为 input
+   2,429,615、cached input 2,321,152、output 47,317、reasoning output 9,379、cache-write input 0。
+2. 节点新增 manifest 驱动案例/参数、同一 API trace 驱动的机械 Canvas、三组曲线、量化指标、
+   开始/暂停/播放复位、原子参数更新、错误清理、SI 单位、非实物比例和键盘/非颜色可访问表达；新增
+   9 项固定 trace 展示测试。worker 的 41/45 与 Chrome 启动限制同样来自 socket sandbox；宿主完整
+   `./bnw check` 为 4/4，45/45 unittest 通过。
+3. 宿主真实 Chrome 首轮烟雾检查发现 `.empty-result { display: flex; }` 覆盖成功响应后的 `hidden`
+   属性，导致旧请求空态与结果同时显示。Reviewer 在验证前以最小 CSS 修正加入显式
+   `.empty-result[hidden]` 规则、增加回归断言并追加 BNW 开发日志；最终门禁仍为 4/4。
+4. 修正后以真实 loopback API 和 Chrome DevTools 验证：键盘方向键从一阶案例切换到悬架案例，得到
+   2501 点与 hash 前缀 `0aa84b98b3e6`；15 个参数、8 项指标、6 条曲线及两个 Canvas 一致显示；空格键
+   播放和暂停共同停在 `0.190 s` 的第 96 个样本。跨字段非法请求显示领域错误、清空旧结果并禁用
+   播放/导出，键盘恢复默认后重新取得完整默认结果。
+5. 最终 verifier report `tmverify-387bbcd6e3c44f7aa944a159c42db3bb` 将 5 个路径和 patch
+   `b0ddec165a176db96ba305e9da2dcb56f3ce62d11685b35e6f6fdd20b11b1b03` 绑定到 `063f443...`。
+   Reviewer 固化 review `tmreview-07aa2046fb934c5386482cd21a7bab6b` / artifact
+   `artifact-d4e426a4f6604369b75b1bba3fa39beb`；独立批准 artifact
+   `artifact-dc1e961da99d4cd099f1853ebb58dabb` 和 key
+   `tmintegrate-c2e0368ac1cfe76cba79a9e98316966f` 在 Git 副作用前落盘。
+6. 精确 UI 补丁提交为隔离分支 commit `11058bbeac74e01d16eeee3636c3ec936275f72c`，integration artifact
+   `artifact-5976b802ba8a4400a591061269b02a3d`；重复 integrate 保持 run revision 45、相同 commit 和
+   integration ID `tmintegration-15bf11f82a33e500572f1a5699f35353`。提交后 `./bnw check` 仍为
+   4/4、45/45，worktree clean。
+
+### 边界与下一步
+
+1. 两个节点始终只写同一隔离分支 `jobslayer/tmws-346d2d5f7e292c0a8bfdd744`。BraveNewWorld 主检出
+   始终保持 `main@fb43878c9f0164deef272e55969c0fc134a6d6a3` 且 clean；没有 merge、push、deploy 或远端变更。
+2. run revision 45 回到 `ready`；`focused-automated-tests` 是唯一依赖已满足的后继。下一步恢复
+   reviewer/executor API 后授权该节点，继续沿 verifier -> source review -> independent approval ->
+   isolated checkpoint 闭环推进；最终完成仍由后续 validation 和 human gate 决定。
+3. 当前 JobSlayer 工作树的完整 `./jobslayer check` 将在本条真实证据回填后执行，并把精确结果追加在
+   本节；此前最近一次完整结果为 DEV-33 记录的 9/9。
+
+## DEV-2026-08-19-35 — TaskManager 源码绑定的确定性 validation node
+
+- 状态：完成（实现、拒绝路径、UI/API、完整门禁及真实 BNW 验证节点均已验证）
+- 类型：provider-neutral validation adapter、policy-constrained commands、Kernel verification、RBAC、UI
+- 关联决策：[ADR-0043](adr/0043-source-bound-deterministic-validation-nodes.md)，并继续遵循
+  [ADR-0037](adr/0037-plan-bound-task-manager-run-assembly.md) 与
+  [ADR-0041](adr/0041-verified-artifact-deliverable-acceptance.md)
+
+### 决策与实现
+
+1. `TaskManagerValidator` 与 `ManagedValidationCheckEvidence` 只表达 adapter 观察到的原始命令和
+   workspace 事实；没有 SDK/provider 对象进入 domain，也不允许 adapter 决定 pass、review 或
+   completion。普通 task 继续拒绝走 validation adapter，validation/human gate 继续拒绝 Codex dispatch。
+2. 新增 `LocalTaskManagerValidationRunner`：从已有 run workspace 读取 manifest，绑定当前隔离分支
+   HEAD，开始及采证时都要求 clean；只通过 `GovernedLocalCommandRunner` 执行 finalized target 的
+   `ValidationProfile`。每条 stdout/stderr、完整 hash、截断、退出码与计时均登记为 task/run-bound
+   artifact，且验证运行不允许产生 changed paths 或 source patch。
+3. TaskManager 先通过 Kernel 将显式人类授权与稳定 `tmvalidate-*` key 写入 run 哈希链，再调用
+   `start_or_locate`。adapter 对 canonical request、reference、terminal result 使用 create-once durable
+   state；相同 terminal 幂等复用、同 key 输入漂移拒绝。同步本地 runner 在 terminal 原子落盘前崩溃
+   时可能重跑，因此当前只支持幂等、非发布型 validation profile，限制已写入 ADR/手册。
+4. runner `Succeeded` 只表示命令已终止。application service 精确核对 finalized check id/order、
+   required、argv、cwd、task/workspace/policy 绑定，再把 command status 与四项结构事实编译成
+   `VerificationReport`，经 Kernel 进入 `Reviewing` 或 `Repairing`；只有授权 Reviewer 接受 passing
+   report 才进入 `DeliverableAccepted`。
+5. HTTP 新增 `run-validation`，要求 `EXECUTE_TASK`；CLI 新增显式
+   `--allow-task-manager-local-validation` 且启动时再次校验 executor role。TaskManager session 暴露独立
+   `node_validation` capability，React UI 为 ready validation node 提供专用运行、observe、verify、
+   review 路径，不提供 Agent start 或直接完成。
+
+### 文件与验证
+
+1. 主要变更：`src/jobslayer/task_manager/execution.py`、
+   `application/task_manager_execution.py`、`application/task_manager.py`、
+   `adapters/task_manager_validation.py`、`orchestration/web.py`、`cli.py`、
+   `ui-framework/src/types.ts`、`ui-framework/src/components/TaskManager.tsx`、
+   `tests/test_task_manager_execution.py`、`tests/test_task_manager_validation.py`、
+   `tests/test_orchestration_web.py`、TaskManager 手册、ADR-0043 与 ADR 索引。
+2. `sh ./init.sh -- python -m unittest tests.test_task_manager_execution
+   tests.test_task_manager_validation tests.test_orchestration_web`：24 项通过，用时 3.637 秒。覆盖允许
+   路径、required check 失败进入 `Repairing` 且不得接受、缺 adapter 不改变 revision、稳定键幂等、
+   request drift、脏 workspace、raw artifacts，以及 planner 对 validation 命令的 403 拒绝。
+3. `sh ./init.sh -- python -m compileall -q src tests` 与 `git diff --check` 返回 0；
+   `sh ./init.sh -- npm --prefix ui-framework run build` 使用 Node 24.19.0/npm 11.17.0 通过，转换
+   2719 modules，TaskManager chunk 25.63 kB（gzip 8.31 kB）。直接使用系统 Node 18.19.1 会因项目
+   已声明的 `node >=22.12` 前置条件在 Rolldown 启动时失败，统一 bootstrap 随后正确解析固定 Node。
+4. `./jobslayer check`：9/9 全部通过，退出码 0，墙钟 29.1 秒；287 项 unittest 用时 27.166 秒，
+   `OK (skipped=5)`；compile、dependency consistency、锁定 UI production build、BNW testbed、三份
+   runbook binding 和 Git diff 门禁全部通过。
+
+### 真实 DAG 证据与边界
+
+1. 在既有 run `tmrun-f7891eb4a2cd4f0ca1aff2dec8073064` revision 45 上，用显式 validation 开关
+   授权 `focused-automated-tests`。run revision 47 绑定 key
+   `tmvalidate-992aa90dd3d7452f5fe5562e4f1f70ae`、adapter `local_validation`、provider run
+   `validation-a8278014c6e8eeb60f028a86c1dfb4775ec2cb89f268f8a4316d673756f8584f` 和 start artifact
+   `artifact-0172e8ecd8024cf0b063a4a8e2bf4965`；未发起 Codex 调用。
+2. finalized checks `suspension-scenario` 与 `complete-bnw-suite` 分别用时 114 ms、2577 ms，exit 0；
+   raw command artifacts 为 `artifact-3334d68cffb1448597c90b423b4d8330` 与
+   `artifact-d999d07cee18471da849e13756c81d4b`。workspace 精确位于隔离 commit
+   `11058bbeac74e01d16eeee3636c3ec936275f72c`，clean、无 changed paths。
+3. report `tmverify-31552001b4054f6eb8987904244d5dd7` / artifact
+   `artifact-964fb0320a62479f87d53d55a805dab6` 的两项命令与 terminal/workspace/path/evidence 四项结构
+   checks 全部 required/passed。Reviewer evidence `artifact-d40921b074d44836b8caba732fbcd448`
+   使 revision 50 经 Kernel 进入 `DeliverableAccepted`，并解锁 `documentation-and-development-log`。
+4. 整个 validation 路径未改动 BNW worktree、未创建源码 commit，也未 merge/push/deploy。BNW 主检出
+   仍保持 `main@fb43878c9f0164deef272e55969c0fc134a6d6a3` clean；后续文档源码节点仍必须走独立
+   review/approval/isolated checkpoint，最终完成继续由剩余两次 validation 与 human gate 决定。
+
+## DEV-2026-08-19-36 — 最终证据门禁与悬架 DAG 完整闭环
+
+- 状态：完成（最终门禁实现、拒绝/兼容路径、全量门禁及真实 11-node DAG 均已闭环）
+- 类型：final human approval、evidence binding、legacy run compatibility、TaskManager API/UI、真实运行
+- 关联决策：[ADR-0044](adr/0044-evidence-bound-final-completion-gate.md)，并继续遵循
+  [ADR-0041](adr/0041-verified-artifact-deliverable-acceptance.md) 与
+  [ADR-0043](adr/0043-source-bound-deterministic-validation-nodes.md)
+
+### 最终门禁基础设施
+
+1. 新增 `approve_completion_gate` application command 与 `approve-completion` HTTP/UI 路径。它只接受
+   有依赖、无下游消费者的 sink human gate，要求除自身外所有节点已受治理终态，且每个直接依赖都有
+   passing verification report、verification artifact 与 reviewer acceptance 或 integration artifact。
+2. 命令要求 `APPLY_DECISION`，并确定性拒绝直接依赖的最后 Reviewer 自批。decision artifact 固定
+   plan id/revision/hash、run、gate、actor、理由和依赖 report/acceptance evidence；随后只通过
+   `WorkflowKernel.transition` 进入 `GateApproved`，run stage 从全部节点终态确定性派生为 `Completed`。
+3. 根范围 gate、非 sink 中间 gate、未完成依赖、缺少 report/acceptance、自批与空理由均不改变 run。
+   旧 run 在尾部 gate 自动初始化为 `PlanReview` 规则加入前已装配时，允许先经 Kernel 追加
+   `Planned -> PlanReview` 系统转换，再执行同一人类批准；不重写旧 transition history。
+4. session capability 增加独立 `completion_approval`；TaskManager UI 只对 sink human gate 显示最终验收
+   理由和批准动作。planner Web 请求返回 403；approver-only session 不需要 executor、validator 或
+   source integration adapter。
+
+### 后续 BNW 节点与真实证据
+
+1. `documentation-and-development-log` 以 Codex `gpt-5.6-sol/xhigh` 从 11:50:16 至 11:57:53 UTC
+   执行，exit 0、无 timeout/protocol failure；usage 为 input 1,774,159、cached input 1,661,440、
+   output 22,404、reasoning output 5,723。候选只修改 README、架构、既有悬架 ADR 与追加式日志；
+   worker sandbox 内 41/45 的 4 项 socket 限制被如实记录，宿主 `./bnw check` 为 4/4、45/45。
+2. report `tmverify-a2eb26b87e5e4903b3a956706ef56233` 将 4 个路径与 patch
+   `cada4e2414f9df270ae945bab8100305a9e920c92306e923d1be6c8ea46620bc` 绑定到 `11058bb...`；
+   review `tmreview-5f779e4f29024ec1976a7e409ad2775b` 后，新的 60 分钟 approver-only session
+   `suspension-demo-docs-approver` 固化 approval artifact
+   `artifact-dc59196290354ea48f87ec7c20ae03e8`。隔离 commit
+   `efa41058af1ef604a7e7c14d39ff5341d2081d8d` 的唯一前序为 `11058bb...`，重复集成保持 revision 62。
+3. `full-repository-validation` 以 key `tmvalidate-21890685c0ecebe8b2570e529db89eeb` 在
+   `efa41058...` 运行；场景/完整门禁分别 114/2575 ms、exit 0。report
+   `tmverify-1d63e35e1d11454e8d99fefe2471e22c` 六项 required checks 全过，Reviewer evidence
+   `artifact-00395d426eb2408f949f891bd5a4cb6b` 使 revision 67 进入 `DeliverableAccepted`。
+4. `development-log-finalization` 从 12:00:59 至 12:04:50 UTC 执行，exit 0；usage 为 input
+   636,770、cached input 561,920、output 11,231、reasoning output 5,061。它只在 BNW 日志末尾追加
+   55 行，逐项转录原始命令时间、hash、stdout truncation、45/45、4/4 和相对 `bnw-0` 的 20 个候选
+   文件，没有推写被截断的 metrics/trace hash。宿主再次 `./bnw check` 为 4/4、45/45。
+5. 该单文件 patch `a3dca1451ac467651a6636b62cf0b61feccdba5745e5b898c74d4db46cda48f3`
+   经 report `tmverify-1b78f9ab2b704255b1a2aaddbabca642`、review
+   `tmreview-3175271bbdf1406b8bd252a514caa096`、approval artifact
+   `artifact-8babe976072e4d44b1a43dfa2b905648` 后提交为隔离 commit
+   `d17fd9486f0bcbfa01075ca11b8e350dc6c99d96`，唯一前序 `efa41058...`，run revision 76。
+6. `final-consistency-validation` 再次在 `d17fd948...` 执行场景/完整门禁，均 exit 0、114/2575 ms；
+   report `tmverify-7bfb839f6c5b4dbaa5ab8188315a36bb` 与 artifact
+   `artifact-8c98d4497fa6456a836760537044dcc7` 的六项 required checks 全过，Reviewer artifact
+   `artifact-2eb660cb73a746d7b8e874e22fae74b8` 使 revision 81 解锁最终 gate。
+7. approver-only session 依据上述 report/review 和全部终态节点批准最终 gate。真实旧 run 先追加
+   `Planned -> PlanReview`（system），再追加 `PlanReview -> GateApproved`（human
+   `suspension-demo-docs-approver`）；decision artifact 为
+   `artifact-6c201c813b564d8f98da85c0ef20fe23`。run revision 82 的 11 个节点全部终态，stage 为
+   `completed`，并准确显示终态 blocker；该完成只属于隔离 TaskManager run。
+
+### 验证、文件与边界
+
+1. 最终门禁主要变更：`src/jobslayer/application/task_manager_execution.py`、
+   `application/task_manager.py`、`orchestration/web.py`、`ui-framework/src/types.ts`、
+   `ui-framework/src/components/TaskManager.tsx`、`tests/test_task_manager_execution.py`、
+   `tests/test_orchestration_web.py`、TaskManager 手册、ADR-0044 与 ADR 索引。
+2. 聚焦 `python -m unittest tests.test_task_manager_execution tests.test_orchestration_web`：22 项通过，
+   用时 4.245 秒；覆盖未完成依赖与 reviewer 自批不写 revision、独立 Approver 允许路径、Kernel evidence
+   和 planner 403。Node 24.19.0 的 UI production build 通过，转换 2719 modules，TaskManager chunk
+   26.27 kB（gzip 8.46 kB）；compileall 与 `git diff --check` 返回 0。
+3. `./jobslayer check`：9/9 全部通过，退出码 0，墙钟 29.3 秒；288 项 unittest 用时 27.369 秒，
+   `OK (skipped=5)`；compile、dependencies、UI、BNW testbed、三份 runbook binding 和 diff 门禁全过。
+4. BNW 隔离分支最终 clean，HEAD 为 `d17fd948...`；主检出仍是
+   `main@fb43878c9f0164deef272e55969c0fc134a6d6a3` 且 clean。全程没有 checkout/merge 主干、push、
+   deployment、release 或远端变更；将完整候选带入主干仍需另行、明确的集成授权。

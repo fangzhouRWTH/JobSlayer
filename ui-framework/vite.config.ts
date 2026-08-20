@@ -12,6 +12,9 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 4173,
     proxy: {
+      "/api/task-manager": {
+        target: "http://127.0.0.1:8780",
+      },
       "/api/orchestration": {
         target: "http://127.0.0.1:8780",
       },

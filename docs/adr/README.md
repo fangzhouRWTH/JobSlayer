@@ -35,5 +35,16 @@
 | [ADR-0031](0031-versioned-collaborative-task-orchestration.md) | Accepted | 用版本化 DAG、Agent 待应用提案和追加式定稿记录建立协作任务编排纵向切片 |
 | [ADR-0032](0032-governed-interactive-planning-workbench.md) | Accepted | 用结构化节点、计划评估、语义边、版本派生和非权威本地布局完善交互式规划工作台 |
 | [ADR-0033](0033-evidence-bound-codex-planning-adapter.md) | Accepted | Codex 只返回经 Schema/DAG 校验的提案草稿，原始交互绑定制品且必须显式启用 |
+| [ADR-0034](0034-authenticated-bounded-planning-artifact-viewer.md) | Accepted | 规划制品只通过认证、plan-bound、去 URI 且哈希验证的有界文本预览进入 Workbench |
+| [ADR-0035](0035-provider-neutral-resumable-long-running-control-plane.md) | Accepted | 长任务用持久 start identity、多维预算、lease、证据 checkpoint 与显式 retry 实现保守恢复 |
+| [ADR-0036](0036-focused-task-manager-product-surface.md) | Accepted | 主产品面收紧为 TaskManager facade，复用既有规划/执行真相并显式暴露执行缺口 |
+| [ADR-0037](0037-plan-bound-task-manager-run-assembly.md) | Accepted | TaskManager run 精确绑定 finalized revision，以 Kernel 状态、幂等启动键和制品证据推进反馈 |
+| [ADR-0038](0038-source-pinned-bravenewworld-execution-target.md) | Accepted | 以源包哈希、固定 BNW 基线和确定性预检把 TaskManager 计划绑定到显式 BraveNewWorld 目标 |
+| [ADR-0039](0039-durable-task-manager-codex-worker.md) | Accepted | 以持久启动身份、独立 worker、运行级 worktree 和原始证据实现 API 重启可定位的本机 Codex 任务执行 |
+| [ADR-0040](0040-plan-finalization-bound-root-human-gate.md) | Accepted | 用独立 GateApproved Kernel 终态和不可变决定证据把根范围门禁绑定到显式 finalized revision |
+| [ADR-0041](0041-verified-artifact-deliverable-acceptance.md) | Accepted | 用确定性 workspace 证据和独立 Reviewer 接受无源码差异的阶段性交付物 |
+| [ADR-0042](0042-independent-source-review-and-isolated-run-checkpoint.md) | Accepted | 用独立源码审查/审批和幂等 run-branch 检查点完成源码节点，不触碰主干发布边界 |
+| [ADR-0043](0043-source-bound-deterministic-validation-nodes.md) | Accepted | 用 finalized profile、受策略约束的本地 runner 与 TaskManager-owned report 执行 validation node |
+| [ADR-0044](0044-evidence-bound-final-completion-gate.md) | Accepted | 用最终 passing/acceptance 证据和独立 Approver 决定 sink human gate 与 run 完成 |
 
 新增或取代 ADR 时，同时更新本索引和 `docs/DEVELOPMENT_LOG.md`。Accepted ADR 不通过静默编辑改变原决定；需要改变方向时新增 superseding ADR。

@@ -42,3 +42,19 @@ Codex 执行器也已经有最小环境继承、只读/workspace-write sandbox �
 - 当前 CLI 只能强制模型选择、单次调用、时间和 I/O 上限，不能从 Codex CLI 预先强制美元/token
   上限。生产启用前仍需账户侧预算、短期凭据/授权、保留策略和一次明确批准的真实 smoke test。
 - 多人事务 plan store、逐项提案合并、制品浏览 API 和 plan-to-Workflow IR 仍是后续工作。
+
+## 2026-08-19 补充：显式 reasoning effort
+
+`--ignore-user-config` 继续隔离本机 Codex 行为配置，但不再使操作者请求的 reasoning effort 隐式
+退回模型默认值。`orchestration-api` 接受可选 `--codex-reasoning-effort`，adapter 只允许已知枚举并
+通过单次 `--config model_reasoning_effort=...` override 传递。登录认证仍来自显式可用的
+`CODEX_HOME`；省略该参数时使用模型默认 effort，而不是 ambient user config。
+
+## 2026-08-19 实测补充：GPT-5.6 Sol/xhigh
+
+操作者授权后，以本机 ChatGPT 登录和 `codex-cli 0.148.0` 执行一次
+`gpt-5.6-sol/xhigh`、300 秒、read-only、ephemeral 的规划调用。它用 15,254 input、9,402
+output tokens（含 4,142 reasoning）生成 11 节点/16 边的完整候选 DAG。JobSlayer 只追加一个
+含 pending proposal 的首 revision，权威图仍为空；四个成功制品与升级前失败的四个制品均通过
+哈希验证。该证据关闭“从未真实调用”的风险，不改变默认 local fixture、外部调用 opt-in、无
+自动重试、人工应用或预算/凭据生产化边界。

@@ -34,7 +34,12 @@ ALLOWED_TRANSITIONS: Mapping[TaskState, frozenset[TaskState]] = {
         {TaskState.PLAN_REVIEW, TaskState.IMPLEMENTING}
     ),
     TaskState.PLAN_REVIEW: frozenset(
-        {TaskState.PLANNED, TaskState.IMPLEMENTING, TaskState.CANCELLED}
+        {
+            TaskState.PLANNED,
+            TaskState.IMPLEMENTING,
+            TaskState.CANCELLED,
+            TaskState.GATE_APPROVED,
+        }
     ),
     TaskState.IMPLEMENTING: frozenset(
         {TaskState.VERIFYING, TaskState.BLOCKED, TaskState.FAILED}
@@ -50,7 +55,11 @@ ALLOWED_TRANSITIONS: Mapping[TaskState, frozenset[TaskState]] = {
     ),
     TaskState.REPAIRING: frozenset({TaskState.VERIFYING}),
     TaskState.REVIEWING: frozenset(
-        {TaskState.REPAIRING, TaskState.MERGE_REVIEW}
+        {
+            TaskState.REPAIRING,
+            TaskState.MERGE_REVIEW,
+            TaskState.DELIVERABLE_ACCEPTED,
+        }
     ),
     TaskState.MERGE_REVIEW: frozenset(
         {TaskState.REPAIRING, TaskState.INTEGRATING, TaskState.CANCELLED}
@@ -60,6 +69,8 @@ ALLOWED_TRANSITIONS: Mapping[TaskState, frozenset[TaskState]] = {
     ),
     TaskState.COMPLETED: frozenset(),
     TaskState.CANCELLED: frozenset(),
+    TaskState.GATE_APPROVED: frozenset(),
+    TaskState.DELIVERABLE_ACCEPTED: frozenset(),
 }
 
 
@@ -130,7 +141,12 @@ class WorkflowKernel:
             raise AuthorizationError(
                 f"leaving {from_state.value} requires a human or policy actor"
             )
-        if to_state in {TaskState.COMPLETED, TaskState.CANCELLED} and actor_type not in {
+        if to_state in {
+            TaskState.COMPLETED,
+            TaskState.CANCELLED,
+            TaskState.GATE_APPROVED,
+            TaskState.DELIVERABLE_ACCEPTED,
+        } and actor_type not in {
             ActorType.HUMAN,
             ActorType.POLICY,
         }:
@@ -152,10 +168,16 @@ class WorkflowKernel:
         integration_result: SourceIntegrationResult | None,
         evidence_ids: tuple[str, ...],
     ) -> tuple[str, ...]:
+        if to_state is TaskState.DELIVERABLE_ACCEPTED and not evidence_ids:
+            raise VerificationGateError(
+                "deliverable acceptance requires immutable review evidence"
+            )
+
         if to_state in {
             TaskState.REVIEWING,
             TaskState.INTEGRATING,
             TaskState.COMPLETED,
+            TaskState.DELIVERABLE_ACCEPTED,
         }:
             if report is None:
                 raise VerificationGateError(
@@ -170,6 +192,11 @@ class WorkflowKernel:
                     "verification report does not pass the completion gate"
                 )
             evidence_ids = tuple(dict.fromkeys((*evidence_ids, report.report_id)))
+
+        if to_state is TaskState.GATE_APPROVED and not evidence_ids:
+            raise VerificationGateError(
+                "gate approval requires immutable decision evidence"
+            )
 
         if to_state is TaskState.COMPLETED:
             if from_state is not TaskState.INTEGRATING:

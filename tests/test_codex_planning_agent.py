@@ -126,6 +126,7 @@ class CodexPlanningAgentTests(unittest.TestCase):
             "external_call_authorized": True,
             "codex_binary": (sys.executable, str(self.fake_codex)),
             "model": "fixture-model",
+            "reasoning_effort": "xhigh",
             "timeout_seconds": 3,
         }
         options.update(overrides)
@@ -209,6 +210,7 @@ class CodexPlanningAgentTests(unittest.TestCase):
         self.assertIn("read-only", stderr["arguments"])
         self.assertIn("--output-schema", stderr["arguments"])
         self.assertIn("fixture-model", stderr["arguments"])
+        self.assertIn('model_reasoning_effort="xhigh"', stderr["arguments"])
 
     def test_application_wraps_codex_content_in_a_jobslayer_owned_proposal(self) -> None:
         service = TaskOrchestrationService(
@@ -364,11 +366,33 @@ class CodexPlanningAgentTests(unittest.TestCase):
                 "--allow-external-planning-agent",
                 "--codex-model",
                 "fixture-model",
+                "--codex-reasoning-effort",
+                "xhigh",
             ]
         )
         self.assertEqual(arguments.planning_agent, "codex")
         self.assertTrue(arguments.allow_external_planning_agent)
         self.assertEqual(arguments.codex_model, "fixture-model")
+        self.assertEqual(arguments.codex_reasoning_effort, "xhigh")
+
+        focused_arguments = build_parser().parse_args(
+            [
+                "task-manager-api",
+                "--identity-session",
+                "session.json",
+                "--identity-key",
+                "key.json",
+            ]
+        )
+        self.assertEqual(focused_arguments.command, "task-manager-api")
+        self.assertEqual(focused_arguments.planning_agent, "local")
+
+    def test_rejects_an_unknown_reasoning_effort(self) -> None:
+        with self.assertRaisesRegex(
+            CodexPlanningAgentConfigurationError,
+            "reasoning effort",
+        ):
+            self.agent(reasoning_effort="extreme")
 
 
 if __name__ == "__main__":

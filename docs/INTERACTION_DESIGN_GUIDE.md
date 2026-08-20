@@ -337,16 +337,19 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 
 现有 `src/jobslayer/supervision/ui` 和 `src/jobslayer/management/ui` 是 loopback、认证、最少依赖的真实本地界面，分别服务决定记录与只读 Dashboard；它们有既有安全和部署边界。
 
-`ui-framework/` 是长期交互方向工作台；当前只有 Task Orchestration 接通了受限本地 API：
+`ui-framework/` 是长期交互方向工作台；当前 TaskManager 和高级 Task Orchestration 已接通受限本地
+API：
 
 - Workflow Studio、Run Inspector、Artifact Review 与 Observability 使用固定 mock data；
 - Task Orchestration 调用 loopback 计划 API，权威 revision 位于 Python store；
 - 计划列表、proposal diff、完整度、edge CRUD、revision compare/derive 和 archive 均通过同一应用服务契约；
+- Codex 规划证据通过 plan-bound ArtifactQuery 进入只读查看器，浏览器不接收 backing URI；
 - 不导入 `src/jobslayer`；
 - React 源码不注册 CLI、数据库或事件消费者；API/CLI 位于独立 Python application/adapter；
 - 不取代 ADR-0007/ADR-0027 的现有本地界面；
 - mock 页面写按钮仍只更新浏览器组件状态；编排写按钮提交有 revision 前置条件的计划命令；
-- finalized plan 不拥有执行状态，也不能直接驱动 Agent runtime。
+- finalized plan 不直接拥有执行状态，也不能直接驱动 Agent runtime；TaskManager 只在用户显式创建
+  plan-bound run 后投影 Kernel 节点历史，未配置 executor 时继续失败关闭。
 
 从原型进入真实接线前必须另立实施任务和 ADR，先定义 provider-neutral application API 与认证/幂等/并发语义，再由 adapter 把现有控制面投影给 UI。不能从 prototype component 反向塑造领域状态机。
 
@@ -375,8 +378,11 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 slice，使用签名 planner 身份、expected revision、追加历史和 Agent proposal/application
 分离；ADR-0032 在同一边界内补齐结构化节点、计划评估、语义边、历史派生与归档。它不替代
 本节尚未完成的 run/artifact/event read-only slice，也不把 plan 解释为执行工作流状态。
-ADR-0033 进一步接入显式启用的 Codex planning adapter，但其原始制品尚未形成通用 Artifact
-Viewer read model，模型调用也不获得工作流命令权限。
+ADR-0033 进一步接入显式启用的 Codex planning adapter；ADR-0034 已把当前 plan 的四类原始
+制品接入认证、去 URI、哈希验证且有界的只读查看器。它仍不是通用 run Artifact Viewer read
+model，模型调用和制品内容也不获得工作流命令权限。2026-08-19 的一次
+`gpt-5.6-sol/xhigh` 真实 smoke 进一步证明：成功响应只形成 pending proposal，权威图保持为空，
+并由确定性 assessment 阻止在提案未处理时定稿。
 
 ### Stage 2：Governed command slice
 

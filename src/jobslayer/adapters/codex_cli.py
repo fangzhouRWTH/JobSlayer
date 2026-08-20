@@ -90,6 +90,7 @@ class CodexCliExecutor:
         *,
         codex_binary: str | os.PathLike[str] | Sequence[str] = "codex",
         model_profiles: Mapping[str, str | None] | None = None,
+        reasoning_efforts: Mapping[str, str | None] | None = None,
         permission_profiles: Mapping[str, str] | None = None,
         output_schemas: Mapping[str, str | Path | None] | None = None,
         process_supervisor: ProcessSupervisor | None = None,
@@ -113,6 +114,20 @@ class CodexCliExecutor:
         self.sandbox_policy = sandbox_policy
         self._credential_grant_id = credential_grant_id
         self.model_profiles = dict(model_profiles or {"default": None})
+        self.reasoning_efforts = (
+            {key: None for key in self.model_profiles}
+            if reasoning_efforts is None
+            else dict(reasoning_efforts)
+        )
+        if set(self.reasoning_efforts) != set(self.model_profiles):
+            raise CodexConfigurationError(
+                "Codex model and reasoning profiles must have identical keys"
+            )
+        if any(
+            effort not in {None, "none", "low", "medium", "high", "xhigh", "max"}
+            for effort in self.reasoning_efforts.values()
+        ):
+            raise CodexConfigurationError("unsupported Codex reasoning effort")
         self.permission_profiles = dict(
             permission_profiles
             or {
@@ -368,6 +383,14 @@ class CodexCliExecutor:
         model = self.model_profiles[spec.model_profile]
         if model:
             command.extend(("--model", model))
+        reasoning_effort = self.reasoning_efforts[spec.model_profile]
+        if reasoning_effort is not None:
+            command.extend(
+                (
+                    "--config",
+                    f'model_reasoning_effort="{reasoning_effort}"',
+                )
+            )
         schema = self.output_schemas[spec.output_schema]
         if schema is not None:
             if not schema.is_file():

@@ -92,6 +92,9 @@ class WorkerLeaseStore(Protocol):
     def recover_orphans(self, *, now: datetime | None = None) -> tuple[WorkerLease, ...]:
         """Expire all elapsed live leases after restart."""
 
+    def get(self, lease_id: str) -> WorkerLease | None:
+        """Read one lease for recovery reconciliation without changing it."""
+
 
 class NetworkPolicy(str, Enum):
     DENY = "deny"

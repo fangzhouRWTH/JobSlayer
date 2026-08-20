@@ -36,6 +36,24 @@ from jobslayer.adapters.local_orchestration import (
     TaskPlanJournalError,
 )
 from jobslayer.adapters.local_planning_agent import LocalPlanningAgent
+from jobslayer.adapters.local_task_manager_runs import (
+    LocalTaskManagerRunStore,
+    TaskManagerRunJournalError,
+)
+from jobslayer.adapters.local_task_manager_targets import (
+    LocalTaskManagerExecutionTargetRegistry,
+)
+from jobslayer.adapters.task_manager_codex import (
+    DurableTaskManagerCodexExecutor,
+    TaskManagerCodexError,
+)
+from jobslayer.adapters.task_manager_git_checkpoint import (
+    LocalTaskManagerGitCheckpointIntegrator,
+)
+from jobslayer.adapters.task_manager_validation import (
+    LocalTaskManagerValidationRunner,
+    TaskManagerValidationError,
+)
 from jobslayer.adapters.codex_planning_agent import (
     CodexPlanningAgent,
     CodexPlanningAgentConfigurationError,
@@ -45,6 +63,9 @@ from jobslayer.adapters.local_artifacts import LocalArtifactRegistry
 from jobslayer.adapters.sqlite_state import SqliteControlPlaneStore
 from jobslayer.application.runbook import LocalRunbookLoader, RunbookError
 from jobslayer.application.task_orchestration import TaskOrchestrationService
+from jobslayer.application.task_manager_execution import TaskManagerExecutionService
+from jobslayer.application.planning_artifacts import PlanningArtifactQuery
+from jobslayer.artifacts.registry import ArtifactRegistry
 from jobslayer.development.checks import (
     DevelopmentCheckConfigurationError,
     DevelopmentCheckRunner,
@@ -593,9 +614,13 @@ def _cmd_serve_task_orchestration(
     identity_key: Path,
     planning_agent_name: str,
     allow_external_planning_agent: bool,
+    allow_external_task_execution: bool,
+    allow_task_manager_local_validation: bool,
+    allow_task_manager_checkpoint_integration: bool,
     planning_artifact_root: Path | None,
     codex_binary: str,
     codex_model: str | None,
+    codex_reasoning_effort: str | None,
     codex_timeout_seconds: float,
     port: int,
     open_browser: bool,
@@ -605,7 +630,7 @@ def _cmd_serve_task_orchestration(
         principal = _authenticated_principal(
             identity_session=identity_session,
             identity_key=identity_key,
-            action=AuthorizationAction.MANAGE_TASK_PLAN,
+            action=AuthorizationAction.VIEW_CONTROL_PLANE,
         )
         plan_root = state_root or (repository_root / ".jobslayer" / "orchestration")
         if not plan_root.is_absolute():
@@ -613,14 +638,17 @@ def _cmd_serve_task_orchestration(
         artifact_root = planning_artifact_root or (plan_root / "artifacts")
         if not artifact_root.is_absolute():
             artifact_root = repository_root / artifact_root
+        artifact_registry = LocalArtifactRegistry(artifact_root)
         planning_agent = _planning_agent_for(
             planning_agent_name,
             repository_root=repository_root,
             artifact_root=artifact_root,
+            artifact_registry=artifact_registry,
             allow_external=allow_external_planning_agent,
             codex_binary=codex_binary,
             codex_model=codex_model,
             codex_timeout_seconds=codex_timeout_seconds,
+            codex_reasoning_effort=codex_reasoning_effort,
         )
         service = TaskOrchestrationService(
             LocalTaskPlanStore(plan_root),
@@ -628,25 +656,121 @@ def _cmd_serve_task_orchestration(
             actor_id=principal.subject_id,
         )
         service.list_latest()
-        server = create_task_orchestration_server(service, principal, port=port)
+        execution_targets = LocalTaskManagerExecutionTargetRegistry(
+            repository_root,
+            {
+                "brave-new-world-suspension-v1": (
+                    "runbooks/bnw-suspension-visualization-001-codex.json"
+                )
+            },
+        )
+        task_executor = None
+        if allow_external_task_execution:
+            verdict = RoleBasedAuthorizer().authorize(
+                AuthorizationRequest(
+                    principal=principal,
+                    action=AuthorizationAction.EXECUTE_TASK,
+                )
+            )
+            if not verdict.permitted:
+                raise LocalIdentityError(
+                    "external task execution requires an active executor role"
+                )
+            task_executor = DurableTaskManagerCodexExecutor(
+                plan_root / "task-manager-codex",
+                artifact_registry,
+                codex_binary=codex_binary,
+            )
+        task_validator = None
+        if allow_task_manager_local_validation:
+            verdict = RoleBasedAuthorizer().authorize(
+                AuthorizationRequest(
+                    principal=principal,
+                    action=AuthorizationAction.EXECUTE_TASK,
+                )
+            )
+            if not verdict.permitted:
+                raise LocalIdentityError(
+                    "local TaskManager validation requires an active executor role"
+                )
+            task_validator = LocalTaskManagerValidationRunner(
+                plan_root / "task-manager-codex",
+                artifact_registry,
+            )
+        source_integrator = None
+        if allow_task_manager_checkpoint_integration:
+            verdict = RoleBasedAuthorizer().authorize(
+                AuthorizationRequest(
+                    principal=principal,
+                    action=AuthorizationAction.INTEGRATE_SOURCE,
+                )
+            )
+            if not verdict.permitted:
+                raise LocalIdentityError(
+                    "source checkpoint integration requires an active approver role"
+                )
+            source_integrator = LocalTaskManagerGitCheckpointIntegrator(
+                plan_root / "task-manager-codex",
+                artifact_registry,
+            )
+        task_manager_execution = TaskManagerExecutionService(
+            LocalTaskManagerRunStore(plan_root / "task-manager-runs"),
+            artifact_registry,
+            actor_id=principal.subject_id,
+            executor=task_executor,
+            validator=task_validator,
+            source_integrator=source_integrator,
+            targets=execution_targets,
+        )
+        task_manager_execution.list_latest()
+        task_manager_execution.list_targets()
+        server = create_task_orchestration_server(
+            service,
+            principal,
+            planning_artifacts=PlanningArtifactQuery(artifact_registry),
+            task_manager_execution=task_manager_execution,
+            port=port,
+        )
     except (
         DevelopmentCheckConfigurationError,
         LocalIdentityError,
         TaskPlanJournalError,
+        TaskManagerRunJournalError,
         TaskOrchestrationServerError,
         CodexPlanningAgentConfigurationError,
+        TaskManagerCodexError,
+        TaskManagerValidationError,
+        TestbedInspectionError,
         OSError,
         ValueError,
     ) as exc:
-        print(f"could not start task orchestration API: {exc}", file=sys.stderr)
+        print(f"could not start TaskManager/planning API: {exc}", file=sys.stderr)
         return 1
     host, actual_port = server.server_address[:2]
-    api_url = f"http://{host}:{actual_port}/api/orchestration"
-    ui_url = "http://127.0.0.1:4173/#/orchestration"
-    print(f"Task orchestration API: {api_url}")
-    print(f"authenticated planner: {principal.subject_id}")
+    api_url = f"http://{host}:{actual_port}/api/task-manager"
+    legacy_api_url = f"http://{host}:{actual_port}/api/orchestration"
+    ui_url = "http://127.0.0.1:4173/#/task-manager"
+    print(f"TaskManager API: {api_url}")
+    print(f"Legacy orchestration API: {legacy_api_url}")
+    print(f"authenticated principal: {principal.subject_id}")
     print(f"planning adapter: {planning_agent.adapter_id}")
     print("append-only plan revisions; agent output remains a pending proposal")
+    print("execution target: BraveNewWorld suspension v1 (fixed bnw-0 baseline)")
+    print(
+        "plan-bound run assembly: enabled; durable local Codex executor: connected"
+        if task_manager_execution.adapter_available
+        else "plan-bound run assembly: enabled; external execution adapter: not connected"
+    )
+    print(
+        "isolated run-branch checkpoint integration: enabled"
+        if task_manager_execution.source_integration_available
+        else "isolated run-branch checkpoint integration: not connected"
+    )
+    print(
+        "policy-constrained local validation: connected"
+        if task_manager_execution.validation_available
+        else "policy-constrained local validation: not connected"
+    )
     print("Workbench: sh ./init.sh -- npm --prefix ui-framework run dev")
     print(f"Open after Vite starts: {ui_url}")
     if open_browser:
@@ -654,7 +778,7 @@ def _cmd_serve_task_orchestration(
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
-        print("\ntask orchestration API stopped")
+        print("\nTaskManager API stopped")
     finally:
         server.server_close()
     return 0
@@ -665,10 +789,12 @@ def _planning_agent_for(
     *,
     repository_root: Path,
     artifact_root: Path,
+    artifact_registry: ArtifactRegistry | None = None,
     allow_external: bool,
     codex_binary: str,
     codex_model: str | None,
     codex_timeout_seconds: float,
+    codex_reasoning_effort: str | None = None,
 ) -> PlanningAgent:
     if name == "local":
         return LocalPlanningAgent()
@@ -682,10 +808,11 @@ def _planning_agent_for(
         raise ValueError("Codex planning requires an explicit --codex-model")
     return CodexPlanningAgent(
         repository_root,
-        LocalArtifactRegistry(artifact_root),
+        artifact_registry or LocalArtifactRegistry(artifact_root),
         external_call_authorized=True,
         codex_binary=codex_binary,
         model=codex_model,
+        reasoning_effort=codex_reasoning_effort,
         timeout_seconds=codex_timeout_seconds,
     )
 
@@ -1183,8 +1310,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     orchestration = commands.add_parser(
         "serve-task-orchestration",
-        aliases=["orchestration-api"],
-        help="serve the authenticated task discussion and graph-planning API",
+        aliases=["orchestration-api", "task-manager-api"],
+        help="serve TaskManager and its legacy graph-planning API",
     )
     orchestration.add_argument("--root", type=Path)
     orchestration.add_argument(
@@ -1206,6 +1333,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicitly authorize external model calls for this server process",
     )
     orchestration.add_argument(
+        "--allow-external-task-execution",
+        action="store_true",
+        help=(
+            "connect the durable local Codex executor; the signed session must "
+            "also have the executor role"
+        ),
+    )
+    orchestration.add_argument(
+        "--allow-task-manager-checkpoint-integration",
+        action="store_true",
+        help=(
+            "connect the isolated run-branch checkpoint adapter; the signed "
+            "session must have the approver role"
+        ),
+    )
+    orchestration.add_argument(
+        "--allow-task-manager-local-validation",
+        action="store_true",
+        help=(
+            "connect the policy-constrained local validation runner; the signed "
+            "session must also have the executor role"
+        ),
+    )
+    orchestration.add_argument(
         "--planning-artifact-root",
         type=Path,
         help="immutable raw planning-interaction artifact registry",
@@ -1213,11 +1364,19 @@ def build_parser() -> argparse.ArgumentParser:
     orchestration.add_argument(
         "--codex-binary",
         default="codex",
-        help="Codex CLI executable used only with --planning-agent codex",
+        help="Codex CLI executable used by explicitly enabled planning/task adapters",
     )
     orchestration.add_argument(
         "--codex-model",
         help="explicit Codex model used only with --planning-agent codex",
+    )
+    orchestration.add_argument(
+        "--codex-reasoning-effort",
+        choices=("none", "low", "medium", "high", "xhigh", "max"),
+        help=(
+            "explicit Codex reasoning effort; omitted uses the selected model's "
+            "default rather than ambient user configuration"
+        ),
     )
     orchestration.add_argument(
         "--codex-timeout-seconds",
@@ -1485,7 +1644,11 @@ def main(argv: list[str] | None = None) -> int:
             port=arguments.port,
             open_browser=arguments.open_browser,
         )
-    if arguments.command in {"serve-task-orchestration", "orchestration-api"}:
+    if arguments.command in {
+        "serve-task-orchestration",
+        "orchestration-api",
+        "task-manager-api",
+    }:
         return _cmd_serve_task_orchestration(
             root=arguments.root,
             state_root=arguments.state_root,
@@ -1493,10 +1656,18 @@ def main(argv: list[str] | None = None) -> int:
             identity_key=arguments.identity_key,
             planning_agent_name=arguments.planning_agent,
             allow_external_planning_agent=arguments.allow_external_planning_agent,
+            allow_external_task_execution=arguments.allow_external_task_execution,
+            allow_task_manager_local_validation=(
+                arguments.allow_task_manager_local_validation
+            ),
+            allow_task_manager_checkpoint_integration=(
+                arguments.allow_task_manager_checkpoint_integration
+            ),
             planning_artifact_root=arguments.planning_artifact_root,
             codex_binary=arguments.codex_binary,
             codex_model=arguments.codex_model,
             codex_timeout_seconds=arguments.codex_timeout_seconds,
+            codex_reasoning_effort=arguments.codex_reasoning_effort,
             port=arguments.port,
             open_browser=arguments.open_browser,
         )

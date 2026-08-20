@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "testbed_id": "brave-new-world",
+  "testbed_path": "testbeds/brave-new-world.json",
+  "task_path": "tasks/bnw-suspension-visualization-001.json",
+  "validation_profile_path": "validation-profiles/brave-new-world-suspension-v1.json",
+  "invocation": {
+    "schema_version": "1.0",
+    "run_spec": {
+      "schema_version": "1.0",
+      "run_id": "bnw-suspension-visualization-001-run-01",
+      "task_id": "bnw-suspension-visualization-001",
+      "executor_type": "codex_cli",
+      "model_profile": "gpt-5.6-sol-xhigh",
+      "context_package_id": "bnw-suspension-visualization-001-context-v1",
+      "workspace_id": "bnw-suspension-visualization-001-ws-01",
+      "permission_profile": "workspace_write",
+      "timeout_seconds": 10800,
+      "max_attempts": 1,
+      "max_repairs": 0,
+      "maximum_input_tokens": 300000,
+      "maximum_output_tokens": 50000,
+      "maximum_context_bytes": 4194304,
+      "output_schema": "none"
+    },
+    "prompt": "Implement the source-controlled task bnw-suspension-visualization-001 in this BraveNewWorld checkout from the fixed BNW-0 base. Build a complete deterministic passive quarter-car two-degree-of-freedom suspension teaching case without breaking the existing first-order-step demo. Obey AGENTS.md. Use only the Python standard library and local HTML/CSS/JavaScript; do not change dependencies, AGENTS.md, the bnw launcher, pyproject.toml, Git configuration, branches, commits, remotes, or files outside the allowed paths. Interactive, HTTP, and headless execution must call the same simulation kernel. Define a strict versioned request selected by demo_id; document the sprung and unsprung mass equations, units, sign convention, initial state, road input, fixed-step numerical method, stability bounds, and visual scaling. Validate all numeric input as finite and within practical teaching bounds. Add scenarios/suspension-quarter-car.json and make ./bnw run-scenario dispatch it. Return deterministic body, wheel, suspension and road trajectories with a stable trace hash and real metrics including peak and RMS body acceleration, suspension travel and tire deflection. Extend the loopback Canvas UI with a clear demo selector, accessible play/pause/reset and bounded parameter controls; animation and curves must remain synchronized to one API result and must not imply that visual scale is physical scale. Add deterministic contract, numerical, rejected-input, CLI scenario, HTTP handler, and presentation-data tests. Update README.md, docs/ARCHITECTURE.md and append docs/DEVELOPMENT_LOG.md; add a BNW ADR for the durable quarter-car and visualization contract. Run ./bnw check, fix all failures, inspect git diff for scope, and leave verified changes uncommitted for JobSlayer to collect. Do not claim approval, integration, completion, merge, push, deployment, exact subscription cost enforcement, or network isolation."
+  },
+  "executor": {
+    "adapter": "codex_cli",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "xhigh"
+  }
+}

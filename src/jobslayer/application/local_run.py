@@ -312,10 +312,13 @@ class LocalRunCoordinator:
                 patch_sha256=config.patch_sha256,
             )
         if isinstance(config, CodexCliConfig):
+            model_profile = prepared.runbook.invocation.run_spec.model_profile
             return CodexCliExecutor(
                 workspace_manager,
                 artifact_root,
                 codex_binary=self.codex_command,
+                model_profiles={model_profile: config.model},
+                reasoning_efforts={model_profile: config.reasoning_effort},
             )
         raise LocalRunError(f"unsupported executor adapter: {config.adapter}")
 

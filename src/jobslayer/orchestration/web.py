@@ -17,6 +17,16 @@ from jobslayer.adapters.local_orchestration import (
     TaskPlanJournalError,
     TaskPlanRevisionConflictError,
 )
+from jobslayer.adapters.local_identity import RoleBasedAuthorizer
+from jobslayer.adapters.local_task_manager_runs import (
+    TaskManagerRunJournalError,
+    TaskManagerRunRevisionConflictError,
+)
+from jobslayer.application.planning_artifacts import (
+    PlanningArtifactNotFoundError,
+    PlanningArtifactQuery,
+    PlanningArtifactQueryError,
+)
 from jobslayer.application.task_orchestration import (
     ArchivedTaskPlanError,
     IncompleteTaskPlanError,
@@ -27,7 +37,30 @@ from jobslayer.application.task_orchestration import (
     TaskPlanNotFoundError,
     TaskPlanProposalMismatchError,
 )
-from jobslayer.identity import AuthenticatedPrincipal
+from jobslayer.application.task_manager import (
+    TaskManagerCapabilityUnavailableError,
+    TaskManagerService,
+)
+from jobslayer.application.task_manager_execution import (
+    StaleTaskManagerRunRevisionError,
+    TaskManagerExecutionAdapterUnavailableError,
+    TaskManagerExecutionError,
+    TaskManagerExecutionEvidenceError,
+    TaskManagerExecutionNodeNotFoundError,
+    TaskManagerExecutionNodeNotReadyError,
+    TaskManagerExecutionProviderError,
+    TaskManagerExecutionService,
+    TaskManagerPlanNotFinalizedError,
+    TaskManagerRunAlreadyExistsError,
+    TaskManagerRunNotFoundError,
+)
+from jobslayer.identity import (
+    AuthenticatedPrincipal,
+    AuthorizationAction,
+    AuthorizationDeniedError,
+    AuthorizationRequest,
+    require_authorized,
+)
 from jobslayer.orchestration import (
     PlanningAgentError,
     TaskPlanEdgeRelation,
@@ -47,8 +80,15 @@ class TaskOrchestrationHttpServer(ThreadingHTTPServer):
         server_address: tuple[str, int],
         service: TaskOrchestrationService,
         principal: AuthenticatedPrincipal,
+        planning_artifacts: PlanningArtifactQuery | None,
+        task_manager_execution: TaskManagerExecutionService | None,
     ):
         self.orchestration_service = service
+        self.task_manager_service = TaskManagerService(
+            service,
+            task_manager_execution,
+        )
+        self.planning_artifacts = planning_artifacts
         self.principal = principal
         self.session_token = secrets.token_urlsafe(32)
         super().__init__(server_address, TaskOrchestrationRequestHandler)
@@ -59,10 +99,186 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     maximum_request_bytes = 131_072
     prefix = ("api", "orchestration")
+    task_manager_prefix = ("api", "task-manager")
 
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         segments = self._segments()
         try:
+            if segments == (*self.task_manager_prefix, "session"):
+                authorizer = RoleBasedAuthorizer()
+                planning_permitted = authorizer.authorize(
+                    AuthorizationRequest(
+                        principal=self.server.principal,
+                        action=AuthorizationAction.MANAGE_TASK_PLAN,
+                    )
+                ).permitted
+                self._send_json(
+                    HTTPStatus.OK,
+                    {
+                        "schema_version": "1.0",
+                        "principal": self.server.principal.model_dump(mode="json"),
+                        "capabilities": {
+                            "task_planning": planning_permitted,
+                            "agent_discussion": planning_permitted,
+                            "dag_preview": True,
+                            "proposal_decisions": planning_permitted,
+                            "finalization": planning_permitted,
+                            "multi_task_history": True,
+                            "planning_artifact_viewer": (
+                                self.server.planning_artifacts is not None
+                            ),
+                            "run_assembly": (
+                                planning_permitted
+                                and
+                                self.server.task_manager_service.execution is not None
+                            ),
+                            "execution_target_binding": (
+                                planning_permitted
+                                and
+                                self.server.task_manager_service.execution is not None
+                                and bool(
+                                    self.server.task_manager_service.list_execution_targets()
+                                )
+                            ),
+                            "task_execution": (
+                                self.server.task_manager_service.execution is not None
+                                and self.server.task_manager_service.execution.adapter_available
+                            ),
+                            "execution_feedback": (
+                                self.server.task_manager_service.execution is not None
+                                and (
+                                    self.server.task_manager_service.execution.adapter_available
+                                    or self.server.task_manager_service.execution.validation_available
+                                )
+                            ),
+                            "node_verification": (
+                                self.server.task_manager_service.execution is not None
+                                and (
+                                    self.server.task_manager_service.execution.adapter_available
+                                    or self.server.task_manager_service.execution.validation_available
+                                )
+                            ),
+                            "node_validation": (
+                                self.server.task_manager_service.execution is not None
+                                and self.server.task_manager_service.execution.validation_available
+                            ),
+                            "completion_approval": authorizer.authorize(
+                                AuthorizationRequest(
+                                    principal=self.server.principal,
+                                    action=AuthorizationAction.APPLY_DECISION,
+                                )
+                            ).permitted,
+                            "node_review": authorizer.authorize(
+                                AuthorizationRequest(
+                                    principal=self.server.principal,
+                                    action=AuthorizationAction.REVIEW_IMPLEMENTATION,
+                                )
+                            ).permitted,
+                            "source_review": authorizer.authorize(
+                                AuthorizationRequest(
+                                    principal=self.server.principal,
+                                    action=AuthorizationAction.REVIEW_IMPLEMENTATION,
+                                )
+                            ).permitted,
+                            "source_checkpoint_approval": authorizer.authorize(
+                                AuthorizationRequest(
+                                    principal=self.server.principal,
+                                    action=AuthorizationAction.APPLY_DECISION,
+                                )
+                            ).permitted,
+                            "source_checkpoint_integration": (
+                                self.server.task_manager_service.execution is not None
+                                and self.server.task_manager_service.execution.source_integration_available
+                                and authorizer.authorize(
+                                    AuthorizationRequest(
+                                        principal=self.server.principal,
+                                        action=AuthorizationAction.INTEGRATE_SOURCE,
+                                    )
+                                ).permitted
+                            ),
+                        },
+                        "agent_adapter": (
+                            self.server.orchestration_service.planning_agent.adapter_id
+                        ),
+                        "submission_token": self.server.session_token,
+                    },
+                )
+                return
+            if segments[:2] == self.task_manager_prefix:
+                if not self._authorized():
+                    return
+                if segments == (*self.task_manager_prefix, "tasks"):
+                    tasks = self.server.task_manager_service.list_tasks()
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {
+                            "schema_version": "1.0",
+                            "tasks": [item.model_dump(mode="json") for item in tasks],
+                        },
+                    )
+                    return
+                if segments == (*self.task_manager_prefix, "targets"):
+                    targets = self.server.task_manager_service.list_execution_targets()
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {
+                            "schema_version": "1.0",
+                            "targets": [
+                                item.model_dump(mode="json") for item in targets
+                            ],
+                        },
+                    )
+                    return
+                if (
+                    len(segments) == 5
+                    and segments[:3] == (*self.task_manager_prefix, "tasks")
+                    and segments[4] == "artifacts"
+                ):
+                    query = self.server.planning_artifacts
+                    if query is None:
+                        self._send_error_json(
+                            HTTPStatus.NOT_FOUND,
+                            "planning artifact viewer is not configured",
+                        )
+                        return
+                    task_id = segments[3]
+                    self.server.task_manager_service.get(task_id)
+                    artifacts = query.list_for_plan(task_id)
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {
+                            "schema_version": "1.0",
+                            "task_id": task_id,
+                            "artifacts": [
+                                item.model_dump(mode="json") for item in artifacts
+                            ],
+                        },
+                    )
+                    return
+                if (
+                    len(segments) == 6
+                    and segments[:3] == (*self.task_manager_prefix, "tasks")
+                    and segments[4] == "artifacts"
+                ):
+                    query = self.server.planning_artifacts
+                    if query is None:
+                        self._send_error_json(
+                            HTTPStatus.NOT_FOUND,
+                            "planning artifact viewer is not configured",
+                        )
+                        return
+                    task_id = segments[3]
+                    self.server.task_manager_service.get(task_id)
+                    preview = query.preview(task_id, segments[5])
+                    self._send_json(HTTPStatus.OK, preview.model_dump(mode="json"))
+                    return
+                if (
+                    len(segments) == 4
+                    and segments[:3] == (*self.task_manager_prefix, "tasks")
+                ):
+                    detail = self.server.task_manager_service.get(segments[3])
+                    self._send_json(HTTPStatus.OK, detail.model_dump(mode="json"))
+                    return
             if segments == (*self.prefix, "session"):
                 self._send_json(
                     HTTPStatus.OK,
@@ -79,6 +295,9 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                             "revision_derivation": True,
                             "plan_archiving": True,
                             "completeness_assessment": True,
+                            "planning_artifact_viewer": (
+                                self.server.planning_artifacts is not None
+                            ),
                             "finalization": True,
                             "workflow_execution": False,
                         },
@@ -117,6 +336,51 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                         assessment.model_dump(mode="json"),
                     )
                     return
+                if segments[4] == "artifacts":
+                    if not self._authorized():
+                        return
+                    query = self.server.planning_artifacts
+                    if query is None:
+                        self._send_error_json(
+                            HTTPStatus.NOT_FOUND,
+                            "planning artifact viewer is not configured",
+                        )
+                        return
+                    self.server.orchestration_service.get(plan_id)
+                    artifacts = query.list_for_plan(plan_id)
+                    self._send_json(
+                        HTTPStatus.OK,
+                        {
+                            "schema_version": "1.0",
+                            "plan_id": plan_id,
+                            "artifacts": [
+                                item.model_dump(mode="json") for item in artifacts
+                            ],
+                        },
+                    )
+                    return
+            if (
+                len(segments) == 6
+                and segments[:3] == (*self.prefix, "plans")
+                and segments[4] == "artifacts"
+            ):
+                if not self._authorized():
+                    return
+                query = self.server.planning_artifacts
+                if query is None:
+                    self._send_error_json(
+                        HTTPStatus.NOT_FOUND,
+                        "planning artifact viewer is not configured",
+                    )
+                    return
+                plan_id = segments[3]
+                self.server.orchestration_service.get(plan_id)
+                preview = query.preview(plan_id, segments[5])
+                self._send_json(
+                    HTTPStatus.OK,
+                    preview.model_dump(mode="json"),
+                )
+                return
             if len(segments) == 4 and segments[:3] == (*self.prefix, "plans"):
                 record = self.server.orchestration_service.get(segments[3])
                 self._send_json(HTTPStatus.OK, record.model_dump(mode="json"))
@@ -124,8 +388,23 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
         except TaskPlanNotFoundError as exc:
             self._send_error_json(HTTPStatus.NOT_FOUND, str(exc))
             return
+        except TaskManagerRunNotFoundError as exc:
+            self._send_error_json(HTTPStatus.NOT_FOUND, str(exc))
+            return
+        except PlanningArtifactNotFoundError as exc:
+            self._send_error_json(HTTPStatus.NOT_FOUND, str(exc))
+            return
+        except PlanningArtifactQueryError as exc:
+            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
         except TaskPlanJournalError as exc:
             self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        except TaskManagerRunJournalError as exc:
+            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
+        except TaskManagerExecutionError as exc:
+            self._send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
             return
         self._send_error_json(HTTPStatus.NOT_FOUND, "resource not found")
 
@@ -144,6 +423,13 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json()
             segments = self._segments()
+            if segments[:2] == self.task_manager_prefix:
+                status, response = self._mutate_task_manager(
+                    method, segments, payload
+                )
+                self._send_json(status, response)
+                return
+            self._require_action(AuthorizationAction.MANAGE_TASK_PLAN)
             service = self.server.orchestration_service
             status = HTTPStatus.OK
             if method == "POST" and segments == (*self.prefix, "plans"):
@@ -437,14 +723,43 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
             self._send_error_json(HTTPStatus.NOT_FOUND, str(exc))
             return
         except (
+            TaskManagerRunNotFoundError,
+            TaskManagerExecutionNodeNotFoundError,
+        ) as exc:
+            self._send_error_json(HTTPStatus.NOT_FOUND, str(exc))
+            return
+        except (
             PendingTaskPlanProposalError,
             ArchivedTaskPlanError,
             IncompleteTaskPlanError,
             StaleTaskPlanRevisionError,
             TaskPlanProposalMismatchError,
             TaskPlanRevisionConflictError,
+            TaskManagerPlanNotFinalizedError,
+            TaskManagerRunAlreadyExistsError,
+            StaleTaskManagerRunRevisionError,
+            TaskManagerExecutionNodeNotReadyError,
+            TaskManagerRunRevisionConflictError,
         ) as exc:
             self._send_error_json(HTTPStatus.CONFLICT, str(exc))
+            return
+        except AuthorizationDeniedError as exc:
+            self._send_error_json(HTTPStatus.FORBIDDEN, str(exc))
+            return
+        except (
+            TaskManagerCapabilityUnavailableError,
+            TaskManagerExecutionAdapterUnavailableError,
+        ) as exc:
+            self._send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+            return
+        except (
+            TaskManagerExecutionEvidenceError,
+            TaskManagerExecutionProviderError,
+        ) as exc:
+            self._send_error_json(HTTPStatus.BAD_GATEWAY, str(exc))
+            return
+        except TaskManagerExecutionError as exc:
+            self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
             return
         except TaskOrchestrationError as exc:
             self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
@@ -455,7 +770,314 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
         except TaskPlanJournalError as exc:
             self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return
+        except TaskManagerRunJournalError as exc:
+            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
         self._send_json(status, record.model_dump(mode="json"))
+
+    def _mutate_task_manager(
+        self,
+        method: str,
+        segments: tuple[str, ...],
+        payload: dict[str, Any],
+    ) -> tuple[HTTPStatus, dict[str, Any]]:
+        service = self.server.task_manager_service
+        is_node_command = (
+            method == "POST"
+            and len(segments) == 9
+            and segments[:3] == (*self.task_manager_prefix, "tasks")
+            and segments[4] == "runs"
+            and segments[6] == "nodes"
+        )
+        if not is_node_command:
+            self._require_action(
+                AuthorizationAction.MANAGE_TASK_PLAN,
+                task_id=segments[3] if len(segments) > 3 else None,
+            )
+        if method == "POST" and segments == (*self.task_manager_prefix, "tasks"):
+            self._keys(payload, required={"task_description"}, optional={"task_id"})
+            detail = service.create(
+                self._string(payload, "task_description"),
+                task_id=self._optional_string(payload, "task_id"),
+            )
+            return HTTPStatus.CREATED, detail.model_dump(mode="json")
+        if (
+            method == "POST"
+            and len(segments) == 5
+            and segments[:3] == (*self.task_manager_prefix, "tasks")
+            and segments[4] == "messages"
+        ):
+            self._keys(
+                payload,
+                required={"content", "expected_revision"},
+                optional={"selected_node_id"},
+            )
+            detail = service.discuss(
+                segments[3],
+                self._string(payload, "content"),
+                expected_revision=self._integer(payload, "expected_revision"),
+                selected_node_id=self._optional_string(payload, "selected_node_id"),
+            )
+            return HTTPStatus.OK, detail.model_dump(mode="json")
+        if (
+            method == "POST"
+            and len(segments) == 6
+            and segments[:3] == (*self.task_manager_prefix, "tasks")
+            and segments[4:] == ("proposal", "apply")
+        ):
+            self._keys(payload, required={"proposal_id", "expected_revision"})
+            detail = service.apply_proposal(
+                segments[3],
+                self._string(payload, "proposal_id"),
+                expected_revision=self._integer(payload, "expected_revision"),
+            )
+            return HTTPStatus.OK, detail.model_dump(mode="json")
+        if (
+            method == "POST"
+            and len(segments) == 6
+            and segments[:3] == (*self.task_manager_prefix, "tasks")
+            and segments[4:] == ("proposal", "reject")
+        ):
+            self._keys(payload, required={"proposal_id", "expected_revision"})
+            detail = service.reject_proposal(
+                segments[3],
+                self._string(payload, "proposal_id"),
+                expected_revision=self._integer(payload, "expected_revision"),
+            )
+            return HTTPStatus.OK, detail.model_dump(mode="json")
+        if (
+            method == "POST"
+            and len(segments) == 5
+            and segments[:3] == (*self.task_manager_prefix, "tasks")
+            and segments[4] == "target"
+        ):
+            self._keys(payload, required={"target_id", "expected_revision"})
+            detail = service.select_execution_target(
+                segments[3],
+                self._string(payload, "target_id"),
+                expected_revision=self._integer(payload, "expected_revision"),
+            )
+            return HTTPStatus.OK, detail.model_dump(mode="json")
+        if (
+            method == "POST"
+            and len(segments) == 5
+            and segments[:3] == (*self.task_manager_prefix, "tasks")
+            and segments[4] == "finalize"
+        ):
+            self._keys(payload, required={"expected_revision"})
+            detail = service.finalize(
+                segments[3],
+                expected_revision=self._integer(payload, "expected_revision"),
+            )
+            return HTTPStatus.OK, detail.model_dump(mode="json")
+        if (
+            method == "POST"
+            and len(segments) == 5
+            and segments[:3] == (*self.task_manager_prefix, "tasks")
+            and segments[4] == "runs"
+        ):
+            self._keys(
+                payload,
+                required={"expected_revision"},
+                optional={"run_id"},
+            )
+            detail = service.assemble_run(
+                segments[3],
+                expected_revision=self._integer(payload, "expected_revision"),
+                run_id=self._optional_string(payload, "run_id"),
+            )
+            return HTTPStatus.CREATED, detail.model_dump(mode="json")
+        if (
+            method == "POST"
+            and len(segments) == 9
+            and segments[:3] == (*self.task_manager_prefix, "tasks")
+            and segments[4] == "runs"
+            and segments[6] == "nodes"
+            and segments[8]
+            in {
+                "start",
+                "retry",
+                "observe",
+                "confirm-scope",
+                "verify",
+                "accept-review",
+                "review-source",
+                "approve-checkpoint",
+                "integrate-checkpoint",
+                "run-validation",
+                "approve-completion",
+            }
+        ):
+            task_id, run_id, node_id, command = (
+                segments[3],
+                segments[5],
+                segments[7],
+                segments[8],
+            )
+            if command == "confirm-scope":
+                self._keys(
+                    payload,
+                    required={"expected_run_revision", "rationale"},
+                )
+                require_authorized(
+                    RoleBasedAuthorizer().authorize(
+                        AuthorizationRequest(
+                            principal=self.server.principal,
+                            action=AuthorizationAction.MANAGE_TASK_PLAN,
+                            task_id=task_id,
+                            run_id=run_id,
+                        )
+                    )
+                )
+            elif command in {"accept-review", "review-source"}:
+                self._keys(
+                    payload,
+                    required={"expected_run_revision", "rationale"},
+                    optional={"findings"} if command == "review-source" else set(),
+                )
+                self._require_action(
+                    AuthorizationAction.REVIEW_IMPLEMENTATION,
+                    task_id=task_id,
+                    run_id=run_id,
+                )
+            elif command == "approve-checkpoint":
+                self._keys(
+                    payload,
+                    required={"expected_run_revision", "rationale"},
+                )
+                self._require_action(
+                    AuthorizationAction.APPLY_DECISION,
+                    task_id=task_id,
+                    run_id=run_id,
+                )
+            elif command == "approve-completion":
+                self._keys(
+                    payload,
+                    required={"expected_run_revision", "rationale"},
+                )
+                self._require_action(
+                    AuthorizationAction.APPLY_DECISION,
+                    task_id=task_id,
+                    run_id=run_id,
+                )
+            elif command == "integrate-checkpoint":
+                self._keys(payload, required={"expected_run_revision"})
+                self._require_action(
+                    AuthorizationAction.INTEGRATE_SOURCE,
+                    task_id=task_id,
+                    run_id=run_id,
+                )
+            elif command == "run-validation":
+                self._keys(payload, required={"expected_run_revision"})
+                self._require_execution_authority(task_id, run_id)
+            else:
+                self._keys(payload, required={"expected_run_revision"})
+                self._require_execution_authority(task_id, run_id)
+            expected = self._integer(payload, "expected_run_revision")
+            if command == "confirm-scope":
+                detail = service.confirm_scope_gate(
+                    task_id,
+                    run_id,
+                    node_id,
+                    expected_run_revision=expected,
+                    rationale=self._string(payload, "rationale"),
+                )
+            elif command == "observe":
+                detail = service.observe_node(
+                    task_id,
+                    run_id,
+                    node_id,
+                    expected_run_revision=expected,
+                )
+            elif command == "verify":
+                detail = service.verify_node(
+                    task_id,
+                    run_id,
+                    node_id,
+                    expected_run_revision=expected,
+                )
+            elif command == "accept-review":
+                detail = service.accept_node_review(
+                    task_id,
+                    run_id,
+                    node_id,
+                    expected_run_revision=expected,
+                    rationale=self._string(payload, "rationale"),
+                )
+            elif command == "review-source":
+                detail = service.review_source_node(
+                    task_id,
+                    run_id,
+                    node_id,
+                    expected_run_revision=expected,
+                    rationale=self._string(payload, "rationale"),
+                    findings=self._string_tuple(payload, "findings") or (),
+                )
+            elif command == "approve-checkpoint":
+                detail = service.approve_source_checkpoint(
+                    task_id,
+                    run_id,
+                    node_id,
+                    expected_run_revision=expected,
+                    rationale=self._string(payload, "rationale"),
+                )
+            elif command == "integrate-checkpoint":
+                detail = service.integrate_source_checkpoint(
+                    task_id,
+                    run_id,
+                    node_id,
+                    expected_run_revision=expected,
+                )
+            elif command == "approve-completion":
+                detail = service.approve_completion_gate(
+                    task_id,
+                    run_id,
+                    node_id,
+                    expected_run_revision=expected,
+                    rationale=self._string(payload, "rationale"),
+                )
+            elif command == "run-validation":
+                detail = service.run_validation_node(
+                    task_id,
+                    run_id,
+                    node_id,
+                    expected_run_revision=expected,
+                )
+            else:
+                detail = service.start_node(
+                    task_id,
+                    run_id,
+                    node_id,
+                    expected_run_revision=expected,
+                    retry=command == "retry",
+                )
+            return HTTPStatus.OK, detail.model_dump(mode="json")
+        raise TaskPlanNotFoundError("TaskManager resource not found")
+
+    def _require_execution_authority(self, task_id: str, run_id: str) -> None:
+        self._require_action(
+            AuthorizationAction.EXECUTE_TASK,
+            task_id=task_id,
+            run_id=run_id,
+        )
+
+    def _require_action(
+        self,
+        action: AuthorizationAction,
+        *,
+        task_id: str | None = None,
+        run_id: str | None = None,
+    ) -> None:
+        require_authorized(
+            RoleBasedAuthorizer().authorize(
+                AuthorizationRequest(
+                    principal=self.server.principal,
+                    action=action,
+                    task_id=task_id,
+                    run_id=run_id,
+                )
+            )
+        )
 
     def _segments(self) -> tuple[str, ...]:
         path = urlsplit(self.path).path
@@ -597,6 +1219,8 @@ def create_task_orchestration_server(
     service: TaskOrchestrationService,
     principal: AuthenticatedPrincipal,
     *,
+    planning_artifacts: PlanningArtifactQuery | None = None,
+    task_manager_execution: TaskManagerExecutionService | None = None,
     host: str = "127.0.0.1",
     port: int = 8780,
 ) -> TaskOrchestrationHttpServer:
@@ -613,7 +1237,13 @@ def create_task_orchestration_server(
     if port < 0 or port > 65_535:
         raise TaskOrchestrationServerError("task-orchestration port is invalid")
     try:
-        return TaskOrchestrationHttpServer((host, port), service, principal)
+        return TaskOrchestrationHttpServer(
+            (host, port),
+            service,
+            principal,
+            planning_artifacts,
+            task_manager_execution,
+        )
     except OSError as exc:
         raise TaskOrchestrationServerError(
             "task-orchestration server could not bind"
