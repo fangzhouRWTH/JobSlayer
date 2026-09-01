@@ -33,6 +33,7 @@ from jobslayer.task_manager.execution import (
     TaskManagerRunStore,
 )
 from jobslayer.task_manager.binding import (
+    TaskManagerDependencyAttachment,
     TaskManagerExecutionBinding,
     TaskManagerExecutionTarget,
     TaskManagerExecutionTargetAssessment,
@@ -208,6 +209,7 @@ __all__ = [
     "TaskManagerExecutor",
     "TaskManagerSourceIntegrator",
     "TaskManagerValidator",
+    "TaskManagerDependencyAttachment",
     "TaskManagerExecutionBinding",
     "TaskManagerExecutionTarget",
     "TaskManagerExecutionTargetAssessment",

@@ -6,6 +6,19 @@
 
 状态标记：`[x]` 已初步落实，`[ ]` 未落实，`[~]` 仅有骨架、尚未接入真实外部系统。
 
+## 2026-09 当前阶段目标 — TaskManager 串行闭环
+
+中期目标不再以完整工程平台或通用仿真框架为退出条件，只交付：
+
+1. 精简、可调试的图状 TaskManager UI；
+2. 单 run 一次最多推进一个节点的持久串行 coordinator；
+3. Agent/命令/验证/审查/人工门禁反馈统一回写 DAG、Backlog、总 Log 与制品；
+4. BraveNewWorld + 固定 Anygine 公共 consumer 上的真实小 App 闭环。
+
+退出条件是同一任务可在进程重启后继续，从 finalized DAG 串行到真实 Anygine build/Vulkan smoke
+证据和最终人工门禁，且没有第二个状态所有者。Dagger、第二执行器、远程多租户、分布式调度和广义
+仿真验证全部后置。
+
 ## Phase 0 — 契约与研究骨架（初步完成）
 
 目标：证明外部编码执行器可以被稳定的内部契约和确定性状态机治理。
@@ -21,7 +34,7 @@
 - [~] 实现受限本地命令运行器（命令规则、环境净化、超时/进程组终止和输出证据已完成；外部取消、网络及资源强隔离待实现）；
 - [~] 接入第一个 Codex CLI 适配器并保留原始事件（adapter、假 CLI 合规测试及一次显式授权的真实模型任务已完成；生产凭据和外层隔离待实现）；
 - [x] 支持从版本化 task/profile/runbook 创建、恢复和检查本地真实运行；
-- [x] 建立 BraveNewWorld 确定性验证 profile 和首个真实隔离样例（远端发布仍是独立人工决定）；
+- [x] 建立旧 BraveNewWorld 确定性验证与完整真实 DAG 证据；旧网页/机电方向已归档，当前基线已重置并发布为 Anygine 小 App 测试床；
 - [x] 提供最小人工计划/合并审批入口（决策卡、签名本地身份、RBAC、短期 authority、授权应用和控制器闭环）；
 - [~] 提供可视化监督入口（真实 run 决定页和认证多任务 Dashboard 已接通；远程多租户界面后置）；
 - [x] 固化 `./jobslayer` 统一入口，使 UI、完整开发验证、模块运行和安装后 CLI 共用同一 launcher；
@@ -50,8 +63,8 @@
 - [ ] Langfuse 或 Phoenix 二选一的观测验证；
 - [ ] Promptfoo 的模型/提示回归套件；
 - [x] 本地认证项目仪表板、证据面板和审批状态视图；
-- [~] Web-first 工程工作台交互框架（主入口已收紧为真实 TaskManager 双栏应用，使用 React Flow 展示 revision-bound DAG，并接入任务切换、Backlog、总日志、Agent 对话和 plan-bound run 状态/证据；原 Stage 0 实验页保留为直接访问的 legacy lab，尚未全部接入统一真相）；
-- [~] 协作式任务编排（TaskManager facade/API 已支持多任务摘要、认证讨论、proposal apply/reject、完整度门禁、execution target ID + source bundle hash 固化、Backlog、完整审计日志，以及 finalized revision 到唯一 governed run 的装配、Kernel 节点历史、持久 Codex start-or-locate 和证据反馈；首个 BraveNewWorld 悬架 target 已绑定固定 bnw-0、允许/禁止路径、`gpt-5.6-sol/xhigh` 预算和两条 `./bnw` 门禁，错配图会确定性阻断；真实计划 proposal 已由用户应用；下一步是 human-gate/verifier/reviewer 完成路径、失败制品全局索引、多人事务 store 与更通用 Workflow IR 编译）；
+- [~] TaskManager 聚焦 UI（当前 App 已激进收束为单屏任务图：左 2/3 React Flow DAG，右 1/3 同时显示节点详情与 Agent 对话；legacy route、Backlog/总日志 tab 和常驻治理控件已退出装配；下一步强化当前节点状态和对话调整闭环）；
+- [~] 协作式任务编排与执行（计划讨论/固化、source-pinned target、run 装配、持久 Codex、确定性 validation、源码 review/checkpoint、最终 evidence-bound human gate、真实 11-node 完成证据和 Anygine source/toolchain 内容绑定已具备；默认 target 已切换为 `brave-new-world-anygine-app-v1`；下一步是单活节点串行 coordinator 与重启恢复）；
 - [x] 跨平台开发环境初始化入口（仓库 venv、固定校验的用户级 Node LTS、lockfile UI install、只读 JSON 检测与离线/分组件模式）；
 - [ ] OpenHands 适配器的有界 PoC。
 
@@ -96,29 +109,29 @@
 
 ## 接下来三个迭代
 
-### 迭代 A：真实工作区
+### 迭代 A：UI 收束与可观察当前节点
 
-1. [x] 为 BraveNewWorld 建立最小可运行基线并固定首个测试 tag（本地 `bnw-0`；尚未推送）；
-2. [x] 定义 `WorkspaceManager` 协议和工作区清单；
-3. [x] 基于固定 commit 创建/安全销毁 Git worktree；
-4. [x] 校验允许/禁止路径并生成带哈希的 patch；
-5. [x] 测试并发任务不共享可写目录。
+1. [x] 移除全局 workbench 导航和 legacy route，根入口只装配 TaskManager；
+2. [x] 固定左 2/3 DAG、右 1/3 节点详情与 Agent 对话的单屏结构；
+3. [ ] DAG 默认突出 running/blocked/next-ready 节点，详情先显示当前反馈；
+4. [ ] 强化围绕所选节点的对话调整、候选图 diff 与焦点保持；
+5. [~] 已用真实 API 数据完成 1440×1000 浏览器检查；待加入自动交互/截图回归。
 
-### 迭代 B：受限执行与 Codex
+### 迭代 B：持久串行 coordinator
 
-1. [x] 定义 `AgentExecutor`、运行句柄、增量事件、取消和终态结果语义；
-2. [x] 使用参数数组启动本地验证进程，实施命令政策、环境净化、超时、进程树终止和输出证据；
-3. [x] 将 Codex JSONL 输出归一化为带序列和内容哈希的 `RunEvent`；
-4. [x] 原始 stdout/stderr 由应用控制器注册为 `ArtifactManifest` 并重新核对哈希；
-5. [~] 已用假 Agent、确定性 scripted replay 和一次显式授权的真实 Codex 完成受治理任务；真实 BNW 滤波补丁已通过验证并到达 `MergeReview`，外层 OCI/VM 网络与资源强隔离仍待落实。
+1. [ ] 定义 provider-neutral coordinator intent/cursor/lease，不新增状态所有者；
+2. [ ] 确定性选择唯一 next-ready node，同一 run 至多一个自动副作用；
+3. [ ] 按 node kind 路由 Agent、validation 或 human wait，并在每一步后刷新投影；
+4. [ ] 覆盖 API/worker/机器重启、重复 tick、失败、阻塞、取消和显式 retry；
+5. [ ] 保留所有权限、verification、独立 review/approval 与最终 completion gate。
 
-### 迭代 C：验证与人工门禁
+### 迭代 C：Anygine 小 App 真实闭环
 
-1. [x] 定义版本化 validation profile，并在建模时校验命令政策和 timeout；
-2. [x] BraveNewWorld `./bnw check` 和新场景命令已登记为受治理 validation profile，并在真实隔离 worktree 生成证据哈希；
-3. [~] 失败检查已确定性进入 `Repairing`；自动发起一次有界修复尚未实现；
-4. [x] 输出包含证据、风险、选项后果和建议的结构化决策卡；
-5. [x] 人工 CLI 生成绑定卡片哈希的决定；批准只进入 `Integrating`，显式 `integrate-run` 仅执行证据门禁的本地 fast-forward；不会 push 或部署。
+1. [x] BraveNewWorld 清空旧当前内容并发布 `bnw-anygine-0` 基线；
+2. [x] 建立 public Anygine build-tree consumer、`hello-task`、真实 C++ build 与 3-frame Vulkan smoke；
+3. [x] 为 run workspace 建立固定 Anygine checkout/toolchain 的内容绑定、前后漂移检查 attachment；
+4. [x] 将真实 build/CTest/GPU smoke 作为 source-controlled validation checks，并在隔离 worktree 通过真实部署验证；
+5. [ ] 选择一个具体小 App，经 TaskManager 串行完成完整规划、执行、反馈和最终人工门禁。
 
 ## 风险登记
 

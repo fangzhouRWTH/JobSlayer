@@ -116,10 +116,10 @@ Dashboard 仅绑定 loopback、只读且要求 `view_control_plane` 权限；不
   --identity-key .jobslayer/identity/planner-key.json
 ```
 
-随后运行 `sh ./init.sh -- npm --prefix ui-framework run dev`，打开
-`http://127.0.0.1:4173/#/orchestration`。该入口记录讨论、待应用 Agent proposal、节点
-CRUD/支线/子任务和用户定稿 revision；不会把计划变成 `TaskState`、启动执行、调用 Git 或
-标记完成。契约和 API 见[协作式任务编排](TASK_ORCHESTRATION.md)。
+该历史 API 仍支持讨论、待应用 Agent proposal、节点 CRUD/支线/子任务和用户定稿 revision；
+不会把计划变成 `TaskState`、启动执行、调用 Git 或标记完成。当前 Web App 不再装配独立的
+`#/orchestration` route；可通过根入口 TaskManager 的 Agent 对话观察聚焦投影，或直接使用受认证
+API。契约见[协作式任务编排](TASK_ORCHESTRATION.md)。
 
 ### 完整开发验证
 
@@ -134,9 +134,8 @@ CRUD/支线/子任务和用户定稿 revision；不会把计划变成 `TaskState
 3. `python -m pip check`；
 4. 通过初始化所解析的项目 npm，离线执行 `ui-framework` 的 TypeScript 与 Vite production build；
 5. 通过统一模块入口校验 BraveNewWorld 测试床登记；
-6. 校验 BraveNewWorld scripted task/profile/runbook/patch 的交叉绑定；
-7. 校验真实 Codex task/profile/runbook 的交叉绑定；
-8. `git -c core.autocrlf=true diff --check`，先按跨平台 checkout 规则规范化文本再检查空白与冲突标记。
+6. 校验 BraveNewWorld Anygine 小 App task/profile/Codex runbook 的交叉绑定与预算；
+7. `git -c core.autocrlf=true diff --check`，先按跨平台 checkout 规则规范化文本再检查空白与冲突标记。
 
 `check` 只能在已经运行 `init.cmd`/`init.sh` 的 JobSlayer 源码 checkout 中使用；UI 步骤
 不会联网补装或升级依赖。通常会自动查找根目录；从其他工作目录运行时可以传
@@ -151,13 +150,17 @@ CRUD/支线/子任务和用户定稿 revision；不会把计划变成 `TaskState
 ./jobslayer validate-task examples/task.example.json
 ./jobslayer validate-testbed testbeds/brave-new-world.json
 ./jobslayer inspect-testbed testbeds/brave-new-world.json
-./jobslayer validate-runbook runbooks/bnw-scenario-slow-001.json
-./jobslayer run-task runbooks/bnw-scenario-slow-001.json
-./jobslayer validate-runbook runbooks/bnw-filter-demo-001-codex.json
-./jobslayer run-task runbooks/bnw-filter-demo-001-codex.json \
+./jobslayer validate-runbook runbooks/bnw-anygine-small-app-001-codex.json
+./jobslayer inspect-task-manager-target \
+  runbooks/bnw-anygine-small-app-001-codex.json \
+  --target-id brave-new-world-anygine-app-v1 \
+  --dependency-attachment anygine-source=/absolute/path/to/Anygine \
+  --dependency-attachment anygine-conan-toolchain=/absolute/path/to/conan \
+  --validation-environment "DISPLAY=${DISPLAY}" \
+  --validation-environment "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
+./jobslayer run-task runbooks/bnw-anygine-small-app-001-codex.json \
   --identity-session .jobslayer/identity/executor.json \
   --identity-key .jobslayer/identity/key.json
-./jobslayer inspect-run .jobslayer/runs/bnw-scenario-slow-001-run-01
 ./jobslayer inspect-readiness --state-root .jobslayer --required-reviewed-tasks 20
 ./jobslayer build-phase0-corpus
 ./jobslayer inspect-readiness --state-root .jobslayer/phase0-corpus/state --required-reviewed-tasks 20

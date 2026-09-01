@@ -82,14 +82,18 @@ issuer、session、actor、decision kind、策略版本和有效期。key/sessio
 提交、写入制品或交给 Agent。生产部署仍应以 OIDC/mTLS 和 secret broker adapter 替换
 本地 HMAC adapter。
 
-## BraveNewWorld 现成候选
+## BraveNewWorld 当前基线
 
 - 本地仓库：`/home/fangzhou/projects/JobSlayer/TestProjects/BraveNewWorld`
 - Git 地址：`https://github.com/fangzhouRWTH/BraveNewWorld.git`
-- 当前固定基线：`fb43878c9f0164deef272e55969c0fc134a6d6a3` / `bnw-0`
-- 真实 Codex run：`.jobslayer/runs/bnw-filter-demo-001-run-01`
+- 当前固定基线：`e7bff4aceca5dee998d0db1dc1c50e4b935fabda` / `bnw-anygine-0`
+- 当前 target：`brave-new-world-anygine-app-v1`
+- 当前 validation gates：`./bnw contract`、`./bnw test --jobs 4`、`./bnw run --jobs 4`
 
-该 run 仍停在 `MergeReview`，没有 `decision.json`，主 checkout 仍干净且位于 BNW-0。可先只运行 `inspect-run` 和 `run-ui` 体验证据与决定记录；只有你明确选择 `approve`、提供有效 authority，并随后显式执行 `integrate-run`，本地 `main` 才会快进。`cleanup-run` 只移除完成后的干净 worktree，保留任务分支。任何命令都不会 push 或部署。
+旧滤波/悬架 run 仍可作为追加式历史证据读取，但其源码 worktree 已在完整归档后移除，不再是当前
+可集成候选。下一次体验应从 TaskManager 新建具体 Anygine 小 App 任务；启动 API 时
+必须绑定 `anygine-source`、`anygine-conan-toolchain` 和所需图形会话环境。attachment 缺失或
+漂移会在固化/run 装配前失败关闭，真实 build/runtime 结果则进入 validation 证据。
 
 ## 建议体验检查表
 

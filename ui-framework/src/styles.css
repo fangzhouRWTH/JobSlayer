@@ -602,12 +602,12 @@ code, pre, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", mon
 .attention-card strong { font-size: 8px; }
 .attention-card small { color: #626a75; font-size: 7px; }
 
-.task-manager-page { height: calc(100vh - var(--header)); min-height: 650px; display: flex; flex-direction: column; gap: 9px; padding: 17px 19px 19px; overflow: hidden; }
-.task-manager-header { min-height: 68px; display: flex; align-items: center; gap: 9px; }
-.task-manager-heading { min-width: 290px; margin-right: auto; }
-.task-manager-heading .section-kicker { margin: 0 0 4px; }
-.task-manager-heading h1 { display: inline; margin: 0; color: #f0f2f4; font-size: 24px; font-weight: 650; letter-spacing: -.035em; }
-.task-manager-heading p { display: inline; margin: 0 0 0 13px; color: #68717c; font-size: 9px; }
+.task-manager-app-shell { min-height: 100vh; background: #090b0e; }
+.task-manager-page { height: 100vh; min-height: 650px; display: flex; flex-direction: column; gap: 8px; padding: 12px; overflow: hidden; }
+.task-manager-header { min-height: 54px; display: flex; align-items: center; gap: 8px; }
+.task-manager-heading { min-width: 260px; margin-right: auto; }
+.task-manager-heading h1 { display: inline; margin: 0; color: #f0f2f4; font-size: 21px; font-weight: 650; letter-spacing: -.035em; }
+.task-manager-heading p { display: inline; margin: 0 0 0 12px; color: #68717c; font-size: 9px; }
 .task-manager-task-picker { width: min(360px, 29vw); display: grid; gap: 4px; }
 .task-manager-task-picker > label { color: #5d6570; font-size: 7px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .task-manager-task-picker > div { position: relative; height: 36px; display: flex; align-items: center; border: 1px solid var(--line); background: #101318; }
@@ -639,8 +639,12 @@ code, pre, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", mon
 .task-manager-proposal > div { min-width: 0; display: grid; gap: 3px; }
 .task-manager-proposal strong { color: #d9ca9d; font-size: 9px; }
 .task-manager-proposal span { overflow: hidden; color: #887f68; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
-.task-manager-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(520px,1.8fr) minmax(315px,.88fr); gap: 8px; }
+.task-manager-layout { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0,2fr) minmax(320px,1fr); gap: 8px; }
 .task-manager-main, .task-manager-side { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.task-manager-panel-title { flex: 0 0 39px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 11px; border-bottom: 1px solid var(--line); color: #c9ced5; background: #111419; }
+.task-manager-panel-title span { display: flex; align-items: center; gap: 7px; font-size: 8px; font-weight: 800; letter-spacing: .12em; }
+.task-manager-panel-title span svg { color: var(--lime); }
+.task-manager-panel-title small { color: #606873; font: 7px "SFMono-Regular", Consolas, monospace; letter-spacing: .08em; }
 .task-manager-tabs { flex: 0 0 41px; display: flex; align-items: center; gap: 3px; padding: 0 7px; border-bottom: 1px solid var(--line); background: #111419; }
 .task-manager-tabs button { align-self: stretch; display: flex; align-items: center; gap: 7px; padding: 0 11px; border: 0; border-bottom: 2px solid transparent; color: #747c87; background: none; cursor: pointer; font-size: 9px; }
 .task-manager-tabs button.active { border-color: var(--lime); color: #d8dce1; }
@@ -677,6 +681,11 @@ code, pre, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", mon
 .task-manager-log small { color: #5d6570; font: 7px "SFMono-Regular", Consolas, monospace; }
 .task-manager-log time { display: grid; gap: 5px; color: #747c87; font: 7px "SFMono-Regular", Consolas, monospace; text-align: right; }
 .task-manager-detail { flex: 1; min-height: 0; overflow: auto; padding: 19px 17px; }
+.task-manager-side { display: grid; grid-template-rows: minmax(250px,1fr) minmax(300px,1.12fr); }
+.task-manager-node-inspector, .task-manager-agent-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.task-manager-node-inspector { border-bottom: 1px solid var(--line); }
+.task-manager-detail-empty { height: 100%; display: grid; place-content: center; justify-items: center; gap: 8px; color: #626a75; }
+.task-manager-detail-empty p { margin: 0; font-size: 9px; }
 .task-manager-detail h2 { margin: 9px 0 7px; color: #e0e3e7; font-size: 17px; font-weight: 620; line-height: 1.3; }
 .task-manager-detail > code { display: inline-block; padding: 3px 5px; border: 1px solid #303640; color: #7f8792; background: #0d1014; font-size: 7px; }
 .task-manager-detail > p { margin: 14px 0; color: #858d98; font-size: 9px; line-height: 1.65; }
@@ -761,7 +770,7 @@ code, pre, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", mon
   .attention-card { grid-column: 1 / -1; }
   .task-manager-heading p { display: none; }
   .task-manager-task-picker { width: min(300px, 27vw); }
-  .task-manager-layout { grid-template-columns: minmax(470px,1.55fr) minmax(290px,.9fr); }
+  .task-manager-layout { grid-template-columns: minmax(0,2fr) minmax(300px,1fr); }
 }
 
 @media (max-width: 880px) {
@@ -817,11 +826,12 @@ code, pre, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", mon
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
   .ops-grid { grid-template-columns: 1fr; }
   .attention-card { grid-column: auto; }
-  .task-manager-page { height: auto; min-height: calc(100vh - var(--header)); overflow: visible; padding: 13px; }
+  .task-manager-page { height: auto; min-height: 100vh; overflow: visible; padding: 13px; }
   .task-manager-header { flex-wrap: wrap; }
   .task-manager-heading { width: 100%; }
   .task-manager-task-picker { width: auto; flex: 1; min-width: 230px; }
-  .task-manager-layout { min-height: 1120px; grid-template-columns: 1fr; grid-template-rows: minmax(620px,1fr) minmax(500px,.8fr); }
+  .task-manager-layout { min-height: 1280px; grid-template-columns: 1fr; grid-template-rows: minmax(620px,1fr) minmax(650px,1fr); }
+  .task-manager-side { grid-template-rows: minmax(280px,.8fr) minmax(350px,1fr); }
   .task-manager-proposal { grid-template-columns: 25px minmax(0,1fr); }
   .task-manager-proposal .button { grid-row: 2; }
   .task-manager-proposal .button:nth-of-type(1) { grid-column: 1; }

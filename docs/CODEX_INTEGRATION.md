@@ -2,7 +2,12 @@
 
 ## 当前状态
 
-`CodexCliExecutor` 已通过假 CLI 合规测试，并已由 `LocalRunCoordinator` 在真实 BraveNewWorld worktree 中完成首个模型任务。它位于 `src/jobslayer/adapters/codex_cli.py`，消费已登记的 `WorkspaceManifest`；源控运行契约位于 `runbooks/bnw-filter-demo-001-codex.json`。
+`CodexCliExecutor` 已通过假 CLI 合规测试，并已由 `LocalRunCoordinator` 在旧 BraveNewWorld
+worktree 中完成首个模型任务。它位于 `src/jobslayer/adapters/codex_cli.py`，消费已登记的
+`WorkspaceManifest`。当前源控运行契约已切换为
+`runbooks/bnw-anygine-small-app-001-codex.json`；旧滤波 runbook 只保留在 Git 历史和离线归档中。
+当前 runbook 同时声明 Anygine source/toolchain attachment，但这两个本机路径只注入独立
+validation node，不传给 Codex 实现进程。Codex 仍只能修改固定 BraveNewWorld worktree 的允许路径。
 
 本机在 2026-08-07 检测到：
 
@@ -12,7 +17,8 @@ codex-cli 0.142.4
 
 版本号只是开发环境记录，不是领域契约。每次升级都应重新运行 adapter 测试，并用受控实验任务核对事件类型变化。
 
-首次真实运行 `bnw-filter-demo-001-run-01` 已产生 19 文件范围内补丁，通过场景和完整 BNW 门禁、独立实现审查，并停在 `MergeReview`。完整证据和复核方式见 [Phase 1 实施说明](PHASE1_FILTER_CODEX_RUN.md)。
+历史运行 `bnw-filter-demo-001-run-01` 曾产生 19 文件范围内补丁并到达 `MergeReview`；它是旧测试床
+方向的审计证据，不再是当前 target。完整证据见 [Phase 1 实施说明](PHASE1_FILTER_CODEX_RUN.md)。
 
 ## 生命周期
 
@@ -72,7 +78,8 @@ AgentInvocation + WorkspaceManifest
 4. 由 context builder 校验版本、内容哈希、普通文件和最大字节；
 5. 运行前验证签名 execution authority、短期凭据 grant、worker lease 和沙箱能力；
 6. 预算 reserve 与 attempt 授权在启动前持久化，运行中按 normalized usage 增量扣减；
-7. 运行后先收集 patch 和 raw logs，再通过独立验证 runner；
+7. 运行后先收集 patch 和 raw logs，再通过独立验证 runner；需要引擎的检查必须核对
+   run-bound dependency identity 与每条命令的显式环境证据；
 8. 只生成合并提案，不自动 push、merge 或 deploy。
 
 `GovernedAgentExecutor` 统一执行 credential/context/sandbox/budget/lease 门禁：缺少任一能力都不启动；超限时先持久化预算耗尽和 lease cancel-requested，再通知 delegate。Linux bubblewrap adapter 已验证默认无网络、宿主文件不可见、仅 workspace 可写以及 CPU/内存/进程/时间限制。原生 Windows 没有等价强沙箱时明确失败关闭，可把同一请求路由到 WSL/Linux worker。

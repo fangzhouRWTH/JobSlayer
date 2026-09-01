@@ -3276,3 +3276,203 @@ ADR-0035 的 lease/checkpoint/recovery 控制面。随后接 verifier/reviewer/h
 4. BNW 隔离分支最终 clean，HEAD 为 `d17fd948...`；主检出仍是
    `main@fb43878c9f0164deef272e55969c0fc134a6d6a3` 且 clean。全程没有 checkout/merge 主干、push、
    deployment、release 或远端变更；将完整候选带入主干仍需另行、明确的集成授权。
+
+## DEV-2026-09-01-01 — 主线收紧为串行 TaskManager 并重置 Anygine 小 App 测试床
+
+- 状态：完成（方向、测试床重置、远端发布、默认 target、历史 binding 兼容和完整门禁已落实）
+- 类型：product scope reduction、testbed reset、external engine consumer、target migration、history compatibility
+- 关联决策：[ADR-0045](adr/0045-focused-serial-task-manager-and-anygine-app-testbed.md)
+
+### 当前框架审计与范围决定
+
+1. 当前 TaskManager 已具备多轮计划讨论、候选 DAG、用户固化、source-pinned run 装配、持久 Codex
+   start-or-locate、单节点反馈、确定性 validation、独立源码 review/approval、隔离检查点和最终
+   evidence-bound human gate；真实悬架 run 已以 11 个节点、revision 82 到达 `completed`。
+2. 当前缺口不是更多外围功能，而是操作者仍需逐按钮推进每个节点，UI 暴露过多低频治理步骤。中期
+   退出条件收紧为精简图状 UI、单活节点的持久串行 coordinator、统一反馈投影和一个 Anygine 小 App
+   的真实闭环。外围 workbench、第二执行器与分布式基础设施后置。
+3. coordinator 只允许拥有 intent/cursor/lease 并调用既有 application commands；task state、权限、
+   retry、verification、approval 和 completion 继续由 JobSlayer/`WorkflowKernel` 拥有。
+
+### BraveNewWorld 可恢复重置与发布
+
+1. 只读盘点确认远端 `main@fb49bf6322b0935dd8e0006015df1c63543bb249` 比本地主检出旧基线领先
+   一个提交，且 BraveNewWorld `.git` 同时管理三个 JobSlayer worktree，其中两个包含未提交源码。
+2. 删除前创建完整 `repository.bundle`（10 refs、complete history、SHA-256
+   `8ce7aa8f9d24aadd54fa9904e009f38b538682b872138247055090bb91a27273`）和全部 worktree tar
+   （SHA-256 `c5db1692b236717b09d3a0f0d55e9d955968b497e658322631d5064a129792fc`），路径为
+   `/home/fangzhou/projects/JobSlayer/TestProjects/Archive/BraveNewWorld-pre-anygine-20260901`。
+3. 明确移除三个旧 worktree、三个旧本地任务分支和 `bnw-0` 本地 tag；远端没有旧任务分支/tag。
+   远端不重写历史，而是在 fast-forward 后以正常提交替换当前内容，保留可审计恢复路径。
+4. 新 BNW commit `e7bff4aceca5dee998d0db1dc1c50e4b935fabda` / tag `bnw-anygine-0` 已推送。
+   远端只保留 `main` 和新 tag 作为当前 refs。
+
+### Anygine 基线与真实构建
+
+1. 读取并更新本地 Anygine remote refs；当前远端 `main` 为
+   `28b4934c24fdad6b8f45b945a89a6ada51703f5d`。在
+   `/home/fangzhou/projects/Anygine/Anygine_JobSlayer` 建立该 commit 的 detached worktree，不切换或
+   修改用户现有 `generation` checkout。
+2. BNW 改为顶层 CMake project，通过 Anygine 已验证的 build-tree consumer 契约链接
+   `Anygine::Engine`、`GraphicsVulkan`、`RendererCore`、`RuntimeAssets` 和 `UI`；不复制引擎源码、
+   不访问 Private include、不修改 engine checkout。
+3. 新增固定 engine/App manifests、跨平台 `bnw`/`bnw.cmd` + Python dispatcher、manifest contract、
+   `hello-task` 和新 README/架构/ADR/追加日志。旧 Python/browser/机电模拟当前文件全部退出 BNW
+   main，但仍保留在 Git 历史和上述离线归档。
+4. 真实冷 build 完成，`BraveNewWorldHelloTask`/`BraveNewWorldBuildAll` 到 100%，CTest 1/1；随后在
+   RTX 5080 上运行固定三帧，Vulkan Required validation、Renderer、ImGui UI 均初始化，0 validation
+   error，success marker 精确为 `validation=requested/enabled errors=0 presented=3 ui=enabled`。
+
+### JobSlayer 迁移
+
+1. 测试床登记改为 published `bnw-anygine-0`，默认 target 改为
+   `brave-new-world-anygine-app-v1`；旧三套 Python/suspension task/profile/runbook/patch 退出当前
+   checkout，统一开发门禁只校验新 Anygine App runbook。
+2. 新 target 保留 `gpt-5.6-sol/xhigh`、单 attempt、4 小时 hard timeout、显式 token/context/费用上限；
+   portable validation 当前只运行 `./bnw contract`。真实 engine build 已验证基线，但 run workspace 尚
+   无固定 engine/toolchain 只读 dependency attachment，因此不能把 contract pass 冒充未来 App build。
+3. `TaskManagerExecutionService.assess_target`、detail 和 blocker 投影在已有 run 时改用 run snapshot
+   内不可变 `execution_binding`，使 registry 迁移后旧完成 run 仍可读取；新测试覆盖 target 被移除后的
+   允许读取路径。
+4. 更新 README、TaskManager 手册、路线图、统一入口、Codex 集成、最小闭环、测试床说明、UI 当前
+   文案、ADR-0045/索引和对应测试。旧 Phase 0/1 文档显式标记其 runbook 仅存在于 Git 历史与归档。
+
+### 验证、限制与下一步
+
+1. 主要 JobSlayer 变更：`src/jobslayer/application/task_manager.py`、
+   `application/task_manager_execution.py`、`cli.py`、`development/checks.py`、新 task/profile/runbook/testbed
+   binding、TaskManager UI 文案、相关单元测试、ADR-0045 及本条所列手册。三套旧测试床当前
+   task/profile/runbook 和一份 replay patch 已从 current checkout 删除，不删除历史。
+2. `./jobslayer validate-testbed testbeds/brave-new-world.json`、
+   `./jobslayer inspect-testbed testbeds/brave-new-world.json` 和
+   `./jobslayer validate-runbook runbooks/bnw-anygine-small-app-001-codex.json` 全部退出码 0；
+   inspect 确认 local HEAD、tag 与 registered baseline 均为 `e7bff4a...`，worktree clean 且
+   baseline 已发布。
+3. `sh ./init.sh -- python -m unittest tests.test_development_checks tests.test_testbed_registry
+   tests.test_task_manager_targets tests.test_task_manager_execution tests.test_orchestration`：32 项通过，
+   用时 4.139 秒。首次完整门禁准确暴露一处仍断言旧“控制理论”purpose 的统一入口测试；
+   修正为 Anygine/任务规划语义后，`sh ./init.sh -- python -m unittest
+   tests.test_unified_entrypoint` 7 项通过，用时 0.763 秒。
+4. 最终 `./jobslayer check`：7/7 全部通过、退出码 0、墙钟 28.9 秒；289 项 unittest 用时
+   27.106 秒，`OK (skipped=5)`；compile、dependency consistency、testbed、Anygine App runbook 和
+   Git diff 门禁全过。Node 24.19.0/npm 11.17.0 的 UI production build 转换 2719 modules，
+   用时 168 ms，TaskManager chunk 26.29 kB（gzip 8.46 kB）。
+5. 当前限制仍是 run workspace 缺少内容哈希绑定的 Anygine source/toolchain 只读 attachment；
+   因此 `./bnw contract` 只能证明清单/边界，不足以单独通过未来小 App 的最终验收。
+6. 下一步按 ADR-0045 先实现 dependency attachment，再实现持久串行 coordinator 和 UI 收束；
+   之后选择首个具体小 App 运行 prompt → DAG → execution → feedback 闭环。
+
+## DEV-2026-09-01-02 — 内容绑定的 Anygine dependency attachment 与原生验证部署
+
+- 状态：完成（实现、真实部署验证、聚焦门禁和完整仓库门禁均已通过）
+- 类型：local deployment、dependency attestation、native validation、evidence binding、UI readiness
+- 关联决策：[ADR-0046](adr/0046-content-bound-local-dependency-attachments.md)
+
+### 部署决定与实现
+
+1. 源控 runbook 只登记稳定 attachment ID、资源类型、期望内容 SHA-256、Git revision/origin、
+   暴露相对路径和环境变量名；operator 通过 CLI 在部署时提供本机路径，绝对路径不进入可移植
+   task/profile。Git checkout 以 clean status、HEAD、origin 和确定性 `git archive` SHA-256 绑定，
+   file/directory 以版本化目录摘要绑定并拒绝 symlink/special file。
+2. resolved attachment 和显式 allowlist 内的非敏感图形环境进入 target source bundle，并随 finalized
+   run 固化。缺失或不匹配的依赖成为 `target.dependency_attachment_not_ready` blocker；新的只读
+   `inspect-task-manager-target` 命令在运行前投影 baseline、2/2 dependency、validation environment、
+   source bundle 和总 readiness。
+3. local command runner 只注入 binding 中逐项记录的环境变量，拒绝覆盖 `HOME`、`PATH`、temp、locale
+   等 runner-owned 环境。validation adapter 在每条命令前、terminal result 落盘前和证据采集时
+   重新检查 attachment，保留 dependency evidence、显式环境 identity/value/source SHA 和原始输出制品；
+   TaskManager verifier 精确比对后才生成 report。
+4. BraveNewWorld profile 从单一 `./bnw contract` 提升为三项 required checks：`./bnw contract`、
+   `./bnw test --jobs 4`、`./bnw run --jobs 4`。TaskManager UI 同步显示 dependency readiness 与仅用于
+   validation 的 runtime environment 名称；attachment 从不传给 Codex 实现进程。
+
+### 真实本机部署与证据
+
+1. operator attachment 为 clean
+   `/home/fangzhou/projects/Anygine/Anygine_JobSlayer@28b4934c24fdad6b8f45b945a89a6ada51703f5d`
+   和 `/home/fangzhou/projects/Anygine/Anygine/build/conan/conan_toolchain.cmake`；预检得到
+   source bundle `2dc0869fea46994390eccca8e6421bd5c4acb884221913151564d0b101697b9c`、baseline ready、
+   dependencies 2/2 ready、三条验证命令和总 `ready=true`。
+2. 在临时 BNW baseline worktree 中运行 durable local validation，provider run 为
+   `validation-d81b300c1942332eecee42d97e1006b408088f22ef83d96bd3bfe212bc98888b`。
+   `manifest-contract` exit 0/64 ms，stdout SHA-256
+   `4d50a604796b9d60c0091c3f7ff7fb7434758125a7049cc14e61ae7f6b89c84a`；
+   `native-build-and-test` exit 0/65,777 ms，stdout/stderr SHA-256 分别为
+   `6e4e67c75e1c8708cbe12de61a67665f1dbc2e6290f025d3ea8784b0a2ed7114` /
+   `89da0cac11ecf3857eeb88efce4addca2c2f08c7b5ec8f94e2ab7395f60817bf`；
+   `native-runtime-smoke` exit 0/1,416 ms，stdout/stderr SHA-256 分别为
+   `372e913fd85b46fd63dce4728403f184fd234ee68fc9c09600b8e885f9b95984` /
+   `c100017eb331aff67e61e73d0db202857078e15ca6a4e35e132f7ca8d7eca307`。
+3. 终态 workspace clean、changed paths 为空；证据包含 2 个 dependency identity 和 5 个 immutable
+   artifacts。临时 build/worktree/branch 已清理，BNW 仍为 clean `main@e7bff4aceca5dee998d0db1dc1c50e4b935fabda`，
+   未发生 merge、push 或 deployment side effect。
+
+### 文件、验证、限制与下一步
+
+1. 主要实现位于 `src/jobslayer/adapters/local_dependency_attachments.py`、`local_command.py`、
+   `local_task_manager_targets.py`、`task_manager_validation.py`、`application/runbook.py`、
+   `application/task_manager_execution.py`、`task_manager/binding.py`、`domain/models.py` 与 `cli.py`；
+   同步更新 source-controlled BNW runbook/profile、TaskManager UI、相关测试、手册、路线图、
+   ADR-0046 与 ADR 索引。
+2. `sh ./init.sh -- python -W error::ResourceWarning -m unittest tests.test_local_dependency_attachments
+   tests.test_local_command tests.test_task_manager_validation tests.test_task_manager_targets
+   tests.test_task_manager_execution tests.test_runbook tests.test_unified_entrypoint`：50 项通过，用时
+   7.727 秒，无 ResourceWarning。`sh ./init.sh -- npm --prefix ui-framework run build` 通过，转换
+   2719 modules，用时 163 ms，TaskManager chunk 26.85 kB（gzip 8.55 kB）；`git diff --check` 返回 0。
+3. 完整 `./jobslayer check`：7/7 全部通过、退出码 0、墙钟约 30.2 秒；297 项 unittest
+   用时 28.496 秒，`OK (skipped=5)`；compile、dependency consistency、UI、BraveNewWorld testbed、
+   Anygine App runbook 和 Git diff 门禁全过。UI 子门禁同样转换 2719 modules，用时 163 ms；diff
+   检查只报告既有 Git `working-tree-encoding` 的未来 LF→CRLF 提示，没有 whitespace/conflict error。
+4. 当前 `read_only` 是受信任、源控精确 argv validator 的前后内容证明，不是 namespace/ACL 强制
+   mount；不得扩展为执行任意 Agent 脚本。Conan toolchain 目录已绑定，但其 package cache closure
+   尚无独立 manifest，因此本次证据是真实 host build，而非跨机器逐字节 hermetic reproduction。
+5. attachment blocker 已解除。下一步实现拥有持久 cursor/lease 的单活串行 coordinator，并收束 UI
+   到当前节点、DAG/Backlog/总 Log 与 Agent 对话；随后用首个具体 Anygine 小 App 验证完整闭环。
+
+## DEV-2026-09-01-03 — TaskManager UI 激进收束为单屏任务图预览
+
+- 状态：完成（实现、真实浏览器检查、聚焦门禁和完整仓库门禁均已通过）
+- 类型：product surface reduction、single-screen DAG、node-focused conversation、explicit UI entrypoint
+- 关联决策：[ADR-0047](adr/0047-single-screen-task-graph-preview.md)
+
+### 界面范围决定与实现
+
+1. `ui-framework/src/App.tsx` 从多页面 workbench shell 收束为只装配 `TaskManager` 和操作提示的根
+   component；全局 header/sidebar、命令面板、legacy lazy routes 和 hash navigation 不再进入当前 App。
+   旧实验组件源码没有删除，后台 API/application 能力也没有改变。
+2. `TaskManager` 移除 `DAG / Backlog / 总 Log` 与 `信息 / Agent` 两组 tabs，以及 target、finalize、
+   run assembly、execute、verify、review、approval、integration 常驻按钮。当前页面只保留任务切换、
+   新建、刷新、候选图应用/拒绝和多轮 Agent 对话。
+3. 主工作区固定为 `2fr / 1fr`：左侧 React Flow DAG 始终可见，右侧上半区始终显示节点描述、状态、
+   依赖、验收标准、验证要求和最新反馈，下半区始终显示完整对话与绑定所选节点的输入框。加载任务或
+   新建任务后默认选择第一个节点；窄屏改为纵向排列，不缩成不可读的三栏。
+4. `ui-framework/package.json` 新增显式 `task-manager` script；API 启动提示和文档统一指向
+   `sh ./init.sh -- npm --prefix ui-framework run task-manager` 与唯一根地址
+   `http://127.0.0.1:4173/`。ADR-0047、索引、README、TaskManager/legacy orchestration 手册和路线图
+   同步记录当前 UI/API 边界。
+
+### 真实浏览器检查
+
+1. 在 `/tmp` 创建 60 分钟 planner identity 与独立空 state，以默认离线 planning fixture 启动
+   `task-manager-api` 8780 和新的 `task-manager` Vite 4173；API 启动提示准确输出唯一 UI 命令和根 URL。
+2. 经认证 API 创建“基于 Anygine 开发一个可交互的小型原生应用”任务，fixture 返回 5-node pending
+   DAG。Google Chrome headless 在 1440×1000、3 秒 virtual-time budget 下渲染真实页面；人工检查确认
+   左侧约 2/3 为完整五节点候选图，右侧 1/3 同时出现首节点详情、两条真实对话和可用输入框，候选图
+   拒绝/应用动作位于单一紧凑提示条。
+3. 检查后对 API/Vite 发送终止信号，确认 4173/8780 均无 listener，并删除精确临时 identity、state
+   和 screenshot 目录；没有把临时运行数据写入仓库。
+
+### 验证、限制与下一步
+
+1. `sh ./init.sh -- npm --prefix ui-framework run build`：TypeScript 与 Vite production build 通过，
+   转换 1951 modules，用时 88 ms；当前单一 JS bundle 为 386.01 kB（gzip 123.19 kB），CSS 为
+   91.05 kB（gzip 17.76 kB）。相较原多 route build，当前入口不再产生 legacy 页面 chunks。
+2. `sh ./init.sh -- python -m unittest tests.test_unified_entrypoint tests.test_orchestration_web`：14 项通过，
+   用时 1.229 秒；`git diff --check` 返回 0。
+3. 完整 `./jobslayer check`：7/7 全部通过、退出码 0、墙钟约 30.2 秒；297 项 unittest
+   用时 28.836 秒，`OK (skipped=5)`；compile、dependency consistency、单屏 UI production build、
+   BraveNewWorld testbed、Anygine App runbook 和 Git diff 门禁全过。diff 子门禁只报告 App、
+   TaskManager 和既有 types 文件的未来 LF→CRLF working-tree-encoding 提示，无 whitespace/conflict error。
+4. 本轮有意只做预览/讨论 UI，因此操作者暂时不能从页面固化或执行 DAG；相应受认证 API、权限、
+   Kernel、验证和审批链仍完整存在。下一步先加强 running/blocked/next-ready 视觉焦点、候选图 diff
+   与节点对话焦点保持，再以串行 coordinator 设计渐进披露的唯一下一动作。

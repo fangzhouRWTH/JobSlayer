@@ -191,10 +191,13 @@ class TaskManagerExecutionService:
             raise TaskManagerExecutionTargetUnavailableError(
                 "task plan has no selected execution target"
             )
-        return assess_plan_for_target(
-            plan.snapshot,
-            self.resolve_target(target_id),
+        existing_run = self.for_plan_record(plan)
+        binding = (
+            existing_run.snapshot.execution_binding
+            if existing_run is not None
+            else self.resolve_target(target_id)
         )
+        return assess_plan_for_target(plan.snapshot, binding)
 
     def list_latest(self) -> tuple[TaskManagerRunRevisionRecord, ...]:
         records = []
@@ -1068,6 +1071,7 @@ class TaskManagerExecutionService:
                     )
                 expected_checks = binding.validation_profile.checks
                 observed_checks = evidence.validation_checks
+                expected_environment = binding.command_environment()
                 if len(observed_checks) != len(expected_checks):
                     raise TaskManagerExecutionEvidenceError(
                         "validation evidence does not cover the finalized validation profile"
@@ -1084,6 +1088,7 @@ class TaskManagerExecutionService:
                         or observed_check.required != expected_check.required
                         or result.argv != expected_check.argv
                         or result.cwd != expected_check.cwd
+                        or result.environment != expected_environment
                         or result.workspace_id != evidence.workspace.workspace_id
                         or result.task_id != binding.task.task_id
                         or result.policy_id
@@ -1119,6 +1124,14 @@ class TaskManagerExecutionService:
                         )
                     )
                 validation_results = tuple(compiled)
+                if evidence.dependency_attachments != binding.dependency_attachments:
+                    raise TaskManagerExecutionEvidenceError(
+                        "validation dependency evidence drifted from the run binding"
+                    )
+                if any(not item.ready for item in evidence.dependency_attachments):
+                    raise TaskManagerExecutionEvidenceError(
+                        "validation dependency evidence contains an unready attachment"
+                    )
                 if (
                     evidence.source_patch_sha256 is not None
                     or evidence.workspace.changed_paths
@@ -1176,6 +1189,27 @@ class TaskManagerExecutionService:
                     True,
                     "all verification artifacts are task/run-bound and hash-verified",
                     {"artifact_ids": list(evidence.evidence_artifact_ids)},
+                ),
+                *(
+                    (
+                        (
+                            "dependency-attachment-binding",
+                            True,
+                            (
+                                "external dependencies match the immutable run binding "
+                                "and remained unchanged through validation"
+                            ),
+                            {
+                                "attachments": [
+                                    item.model_dump(mode="json")
+                                    for item in evidence.dependency_attachments
+                                ]
+                            },
+                        ),
+                    )
+                    if node.node.kind is TaskPlanNodeKind.VALIDATION
+                    and binding.dependency_attachments
+                    else ()
                 ),
             )
             fact_checks = tuple(

@@ -55,14 +55,14 @@ Workbench 还提供多计划搜索/切换/归档、proposal 与 applied graph �
   --identity-key .jobslayer/identity/planner-key.json
 ```
 
-终端二启动 Workbench：
+当前 Web App 已按 ADR-0047 收束为 TaskManager 单屏预览。终端二启动该唯一入口：
 
 ```bash
-sh ./init.sh -- npm --prefix ui-framework run dev
+sh ./init.sh -- npm --prefix ui-framework run task-manager
 ```
 
-打开 `http://127.0.0.1:4173/#/orchestration`。Vite 将 `/api/orchestration` 同源代理到默认
-`127.0.0.1:8780`；修改 API 端口时需要同步调整本地 Vite proxy。
+打开 `http://127.0.0.1:4173/`。当前 UI 通过 TaskManager Agent 对话投影规划能力，不再提供
+独立 `#/orchestration` 页面；`/api/orchestration` 仍由 Vite 同源代理到默认 `127.0.0.1:8780`。
 
 Windows 对应使用 `jobslayer.cmd`、`init.cmd` 和相同参数。
 

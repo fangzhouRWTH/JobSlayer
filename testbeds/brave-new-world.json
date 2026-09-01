@@ -2,8 +2,8 @@
   "schema_version": "1.0",
   "testbed_id": "brave-new-world",
   "display_name": "BraveNewWorld",
-  "purpose": "面向控制理论、动力学、运动学、信号处理和机器人基础技术的示教、可视化与轻量仿真实验项目，同时作为 JobSlayer 的首个真实外部测试床。",
-  "status": "bootstrapping",
+  "purpose": "以固定 Anygine 公共引擎接口持续开发小规模原生 App，作为 JobSlayer 任务规划、串行执行、验证和反馈闭环的快速外部测试床。",
+  "status": "active",
   "repository": {
     "clone_url": "https://github.com/fangzhouRWTH/BraveNewWorld.git",
     "alternative_clone_urls": [
@@ -12,27 +12,27 @@
     "default_branch": "main"
   },
   "baseline": {
-    "commit": "fb43878c9f0164deef272e55969c0fc134a6d6a3",
-    "tag": "bnw-0",
-    "published": false,
+    "commit": "e7bff4aceca5dee998d0db1dc1c50e4b935fabda",
+    "tag": "bnw-anygine-0",
+    "published": true,
     "verification_command": [
       "./bnw",
-      "check"
+      "contract"
     ]
   },
   "local_checkout_hint": "../TestProjects/BraveNewWorld",
   "architecture_areas": [
-    "visualization",
-    "simulation",
-    "ui",
-    "demos"
+    "native_apps",
+    "anygine_public_consumer",
+    "task_planning_testbed",
+    "execution_feedback"
   ],
   "capability_targets": [
-    "documentation_change",
-    "frontend_change",
-    "python_numerical_change",
-    "deterministic_simulation",
-    "cross_layer_change",
+    "cpp_application_change",
+    "cmake_change",
+    "native_ui_change",
+    "engine_public_api_consumption",
+    "bounded_app_manifest",
     "build_and_test",
     "permission_boundary",
     "clarification_and_escalation"

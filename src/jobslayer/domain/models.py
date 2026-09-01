@@ -440,6 +440,18 @@ class CommandPolicy(DomainModel):
         return self
 
 
+class CommandEnvironmentVariable(DomainModel):
+    """One explicit, evidence-safe environment value supplied to a command."""
+
+    name: str = Field(pattern=r"^[A-Z][A-Z0-9_]*$", max_length=128)
+    value: str = Field(min_length=1, max_length=4_096)
+    source_id: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        max_length=128,
+    )
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class CommandRequest(DomainModel):
     schema_version: str = "1.0"
     command_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -448,6 +460,7 @@ class CommandRequest(DomainModel):
     argv: tuple[str, ...] = Field(min_length=1)
     cwd: str = "."
     timeout_seconds: float = Field(default=60, gt=0)
+    environment: tuple[CommandEnvironmentVariable, ...] = ()
 
     @field_validator("argv")
     @classmethod
@@ -461,6 +474,13 @@ class CommandRequest(DomainModel):
     def validate_cwd(cls, value: str) -> str:
         return _validate_relative_path(value)
 
+    @model_validator(mode="after")
+    def validate_environment(self) -> CommandRequest:
+        names = tuple(item.name for item in self.environment)
+        if len(names) != len(set(names)):
+            raise ValueError("command environment variable names must be unique")
+        return self
+
 
 class CommandResult(DomainModel):
     schema_version: str = "1.0"
@@ -471,6 +491,7 @@ class CommandResult(DomainModel):
     rule_id: str = Field(min_length=1)
     argv: tuple[str, ...]
     cwd: str
+    environment: tuple[CommandEnvironmentVariable, ...] = ()
     status: CommandStatus
     exit_code: int | None
     started_at: datetime
@@ -493,6 +514,9 @@ class CommandResult(DomainModel):
             raise ValueError("timed out commands must not claim a normal exit code")
         if self.status is not CommandStatus.TIMED_OUT and self.exit_code is None:
             raise ValueError("completed commands require an exit code")
+        names = tuple(item.name for item in self.environment)
+        if len(names) != len(set(names)):
+            raise ValueError("command result environment names must be unique")
         return self
 
 

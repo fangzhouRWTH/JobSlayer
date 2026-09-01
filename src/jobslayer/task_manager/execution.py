@@ -21,7 +21,10 @@ from jobslayer.domain.models import (
     WorkspaceInspection,
 )
 from jobslayer.orchestration import IDENTIFIER_PATTERN, TaskPlanNode
-from jobslayer.task_manager.binding import TaskManagerExecutionBinding
+from jobslayer.task_manager.binding import (
+    TaskManagerDependencyAttachment,
+    TaskManagerExecutionBinding,
+)
 from jobslayer.workflow.journal import verify_transition_sequence
 
 
@@ -120,6 +123,7 @@ class ManagedVerificationEvidence(DomainModel):
     collected_at: datetime
     evidence_artifact_ids: tuple[str, ...] = Field(min_length=1, max_length=32)
     validation_checks: tuple[ManagedValidationCheckEvidence, ...] = ()
+    dependency_attachments: tuple[TaskManagerDependencyAttachment, ...] = ()
 
     @model_validator(mode="after")
     def validate_evidence(self) -> ManagedVerificationEvidence:
@@ -139,6 +143,11 @@ class ManagedVerificationEvidence(DomainModel):
             for item in self.validation_checks
         ):
             raise ValueError("validation check artifacts must be included in evidence ids")
+        dependency_ids = tuple(
+            item.attachment_id for item in self.dependency_attachments
+        )
+        if len(dependency_ids) != len(set(dependency_ids)):
+            raise ValueError("dependency attachment evidence ids must be unique")
         return self
 
 

@@ -56,16 +56,14 @@ class DevelopmentCheckRunnerTests(unittest.TestCase):
                 "dependencies",
                 "ui",
                 "testbed",
-                "runbook",
-                "codex-runbook",
-                "codex-suspension-runbook",
+                "anygine-app-runbook",
                 "diff",
             ),
         )
-        self.assertEqual(len(invocations), 9)
+        self.assertEqual(len(invocations), 7)
         self.assertTrue(all(cwd == self.root.resolve() for _, cwd in invocations))
         self.assertFalse(report.passed)
-        self.assertIn("8/9 passed", stdout.getvalue())
+        self.assertIn("6/7 passed", stdout.getvalue())
         self.assertEqual(
             report.results[0].step.argv,
             (

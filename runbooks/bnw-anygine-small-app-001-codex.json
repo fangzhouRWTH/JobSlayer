@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "testbed_id": "brave-new-world",
+  "testbed_path": "testbeds/brave-new-world.json",
+  "task_path": "tasks/bnw-anygine-small-app-001.json",
+  "validation_profile_path": "validation-profiles/brave-new-world-anygine-app-v1.json",
+  "dependency_attachments": [
+    {
+      "attachment_id": "anygine-source",
+      "kind": "git_checkout",
+      "environment_variable": "ANYGINE_SOURCE_ROOT",
+      "expected_sha256": "8845cbbe2c3936dce4bfda4b84bd949995ac77089ccaf8ec3a92fb5b179c62a7",
+      "expected_revision": "28b4934c24fdad6b8f45b945a89a6ada51703f5d",
+      "repository_urls": [
+        "https://github.com/fangzhouRWTH/Anygine.git",
+        "git@github.com:fangzhouRWTH/Anygine.git"
+      ],
+      "expose_relative_path": "."
+    },
+    {
+      "attachment_id": "anygine-conan-toolchain",
+      "kind": "directory",
+      "environment_variable": "ANYGINE_CONAN_TOOLCHAIN",
+      "expected_sha256": "cabbe349eeb78c4ea63d0f4a75b9f36cead145f0ecba33545e685ea0a88fbaf9",
+      "expose_relative_path": "conan_toolchain.cmake"
+    }
+  ],
+  "validation_environment_allowlist": [
+    "DISPLAY",
+    "WAYLAND_DISPLAY",
+    "XDG_RUNTIME_DIR"
+  ],
+  "invocation": {
+    "schema_version": "1.0",
+    "run_spec": {
+      "schema_version": "1.0",
+      "run_id": "bnw-anygine-small-app-001-run-01",
+      "task_id": "bnw-anygine-small-app-001",
+      "executor_type": "codex_cli",
+      "model_profile": "gpt-5.6-sol-xhigh",
+      "context_package_id": "bnw-anygine-small-app-001-context-v1",
+      "workspace_id": "bnw-anygine-small-app-001-ws-01",
+      "permission_profile": "workspace_write",
+      "timeout_seconds": 14400,
+      "max_attempts": 1,
+      "max_repairs": 0,
+      "maximum_input_tokens": 500000,
+      "maximum_output_tokens": 60000,
+      "maximum_context_bytes": 8388608,
+      "output_schema": "none"
+    },
+    "prompt": "Implement only the concrete small-App node and acceptance criteria from the finalized TaskManager DAG in this BraveNewWorld checkout. Obey AGENTS.md and the source-controlled task contract. Keep BraveNewWorld as the top-level CMake consumer; use only the pinned Anygine public targets, do not copy or edit engine sources, and do not add private include paths or implicit network fetches. Keep the App bounded and thin, add or update its Config/Apps manifest and deterministic contract checks, and append accurate documentation and development evidence. Run ./bnw contract and inspect the complete Git diff. Do not access operator-owned Anygine/toolchain paths during implementation; JobSlayer injects their content-bound attachment environments only into the separately authorized validation node, where ./bnw test --jobs 4 and ./bnw run --jobs 4 produce structured evidence. Leave changes uncommitted for JobSlayer to collect. Do not claim approval, integration, completion, merge, push, deployment, or build/runtime evidence that was not actually observed."
+  },
+  "executor": {
+    "adapter": "codex_cli",
+    "model": "gpt-5.6-sol",
+    "reasoning_effort": "xhigh"
+  }
+}

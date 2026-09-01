@@ -46,5 +46,8 @@
 | [ADR-0042](0042-independent-source-review-and-isolated-run-checkpoint.md) | Accepted | 用独立源码审查/审批和幂等 run-branch 检查点完成源码节点，不触碰主干发布边界 |
 | [ADR-0043](0043-source-bound-deterministic-validation-nodes.md) | Accepted | 用 finalized profile、受策略约束的本地 runner 与 TaskManager-owned report 执行 validation node |
 | [ADR-0044](0044-evidence-bound-final-completion-gate.md) | Accepted | 用最终 passing/acceptance 证据和独立 Approver 决定 sink human gate 与 run 完成 |
+| [ADR-0045](0045-focused-serial-task-manager-and-anygine-app-testbed.md) | Accepted | 中期主线收紧为串行 TaskManager，并把 BraveNewWorld 重置为固定 Anygine 公共接口的小 App 测试床 |
+| [ADR-0046](0046-content-bound-local-dependency-attachments.md) | Accepted | 用源控需求、operator 路径、内容摘要和前后漂移证据将 Anygine 依赖接入隔离 validation |
+| [ADR-0047](0047-single-screen-task-graph-preview.md) | Accepted | 当前 Web App 只装配单屏任务图预览，以左 2/3 DAG 和右 1/3 节点详情/Agent 对话验证规划交互 |
 
 新增或取代 ADR 时，同时更新本索引和 `docs/DEVELOPMENT_LOG.md`。Accepted ADR 不通过静默编辑改变原决定；需要改变方向时新增 superseding ADR。

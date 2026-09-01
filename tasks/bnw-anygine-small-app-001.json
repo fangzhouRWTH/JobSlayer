@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "task_id": "bnw-anygine-small-app-001",
+  "project_id": "brave-new-world",
+  "version": 1,
+  "title": "在固定 Anygine 基线上开发一个小规模验证 App",
+  "objective": "按照用户固化的 TaskManager DAG，在 BraveNewWorld 中实现一个边界清晰的原生小 App，以快速验证任务规划、串行执行、确定性检查和反馈闭环。",
+  "repository": "https://github.com/fangzhouRWTH/BraveNewWorld.git",
+  "base_commit": "e7bff4aceca5dee998d0db1dc1c50e4b935fabda",
+  "allowed_paths": [
+    "CMakeLists.txt",
+    "Config/Apps/",
+    "Scripts/",
+    "Source/Apps/",
+    "Tests/",
+    "docs/",
+    "README.md"
+  ],
+  "forbidden_paths": [
+    ".github/",
+    ".gitmodules",
+    "AGENTS.md",
+    "Config/Engine.json",
+    "bnw",
+    "bnw.cmd"
+  ],
+  "required_capabilities": [
+    "cmake_cpp20",
+    "pinned_anygine_public_consumer",
+    "bounded_native_app",
+    "app_manifest",
+    "deterministic_contract_check",
+    "build_and_test"
+  ],
+  "acceptance_criteria": [
+    "新增或调整的 App 具有唯一 manifest、CMake target、明确入口和有界运行方式",
+    "只链接 Config/Engine.json 登记的公共 Anygine targets，不复制引擎源码、不包含 Private 目录、不修改 Anygine checkout",
+    "App 的具体交互、输出、验收标准和验证路径与 finalized TaskManager DAG 一致",
+    "./bnw contract 通过，且 manifest、CMake target、引擎 pin 与文档保持一致",
+    "通过内容哈希绑定的 Anygine source/toolchain attachment 运行 ./bnw test --jobs 4 并产生结构化构建与 CTest 证据",
+    "在具备图形环境的受治理验证主机上运行 ./bnw run --jobs 4，并记录固定帧运行、Vulkan validation 和 UI 启动证据",
+    "README、架构说明和追加式开发日志准确记录变更、验证、限制与下一步",
+    "没有修改允许范围之外的路径，也没有提交、合并、推送或部署"
+  ],
+  "validation_profile": "brave-new-world-anygine-app-v1",
+  "risk": "low",
+  "max_cost_usd": 15.0
+}

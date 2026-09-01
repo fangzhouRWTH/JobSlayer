@@ -106,6 +106,24 @@ export interface TaskPlanSnapshot {
   updated_at: string;
 }
 
+export interface TaskManagerDependencyAttachment {
+  schema_version: "1.0";
+  attachment_id: string;
+  kind: "git_checkout" | "directory" | "file";
+  environment_variable: string;
+  access_mode: "read_only";
+  expected_sha256: string;
+  observed_sha256: string | null;
+  expected_revision: string | null;
+  observed_revision: string | null;
+  repository_urls: string[];
+  observed_repository_url: string | null;
+  root_path: string | null;
+  exposed_path: string | null;
+  working_tree_clean: boolean | null;
+  issue: string | null;
+}
+
 export interface TaskManagerExecutionTarget {
   schema_version: "1.0";
   target_id: string;
@@ -130,6 +148,9 @@ export interface TaskManagerExecutionTarget {
   maximum_context_bytes: number;
   maximum_cost_usd: number;
   local_baseline_ready: boolean;
+  dependencies_ready: boolean;
+  dependency_attachments: TaskManagerDependencyAttachment[];
+  validation_environment_names: string[];
   source_bundle_sha256: string;
 }
 
@@ -319,6 +340,7 @@ export interface ManagedVerificationEvidence {
   };
   collected_at: string;
   evidence_artifact_ids: string[];
+  dependency_attachments: TaskManagerDependencyAttachment[];
 }
 
 export interface TaskManagerVerificationReport {

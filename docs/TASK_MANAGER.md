@@ -19,10 +19,28 @@ TaskManager 是 JobSlayer 当前主产品面，先收紧到一个可验证闭环
 本机 Codex durable executor。默认 CLI 只启用本地追加式 run store；没有执行开关和 `executor`
 身份时不会接入外部进程。即使 provider success，也只进入 `Verifying`，不会伪装成完成。
 
-默认 TaskManager 现在显式登记 `brave-new-world-suspension-v1`。目标解析器把 runbook、testbed、
-task 和 validation profile 四个源文件合成 SHA-256 source bundle，并只读检查本地 `bnw-0` Git
-基线。任务图包含 JobSlayer 命令、遗漏 `./bnw run-scenario scenarios/suspension-quarter-car.json`
-或遗漏 `./bnw check` 时，目标预检会阻止固化和 run 装配。
+默认 TaskManager 现在显式登记 `brave-new-world-anygine-app-v1`。目标解析器把 runbook、testbed、
+task 和 validation profile 四个源文件合成 SHA-256 source bundle，并只读检查本地
+`bnw-anygine-0` Git 基线。任务图包含 JobSlayer 内部命令或遗漏 `./bnw contract` 时，目标预检会
+阻止固化和 run 装配。现在 runbook 还声明固定 Anygine Git archive 与 Conan toolchain 目录
+SHA-256；operator 在部署时绑定本机路径。两项 attachment 就绪后，source-controlled profile
+要求 `./bnw contract`、`./bnw test --jobs 4` 和 `./bnw run --jobs 4`，不再以
+portable contract 冒充真实 C++ build/Vulkan 证据。
+
+## 当前中期目标
+
+当前不再扩张通用工程工作台，产品退出条件收紧为一个可观察、可恢复的串行 TaskManager 闭环：
+
+1. UI 只保留单屏任务图预览：左侧 2/3 DAG，右侧 1/3 同时显示当前节点详情和 Agent 对话；
+2. finalized run 在任意时刻至多有一个自动推进中的节点/外部副作用，并以持久 cursor 恢复；
+3. coordinator 依节点 kind 调用 Agent、validation 或 human gate 路径，仍不替代权限和完成决定；
+4. 每次启动、观察、验证、审查、失败和阻塞都立即反馈到 DAG、总 Log 和制品入口；
+5. 用 BraveNewWorld 的一个小 Anygine App 完成“讨论 → DAG → 固化 → 串行执行 → build/smoke 证据
+   → 人工完成门禁”的真实验证。
+
+当前已经具备全部单节点 application/API 命令和完整 11-node 人工推进证据，但没有拥有 lease/cursor
+的自动串行 coordinator。当前预览 UI 按 ADR-0047 主动隐藏固化、执行和治理按钮，先验证“图 → 节点
+→ 对话”；这些后台能力没有删除或旁路。
 
 ## 运行
 
@@ -50,12 +68,12 @@ task 和 validation profile 四个源文件合成 SHA-256 source bundle，并只
 另开终端启动 Web 应用：
 
 ```bash
-sh ./init.sh -- npm --prefix ui-framework run dev
+sh ./init.sh -- npm --prefix ui-framework run task-manager
 ```
 
-打开 `http://127.0.0.1:4173/#/task-manager`。Windows 使用等价的
+打开唯一入口 `http://127.0.0.1:4173/`。Windows 使用等价的
 `.\jobslayer.cmd task-manager-api ...` 和
-`.\init.cmd -- npm --prefix ui-framework run dev`。
+`.\init.cmd -- npm --prefix ui-framework run task-manager`。
 
 需要调用本机已登录 Codex 讨论计划时，必须显式授权外部 planning adapter 并固定模型/推理等级：
 
@@ -92,6 +110,12 @@ API 时单独启用 durable executor：
   --allow-external-planning-agent \
   --allow-external-task-execution \
   --allow-task-manager-local-validation \
+  --task-manager-dependency-attachment \
+    anygine-source=/home/fangzhou/projects/Anygine/Anygine_JobSlayer \
+  --task-manager-dependency-attachment \
+    anygine-conan-toolchain=/home/fangzhou/projects/Anygine/Anygine/build/conan \
+  --task-manager-validation-environment "DISPLAY=${DISPLAY}" \
+  --task-manager-validation-environment "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}" \
   --codex-model gpt-5.6-sol \
   --codex-reasoning-effort xhigh \
   --codex-timeout-seconds 900
@@ -99,13 +123,28 @@ API 时单独启用 durable executor：
 
 executor 会从目标固定基线创建 run 级独立 worktree，并以持久 start key 启动独立 worker。API 重启后
 可定位同一个 provider run；原始 JSONL、stderr 与 terminal result 都注册为证据。这个开关仍不会
-自动固化计划、自动启动节点或绕过逐节点授权。
+自动固化计划、自动启动节点或绕过逐节点授权；自动串行 coordinator 尚未落实。
 
 `--allow-task-manager-local-validation` 是与外部 Agent 执行分离的显式开关。它只读取 finalized target
 中的 validation profile，在当前 clean 隔离 run worktree 上通过命令策略运行检查；不会把 validation
-node 发送给 Codex。命令终止后还需调用 `observe`、`verify` 并由 Reviewer 接受 passing report，节点
+node 发送给 Codex。执行前可先用下列只读入口验证 baseline、2/2 attachment、图形会话和
+source-bundle hash：
+
+```bash
+./jobslayer inspect-task-manager-target \
+  runbooks/bnw-anygine-small-app-001-codex.json \
+  --target-id brave-new-world-anygine-app-v1 \
+  --dependency-attachment anygine-source=/home/fangzhou/projects/Anygine/Anygine_JobSlayer \
+  --dependency-attachment anygine-conan-toolchain=/home/fangzhou/projects/Anygine/Anygine/build/conan \
+  --validation-environment "DISPLAY=${DISPLAY}" \
+  --validation-environment "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
+```
+
+命令终止后还需调用 `observe`、`verify` 并由 Reviewer 接受 passing report，节点
 才会满足后继依赖。当前 profile 必须是幂等、非发布型检查；进程在 terminal 结果原子落盘前崩溃时，
-恢复可能保守重跑这些命令。
+恢复可能保守重跑这些命令。attachment 不传给 Codex 实现进程；本地 validator 对其执行
+前/后/采证时重新计算哈希并拒绝漂移。当前尚未用 namespace mount 强制主机文件系统只读，
+因此这条路径只允许源控、精确 argv 的受信任验证命令，不运行任意 Agent 脚本。
 
 运行数据默认写入 `<state-root>/task-manager-runs/*.jsonl`，worker 状态与 run 级 worktree 默认写入
 `<state-root>/task-manager-codex/`；它们与计划 journal 分离。创建运行不调用外部模型；未提供显式
@@ -136,32 +175,13 @@ reviewer 权限。adapter 只在已有 run worktree branch 上提交已审查的
 ## 界面
 
 - 顶部任务切换器读取所有最新任务，可创建和刷新任务；
-- 左侧主面板切换 `DAG / Backlog / 总 Log`；候选图用虚线和 proposed 状态标示；
-- 右侧切换任务/节点信息与 Agent 对话；选中 DAG 节点后，对话会携带该节点上下文；
+- 左侧约占 2/3，始终显示 DAG；候选图用虚线和 proposed 状态标示；
+- 右侧约占 1/3，上半区始终显示所选节点详情，下半区始终显示 Agent 对话；
+- 选中 DAG 节点后，详情和对话上下文同步切换到该节点；
 - Agent 输出始终先成为候选图，用户可以拒绝或应用；
-- 只有没有 pending proposal、完整度 assessment 通过的 draft 才能固化；
-- finalized 后可显式“创建执行运行”；DAG 会把根节点显示为 `READY`，未满足依赖的节点显示为
-  `WAITING`，状态栏展示 run id/revision；
-- 执行未接入时，节点授权按钮禁用，信息面板显示准确 blocker；接入 adapter 后，普通 task node
-  按状态提供 start/observe/retry。validation 只在本地验证 adapter 显式接入时提供“运行目标验证规则”，
-  随后复用 observe/verify/reviewer 阶段；human gate 保持专用路径，不提供绕过验证的“直接完成”。
-- 无依赖的根 human gate 可在 UI 输入确认理由，将已固化 plan id/revision/hash 与人类 actor 登记为
-  不可变证据，并经 `WorkflowKernel` 进入 `GateApproved`。该状态只满足 DAG 依赖，不等于代码任务
-  `Completed`；尾部最终验收门禁不会复用此路径。
-- provider 成功后的普通 task/milestone 先运行确定性 `verify`。验证器检查 terminal 状态、workspace
-  binding、路径策略及制品哈希，再经 Kernel 进入 `Reviewing`；它不会替 Reviewer 作语义验收。
-- 若 workspace 无 changed paths、无 patch 且 clean，具备 `reviewer` 角色的主体可输入接受理由，将
-  report、交付物和验收标准固化为 review evidence，并进入 `DeliverableAccepted`。检测到源码差异时
-  该按钮失败关闭，必须走源码 review/integration；validation 和最终 human gate 也不复用它。
-- 若验证证据包含源码 patch，UI 依次显示 `review-source`、`approve-checkpoint` 和
-  `integrate-checkpoint`。Reviewer 与 Approver 必须是不同主体；批准 intent 和稳定幂等键先写入 run
-  哈希链，Git 提交后才凭完全匹配的 integration result 进入 `Completed`。
-- 有依赖且无下游的最终 human gate 只提供 `approve-completion`。它要求独立 Approver 复核所有节点
-  已终态，且直接依赖同时具有 passing report 与 reviewer/integration evidence；根范围确认、中间人工
-  门禁和 Agent 都不能复用该路径。批准只完成隔离 run，不代表主干 merge、push、deploy 或 release。
-
-原 `#/orchestration` 页面仍保留高级 node/edge CRUD、版本派生、归档、diff 和规划证据查看能力，
-但不再是主导航。其他 Stage 0 实验页面同样可通过命令面板或直接 hash route 访问。
+- Backlog、总 Log、target、固化、执行、验证、review/approval/integration 控件暂不在当前预览 UI
+  暴露；相应受认证 API 和 application commands 仍然存在，并继续服从原有权限与证据门禁；
+- 当前 App 不再装配 `#/orchestration` 或其他 legacy workbench route。
 
 ## API
 

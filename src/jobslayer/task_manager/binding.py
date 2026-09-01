@@ -9,6 +9,7 @@ from pydantic import Field, model_validator
 
 from jobslayer.domain.models import (
     AgentInvocation,
+    CommandEnvironmentVariable,
     DomainModel,
     TaskSpec,
     TestbedInspection,
@@ -27,6 +28,90 @@ class TaskManagerSourceDigest(DomainModel):
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class TaskManagerDependencyAttachment(DomainModel):
+    """Resolved local resource identity; commands may only consume its exposed path."""
+
+    schema_version: str = "1.0"
+    attachment_id: str = Field(pattern=IDENTIFIER_PATTERN, max_length=128)
+    kind: Literal["git_checkout", "directory", "file"]
+    environment_variable: str = Field(
+        pattern=r"^[A-Z][A-Z0-9_]*$",
+        max_length=128,
+    )
+    access_mode: Literal["read_only"] = "read_only"
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    observed_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    expected_revision: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-fA-F]{40}$",
+    )
+    observed_revision: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-fA-F]{40}$",
+    )
+    repository_urls: tuple[str, ...] = ()
+    observed_repository_url: str | None = Field(default=None, min_length=1)
+    root_path: str | None = Field(default=None, min_length=1, max_length=4_096)
+    exposed_path: str | None = Field(default=None, min_length=1, max_length=4_096)
+    working_tree_clean: bool | None = None
+    issue: str | None = Field(default=None, min_length=1, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_attachment(self) -> TaskManagerDependencyAttachment:
+        if len(self.repository_urls) != len(set(self.repository_urls)):
+            raise ValueError("dependency attachment repository URLs must be unique")
+        if self.kind == "git_checkout":
+            if self.expected_revision is None or not self.repository_urls:
+                raise ValueError(
+                    "git dependency attachments require revision and repository URLs"
+                )
+        elif any(
+            item is not None
+            for item in (
+                self.expected_revision,
+                self.observed_revision,
+                self.observed_repository_url,
+                self.working_tree_clean,
+            )
+        ) or self.repository_urls:
+            raise ValueError(
+                "only git dependency attachments may contain repository facts"
+            )
+        if (self.root_path is None) != (self.exposed_path is None):
+            raise ValueError("dependency root and exposed paths must be present together")
+        return self
+
+    @property
+    def ready(self) -> bool:
+        base_ready = (
+            self.issue is None
+            and self.root_path is not None
+            and self.exposed_path is not None
+            and self.observed_sha256 == self.expected_sha256
+        )
+        if self.kind != "git_checkout":
+            return base_ready
+        return bool(
+            base_ready
+            and self.observed_revision is not None
+            and self.expected_revision is not None
+            and self.observed_revision.lower() == self.expected_revision.lower()
+            and self.observed_repository_url in self.repository_urls
+            and self.working_tree_clean is True
+        )
+
+    def command_environment(self) -> CommandEnvironmentVariable:
+        if not self.ready or self.exposed_path is None:
+            raise ValueError("unready dependency attachment has no command environment")
+        assert self.observed_sha256 is not None
+        return CommandEnvironmentVariable(
+            name=self.environment_variable,
+            value=self.exposed_path,
+            source_id=self.attachment_id,
+            source_sha256=self.observed_sha256,
+        )
+
+
 class TaskManagerExecutionBinding(DomainModel):
     """Exact source inputs and observed local baseline for one target."""
 
@@ -35,6 +120,8 @@ class TaskManagerExecutionBinding(DomainModel):
     display_name: str = Field(min_length=1, max_length=200)
     source_bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_digests: tuple[TaskManagerSourceDigest, ...] = Field(min_length=4)
+    dependency_attachments: tuple[TaskManagerDependencyAttachment, ...] = ()
+    validation_environment: tuple[CommandEnvironmentVariable, ...] = ()
     task: TaskSpec
     validation_profile: ValidationProfile
     invocation: AgentInvocation
@@ -53,6 +140,23 @@ class TaskManagerExecutionBinding(DomainModel):
         paths = tuple(item.path for item in self.source_digests)
         if len(paths) != len(set(paths)):
             raise ValueError("execution-target source paths must be unique")
+        attachment_ids = tuple(
+            item.attachment_id for item in self.dependency_attachments
+        )
+        environment_variables = tuple(
+            item.environment_variable for item in self.dependency_attachments
+        )
+        if len(attachment_ids) != len(set(attachment_ids)):
+            raise ValueError("execution-target dependency ids must be unique")
+        if len(environment_variables) != len(set(environment_variables)):
+            raise ValueError("execution-target dependency environments must be unique")
+        runtime_names = tuple(item.name for item in self.validation_environment)
+        if len(runtime_names) != len(set(runtime_names)):
+            raise ValueError("execution-target validation environments must be unique")
+        if set(runtime_names).intersection(environment_variables):
+            raise ValueError(
+                "execution-target dependency and validation environments overlap"
+            )
         if self.task.project_id != self.testbed_inspection.testbed_id:
             raise ValueError("execution target task and testbed do not match")
         if self.task.base_commit != self.testbed_inspection.baseline_commit:
@@ -65,6 +169,12 @@ class TaskManagerExecutionBinding(DomainModel):
         if spec.executor_type != self.executor_adapter:
             raise ValueError("execution target invocation does not match adapter")
         return self
+
+    def command_environment(self) -> tuple[CommandEnvironmentVariable, ...]:
+        return (
+            *(item.command_environment() for item in self.dependency_attachments),
+            *self.validation_environment,
+        )
 
 
 class TaskManagerExecutionTarget(DomainModel):
@@ -96,6 +206,9 @@ class TaskManagerExecutionTarget(DomainModel):
     maximum_context_bytes: int = Field(gt=0)
     maximum_cost_usd: float = Field(ge=0)
     local_baseline_ready: bool
+    dependencies_ready: bool = True
+    dependency_attachments: tuple[TaskManagerDependencyAttachment, ...] = ()
+    validation_environment_names: tuple[str, ...] = ()
     source_bundle_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -164,6 +277,13 @@ def describe_execution_target(
         maximum_context_bytes=spec.maximum_context_bytes,
         maximum_cost_usd=binding.task.max_cost_usd,
         local_baseline_ready=binding.testbed_inspection.valid_local_baseline,
+        dependencies_ready=all(
+            item.ready for item in binding.dependency_attachments
+        ),
+        dependency_attachments=binding.dependency_attachments,
+        validation_environment_names=tuple(
+            item.name for item in binding.validation_environment
+        ),
         source_bundle_sha256=binding.source_bundle_sha256,
     )
 
@@ -215,6 +335,14 @@ def assess_plan_for_target(
             TaskPlanIssueSeverity.BLOCKER,
             "BraveNewWorld 本地检出不是已注册的干净固定基线。",
         )
+    for attachment in binding.dependency_attachments:
+        if not attachment.ready:
+            detail = attachment.issue or "实际内容与源控声明不一致"
+            add(
+                "target.dependency_attachment_not_ready",
+                TaskPlanIssueSeverity.BLOCKER,
+                f"外部依赖 {attachment.attachment_id} 未就绪：{detail}。",
+            )
 
     nodes = (
         snapshot.pending_proposal.nodes
@@ -294,6 +422,7 @@ def assess_plan_for_target(
 __all__ = [
     "assess_plan_for_target",
     "describe_execution_target",
+    "TaskManagerDependencyAttachment",
     "TaskManagerExecutionBinding",
     "TaskManagerExecutionTarget",
     "TaskManagerExecutionTargetAssessment",

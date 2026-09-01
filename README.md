@@ -33,10 +33,14 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
   节点和语义边 CRUD、完整度评估、历史派生、归档、追加式 revision 与用户定稿哈希；另提供
   显式 opt-in、结构化输出和原始交互制品绑定的 Codex planning adapter，以及认证、去存储 URI、
   哈希验证的有界规划证据查看器；本地 fixture 仍为默认；
-- 聚焦的 TaskManager 主应用：统一任务摘要、revision-bound DAG/Backlog/总日志、完整 Agent
-  对话、proposal 决定与任务流固化，以源包哈希锁定 BraveNewWorld target，并把 finalized revision
+- 聚焦的 TaskManager 主应用：后台统一任务摘要、revision-bound DAG/Backlog/总日志、完整 Agent
+  对话、proposal 决定与任务流固化；当前 Web UI 只装配左 2/3 DAG、右 1/3 节点详情与 Agent
+  对话的单屏预览。后台以源包哈希锁定 BraveNewWorld target，并把 finalized revision
   装配为 hash-chained、Kernel-owned 的节点运行；显式启用的 durable 本机 Codex worker 支持 API
   重启后 start-or-locate、运行级隔离 worktree 和原始证据，默认仍禁用 dispatch，且不伪造完成；
+- 内容绑定的本地 dependency attachment：将 operator 提供的 Anygine Git checkout/Conan toolchain
+  路径与源控 revision/SHA-256 核对，只向受治理 validation 注入显式环境，并以前后漂移证据
+  支持隔离 BraveNewWorld C++ build、CTest 和 GPU smoke；
 - 一个可运行的闭环演示和标准库测试；
 - 项目指导、架构决策和分阶段路线图。
 
@@ -79,9 +83,7 @@ POSIX（Linux/macOS/WSL）公共命令示例：
 ./jobslayer check
 ./jobslayer validate-testbed testbeds/brave-new-world.json
 ./jobslayer inspect-testbed testbeds/brave-new-world.json
-./jobslayer validate-runbook runbooks/bnw-scenario-slow-001.json
-./jobslayer validate-runbook runbooks/bnw-filter-demo-001-codex.json
-./jobslayer inspect-run .jobslayer/runs/bnw-scenario-slow-001-run-01
+./jobslayer validate-runbook runbooks/bnw-anygine-small-app-001-codex.json
 ./jobslayer inspect-readiness --state-root .jobslayer --required-reviewed-tasks 20
 ./jobslayer build-phase0-corpus
 ./jobslayer inspect-readiness --state-root .jobslayer/phase0-corpus/state --required-reviewed-tasks 20
@@ -103,16 +105,17 @@ POSIX（Linux/macOS/WSL）公共命令示例：
   --open-browser
 ```
 
-TaskManager 本地双栏应用需要 planner 身份，随后分别启动 API 与 Vite：
+TaskManager 单屏任务图应用需要 planner 身份，随后分别启动 API 与专用 UI 入口：
 
 ```bash
 ./jobslayer task-manager-api \
   --identity-session .jobslayer/identity/task-manager-session.json \
   --identity-key .jobslayer/identity/task-manager-key.json
-sh ./init.sh -- npm --prefix ui-framework run dev
+sh ./init.sh -- npm --prefix ui-framework run task-manager
 ```
 
-打开 `http://127.0.0.1:4173/#/task-manager`。身份创建、Codex opt-in 和接口说明见
+打开 `http://127.0.0.1:4173/`。页面左侧 2/3 为任务图，右侧 1/3 同时显示节点详情与
+Agent 对话；身份创建、Codex opt-in 和接口说明见
 [TaskManager 聚焦应用](docs/TASK_MANAGER.md)。
 
 Windows PowerShell 使用原生 Python，不要求 WSL：
@@ -128,9 +131,9 @@ Windows PowerShell 使用原生 Python，不要求 WSL：
 ```
 
 下文的 `./jobslayer` 在 Windows 上均对应 `.\jobslayer.cmd`。JobSlayer
-控制平面和完整开发门禁可原生运行；当前 BraveNewWorld 源控 runbook 仍绑定
-测试床自身的 `./bnw` POSIX 验证入口，因此实际执行这些 BNW runbook 时仍需
-兼容该命令的环境，直到测试床另行提供 Windows 验证入口。
+控制平面和完整开发门禁可原生运行。BraveNewWorld profile 现在包含 contract、C++ build/CTest
+和 runtime smoke；实际运行前必须用 TaskManager 部置参数绑定对应平台的 Anygine source/toolchain
+和所需图形会话环境，缺失时目标失败关闭。
 
 演示会依次经过：
 
@@ -166,15 +169,22 @@ Draft -> Planned -> Implementing -> Verifying -> Reviewing
 - [示例任务](examples/task.example.json)
 - [示例决策卡](examples/decision-card.example.json)
 
-## 首个实验项目
+## 当前开发焦点与实验项目
 
-BraveNewWorld 是 JobSlayer 的首个外部测试床，用于验证真实仓库中的任务治理、隔离执行和证据闭环。仓库地址、BNW-0 固定 commit、`bnw-0` 标签和验证入口已登记在 [`testbeds/brave-new-world.json`](testbeds/brave-new-world.json)。
+中期主线进一步收紧为 TaskManager 单产品闭环：精简图状任务 UI、将当前逐按钮推进收束为一次只运行
+一个节点的可恢复串行协调器，并把 Agent、命令、验证、审查和人工门禁反馈统一投影回 DAG。工作台其余
+能力保留为历史/高级入口，不进入当前退出条件。
+
+BraveNewWorld 已重置为基于 Anygine 公共 build-tree contract 的小 App 测试床。固定基线为
+`e7bff4aceca5dee998d0db1dc1c50e4b935fabda` / `bnw-anygine-0`，已发布到远端；旧网页端机电模拟内容
+不再属于当前主干目标。登记与验证入口见 [`testbeds/brave-new-world.json`](testbeds/brave-new-world.json)。
 
 ```bash
 git clone https://github.com/fangzhouRWTH/BraveNewWorld.git
 ```
 
-BraveNewWorld 有独立的教学产品目标，但不属于 JobSlayer 控制平面的源码；JobSlayer 只保存它的项目登记、任务规格、运行记录和验证证据。当前 BNW-0 已在本机固定，但尚未推送，登记中的 `published` 因而保持 `false`；在首次发布前，其他开发端通过上述地址只能看到空远端。
+BraveNewWorld 不属于 JobSlayer 控制平面的源码；JobSlayer 只保存项目登记、任务规格、运行记录和验证
+证据。Anygine 仍是独立引擎库，BraveNewWorld 只消费固定 public targets，不复制或修改引擎源码。
 
 ## 当前边界
 

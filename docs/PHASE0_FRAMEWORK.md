@@ -3,6 +3,9 @@
 > 本文保留 Phase 0 架构与样例证据；当前基础设施状态和入口以
 > [短期基础设施计划](SHORT_TERM_INFRASTRUCTURE_PLAN.md)与
 > [统一入口](UNIFIED_ENTRYPOINT.md)为准。
+> 文中的 `bnw-scenario-slow-001`、旧 validation profile 和 patch 已在 2026-09-01 测试床重置时
+> 退出当前 checkout；需要复盘时使用 JobSlayer commit `4d5be6b` 或离线 BraveNewWorld 归档，
+> 不要把下列历史命令当作当前 runbook。
 
 ## 1. 当前结论
 

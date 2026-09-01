@@ -18,6 +18,7 @@ from jobslayer.adapters.local_task_manager_runs import (
 from jobslayer.application.task_manager_execution import (
     StaleTaskManagerRunRevisionError,
     TaskManagerExecutionAdapterUnavailableError,
+    TaskManagerExecutionEvidenceError,
     TaskManagerExecutionNodeNotReadyError,
     TaskManagerExecutionProviderError,
     TaskManagerExecutionService,
@@ -44,6 +45,7 @@ from jobslayer.task_manager import (
     ManagedCheckpointResult,
     ManagedVerificationEvidence,
     ManagedValidationCheckEvidence,
+    TaskManagerDependencyAttachment,
     TaskManagerRunStage,
 )
 from tests.task_manager_fixtures import (
@@ -153,6 +155,7 @@ class FixtureManagedValidator:
         self.artifacts = artifacts
         self.start_requests: list[ManagedExecutionRequest] = []
         self.command_status = CommandStatus.PASSED
+        self.omit_dependency_evidence = False
 
     def start_or_locate(
         self,
@@ -225,6 +228,7 @@ class FixtureManagedValidator:
                 rule_id="complete-suite",
                 argv=check.argv,
                 cwd=check.cwd,
+                environment=request.execution_binding.command_environment(),
                 status=self.command_status,
                 exit_code=(0 if self.command_status is CommandStatus.PASSED else 1),
                 started_at=now,
@@ -272,6 +276,11 @@ class FixtureManagedValidator:
             collected_at=now,
             evidence_artifact_ids=tuple(evidence_ids),
             validation_checks=tuple(checks),
+            dependency_attachments=(
+                ()
+                if self.omit_dependency_evidence
+                else request.execution_binding.dependency_attachments
+            ),
         )
 
 
@@ -320,6 +329,7 @@ class TaskManagerExecutionServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary_directory = TemporaryDirectory()
         root = Path(self.temporary_directory.name)
+        self.root = root
         self.planning = TaskOrchestrationService(
             LocalTaskPlanStore(root / "plans"),
             LocalPlanningAgent(),
@@ -329,13 +339,14 @@ class TaskManagerExecutionServiceTests(unittest.TestCase):
         self.store = LocalTaskManagerRunStore(root / "runs")
         self.executor = FixtureManagedExecutor(self.artifacts)
         self.validator = FixtureManagedValidator(self.artifacts)
+        self.targets = FixtureExecutionTargetRegistry()
         self.execution = TaskManagerExecutionService(
             self.store,
             self.artifacts,
             actor_id="executor@example.invalid",
             executor=self.executor,
             validator=self.validator,
-            targets=FixtureExecutionTargetRegistry(),
+            targets=self.targets,
         )
 
     def tearDown(self) -> None:
@@ -481,6 +492,30 @@ class TaskManagerExecutionServiceTests(unittest.TestCase):
                 expected_plan_revision=finalized.sequence,
                 run_id="tmrun-another",
             )
+
+    def test_assembled_run_keeps_retired_target_binding_readable(self) -> None:
+        finalized = self._finalized_plan("task-retired-target")
+        assembled = self.execution.assemble(
+            finalized,
+            expected_plan_revision=finalized.sequence,
+            run_id="tmrun-retired-target",
+        )
+
+        class RetiredRegistry:
+            def list_targets(self):
+                return ()
+
+            def get(self, target_id: str):
+                raise LookupError(target_id)
+
+        self.execution.targets = RetiredRegistry()
+        assessment = self.execution.assess_target(finalized)
+
+        self.assertTrue(assessment.ready)
+        self.assertEqual(
+            assembled.snapshot.execution_binding.target_id,
+            assessment.target_id,
+        )
 
     def test_execution_feedback_cannot_bypass_verification_or_dependencies(self) -> None:
         finalized = self._finalized_plan()
@@ -860,6 +895,84 @@ class TaskManagerExecutionServiceTests(unittest.TestCase):
         self.assertEqual(
             accepted_node.transition_history[-1].actor_type,
             ActorType.HUMAN,
+        )
+
+    def test_validation_binds_dependency_environment_and_rejects_missing_evidence(
+        self,
+    ) -> None:
+        dependency = self.root / "fixture-dependency"
+        dependency.mkdir()
+        attachment = TaskManagerDependencyAttachment(
+            attachment_id="fixture-dependency",
+            kind="directory",
+            environment_variable="FIXTURE_DEPENDENCY_ROOT",
+            expected_sha256="d" * 64,
+            observed_sha256="d" * 64,
+            root_path=str(dependency),
+            exposed_path=str(dependency),
+        )
+        self.targets.binding = self.targets.binding.model_copy(
+            update={"dependency_attachments": (attachment,)}
+        )
+        ready = self._ready_validation_run(
+            plan_id="task-run-validation-dependency",
+            run_id="tmrun-validation-dependency",
+        )
+        started = self.execution.run_validation_node(
+            ready.run_id,
+            "verify",
+            expected_run_revision=ready.sequence,
+        )
+        verifying = self.execution.observe_node(
+            ready.run_id,
+            "verify",
+            expected_run_revision=started.sequence,
+        )
+
+        verified = self.execution.verify_node(
+            ready.run_id,
+            "verify",
+            expected_run_revision=verifying.sequence,
+        )
+        node = next(
+            item for item in verified.snapshot.nodes if item.node.node_id == "verify"
+        )
+        self.assertIn(
+            "dependency-attachment-binding",
+            tuple(check.check_id for check in node.verification_report.checks),
+        )
+        self.assertEqual(
+            node.verification_evidence.validation_checks[0].result.environment,
+            (attachment.command_environment(),),
+        )
+
+        self.targets.binding = self.targets.binding.model_copy(
+            update={"source_bundle_sha256": "e" * 64}
+        )
+        self.validator.omit_dependency_evidence = True
+        rejected_ready = self._ready_validation_run(
+            plan_id="task-run-validation-dependency-rejected",
+            run_id="tmrun-validation-dependency-rejected",
+        )
+        rejected_started = self.execution.run_validation_node(
+            rejected_ready.run_id,
+            "verify",
+            expected_run_revision=rejected_ready.sequence,
+        )
+        rejected_verifying = self.execution.observe_node(
+            rejected_ready.run_id,
+            "verify",
+            expected_run_revision=rejected_started.sequence,
+        )
+        with self.assertRaises(TaskManagerExecutionEvidenceError):
+            self.execution.verify_node(
+                rejected_ready.run_id,
+                "verify",
+                expected_run_revision=rejected_verifying.sequence,
+            )
+        self.assertEqual(
+            self.execution.get(rejected_ready.run_id),
+            rejected_verifying,
         )
 
     def test_failed_validation_enters_repair_and_cannot_be_accepted(self) -> None:

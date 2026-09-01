@@ -50,7 +50,7 @@ class TaskOrchestrationTests(unittest.TestCase):
         with self.assertRaises(PendingTaskPlanProposalError):
             self.service.set_execution_target(
                 created.plan_id,
-                "brave-new-world-suspension-v1",
+                "brave-new-world-anygine-app-v1",
                 "a" * 64,
                 expected_revision=created.sequence,
             )
@@ -65,17 +65,17 @@ class TaskOrchestrationTests(unittest.TestCase):
         )
         selected = self.service.set_execution_target(
             created.plan_id,
-            "brave-new-world-suspension-v1",
+            "brave-new-world-anygine-app-v1",
             "a" * 64,
             expected_revision=applied.sequence,
         )
         self.assertEqual(
             selected.snapshot.execution_target_id,
-            "brave-new-world-suspension-v1",
+            "brave-new-world-anygine-app-v1",
         )
         self.assertEqual(
             selected.operation,
-            "plan.execution_target_selected:brave-new-world-suspension-v1",
+            "plan.execution_target_selected:brave-new-world-anygine-app-v1",
         )
         with self.assertRaises(StaleTaskPlanRevisionError):
             self.service.set_execution_target(

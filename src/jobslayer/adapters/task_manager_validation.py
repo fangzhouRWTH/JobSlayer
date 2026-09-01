@@ -14,6 +14,9 @@ from typing import Any
 from pydantic import ValidationError
 
 from jobslayer.adapters.git_workspace import GitWorktreeManager
+from jobslayer.adapters.local_dependency_attachments import (
+    reinspect_local_dependency_attachment,
+)
 from jobslayer.adapters.local_command import GovernedLocalCommandRunner
 from jobslayer.artifacts.registry import ArtifactRegistry
 from jobslayer.domain.models import CommandRequest, CommandStatus, WorkspaceManifest
@@ -26,6 +29,7 @@ from jobslayer.task_manager.execution import (
     ManagedValidationCheckEvidence,
     ManagedVerificationEvidence,
 )
+from jobslayer.task_manager.binding import TaskManagerDependencyAttachment
 
 
 class TaskManagerValidationError(RuntimeError):
@@ -90,11 +94,15 @@ class LocalTaskManagerValidationRunner:
         with self._lock:
             state = self._state_directory(request.provider_start_key)
             workspace = self._checkpoint_workspace(request)
+            attachments = self._dependency_attachments(request)
             state.mkdir(parents=True, exist_ok=True, mode=0o700)
             request_payload = {
                 "schema_version": "1.0",
                 "request": request.model_dump(mode="json"),
                 "workspace": workspace.model_dump(mode="json"),
+                "dependency_attachments": [
+                    item.model_dump(mode="json") for item in attachments
+                ],
             }
             request_bytes = _canonical(request_payload)
             request_sha256 = hashlib.sha256(request_bytes).hexdigest()
@@ -159,6 +167,7 @@ class LocalTaskManagerValidationRunner:
             terminal_path = state / "terminal.json"
             if not terminal_path.exists():
                 checks = self._run_checks(request, workspace)
+                terminal_attachments = self._dependency_attachments(request)
                 _atomic_write(
                     terminal_path,
                     _canonical(
@@ -168,6 +177,10 @@ class LocalTaskManagerValidationRunner:
                             "request_sha256": request_sha256,
                             "finished_at": datetime.now(UTC).isoformat(),
                             "checks": [item.model_dump(mode="json") for item in checks],
+                            "dependency_attachments": [
+                                item.model_dump(mode="json")
+                                for item in terminal_attachments
+                            ],
                         }
                     ),
                 )
@@ -186,6 +199,10 @@ class LocalTaskManagerValidationRunner:
             checks = tuple(
                 ManagedValidationCheckEvidence.model_validate(item)
                 for item in terminal["checks"]
+            )
+            terminal_attachments = tuple(
+                TaskManagerDependencyAttachment.model_validate(item)
+                for item in terminal.get("dependency_attachments", ())
             )
         except (KeyError, TypeError, ValueError, ValidationError) as exc:
             raise TaskManagerValidationError("validation terminal evidence is invalid") from exc
@@ -244,6 +261,10 @@ class LocalTaskManagerValidationRunner:
                 ManagedValidationCheckEvidence.model_validate(item)
                 for item in terminal["checks"]
             )
+            terminal_attachments = tuple(
+                TaskManagerDependencyAttachment.model_validate(item)
+                for item in terminal.get("dependency_attachments", ())
+            )
         except (KeyError, TypeError, ValueError, ValidationError) as exc:
             raise TaskManagerValidationError("validation evidence binding is invalid") from exc
         if (
@@ -252,6 +273,11 @@ class LocalTaskManagerValidationRunner:
             or request.workflow_task_id != str(record["workflow_task_id"])
         ):
             raise TaskManagerValidationError("validation request binding drifted")
+        current_attachments = self._dependency_attachments(request)
+        if terminal_attachments != current_attachments:
+            raise TaskManagerValidationError(
+                "validation dependency attachments drifted after command completion"
+            )
         manager = GitWorktreeManager(workspace.repository_root, self.workspaces_root)
         inspection = manager.inspect(workspace)
         inspection_artifact = self.artifacts.register_bytes(
@@ -267,11 +293,38 @@ class LocalTaskManagerValidationRunner:
                 "working_tree_clean": inspection.working_tree_clean,
             },
         )
+        dependency_artifact_ids: tuple[str, ...] = ()
+        if current_attachments:
+            dependency_artifact = self.artifacts.register_bytes(
+                task_id=request.workflow_task_id,
+                run_id=request.run_id,
+                artifact_type="task-manager-validation-dependency-attachments",
+                producer=self.producer,
+                content=_canonical(
+                    {
+                        "schema_version": "1.0",
+                        "provider_run_id": reference.provider_run_id,
+                        "attachments": [
+                            item.model_dump(mode="json")
+                            for item in current_attachments
+                        ],
+                    }
+                ),
+                metadata={
+                    "provider_run_id": reference.provider_run_id,
+                    "attachment_count": len(current_attachments),
+                    "attachment_ids": ",".join(
+                        item.attachment_id for item in current_attachments
+                    ),
+                },
+            )
+            dependency_artifact_ids = (dependency_artifact.artifact_id,)
         evidence_ids = tuple(
             dict.fromkeys(
                 (
                     *(item.evidence_artifact_id for item in checks),
                     inspection_artifact.artifact_id,
+                    *dependency_artifact_ids,
                 )
             )
         )
@@ -283,6 +336,7 @@ class LocalTaskManagerValidationRunner:
             collected_at=datetime.now(UTC),
             evidence_artifact_ids=evidence_ids,
             validation_checks=checks,
+            dependency_attachments=current_attachments,
         )
 
     def _run_checks(
@@ -294,6 +348,7 @@ class LocalTaskManagerValidationRunner:
         runner = GovernedLocalCommandRunner(manager)
         evidence: list[ManagedValidationCheckEvidence] = []
         profile = request.execution_binding.validation_profile
+        environment = request.execution_binding.command_environment()
         for check in profile.checks:
             result = runner.run(
                 workspace,
@@ -304,6 +359,7 @@ class LocalTaskManagerValidationRunner:
                     argv=check.argv,
                     cwd=check.cwd,
                     timeout_seconds=check.timeout_seconds,
+                    environment=environment,
                 ),
                 profile.command_policy,
             )
@@ -330,6 +386,27 @@ class LocalTaskManagerValidationRunner:
                 )
             )
         return tuple(evidence)
+
+    @staticmethod
+    def _dependency_attachments(
+        request: ManagedExecutionRequest,
+    ) -> tuple[TaskManagerDependencyAttachment, ...]:
+        observed = tuple(
+            reinspect_local_dependency_attachment(item)
+            for item in request.execution_binding.dependency_attachments
+        )
+        if any(not item.ready for item in observed):
+            failed = ", ".join(
+                item.attachment_id for item in observed if not item.ready
+            )
+            raise TaskManagerValidationError(
+                "validation dependency attachments are not ready: " + failed
+            )
+        if observed != request.execution_binding.dependency_attachments:
+            raise TaskManagerValidationError(
+                "validation dependency attachment identity drifted from the run binding"
+            )
+        return observed
 
     def _checkpoint_workspace(
         self,

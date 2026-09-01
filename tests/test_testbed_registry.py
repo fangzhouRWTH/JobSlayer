@@ -14,7 +14,7 @@ class TestbedRegistryTests(unittest.TestCase):
             manifest_path.read_text(encoding="utf-8")
         )
 
-        self.assertEqual(testbed.status, TestbedStatus.BOOTSTRAPPING)
+        self.assertEqual(testbed.status, TestbedStatus.ACTIVE)
         self.assertEqual(
             testbed.repository.clone_url,
             "https://github.com/fangzhouRWTH/BraveNewWorld.git",
@@ -26,11 +26,11 @@ class TestbedRegistryTests(unittest.TestCase):
         self.assertIsNotNone(testbed.baseline)
         self.assertEqual(
             testbed.baseline.commit,
-            "fb43878c9f0164deef272e55969c0fc134a6d6a3",
+            "e7bff4aceca5dee998d0db1dc1c50e4b935fabda",
         )
-        self.assertEqual(testbed.baseline.tag, "bnw-0")
-        self.assertFalse(testbed.baseline.published)
-        self.assertEqual(testbed.baseline.verification_command, ("./bnw", "check"))
+        self.assertEqual(testbed.baseline.tag, "bnw-anygine-0")
+        self.assertTrue(testbed.baseline.published)
+        self.assertEqual(testbed.baseline.verification_command, ("./bnw", "contract"))
 
 
 

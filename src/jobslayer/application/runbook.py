@@ -55,6 +55,47 @@ class CodexCliConfig(_RunbookModel):
     ] | None = None
 
 
+class LocalDependencyAttachmentConfig(_RunbookModel):
+    """Source-controlled identity expected from one operator-owned local path."""
+
+    attachment_id: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+        max_length=128,
+    )
+    kind: Literal["git_checkout", "directory", "file"]
+    environment_variable: str = Field(
+        pattern=r"^[A-Z][A-Z0-9_]*$",
+        max_length=128,
+    )
+    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_revision: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-fA-F]{40}$",
+    )
+    repository_urls: tuple[str, ...] = ()
+    expose_relative_path: str = "."
+
+    @field_validator("expose_relative_path")
+    @classmethod
+    def validate_exposed_path(cls, value: str) -> str:
+        return _relative_path(value)
+
+    @model_validator(mode="after")
+    def validate_kind_contract(self) -> LocalDependencyAttachmentConfig:
+        if self.kind == "git_checkout":
+            if self.expected_revision is None or not self.repository_urls:
+                raise ValueError(
+                    "git checkout attachments require a revision and repository URLs"
+                )
+        elif self.expected_revision is not None or self.repository_urls:
+            raise ValueError(
+                "only git checkout attachments may declare revision or repository URLs"
+            )
+        if len(self.repository_urls) != len(set(self.repository_urls)):
+            raise ValueError("dependency attachment repository URLs must be unique")
+        return self
+
+
 class LocalTaskRunbook(_RunbookModel):
     """Source-controlled references and invocation for one governed local run."""
 
@@ -63,6 +104,8 @@ class LocalTaskRunbook(_RunbookModel):
     testbed_path: str
     task_path: str
     validation_profile_path: str
+    dependency_attachments: tuple[LocalDependencyAttachmentConfig, ...] = ()
+    validation_environment_allowlist: tuple[str, ...] = ()
     invocation: AgentInvocation
     executor: Annotated[
         ScriptedPatchConfig | CodexCliConfig,
@@ -108,6 +151,39 @@ class LocalTaskRunbook(_RunbookModel):
                 raise ValueError(
                     "codex_cli requires explicit input/output/context and task cost budgets"
                 )
+        attachment_ids = tuple(
+            item.attachment_id for item in self.dependency_attachments
+        )
+        environment_variables = tuple(
+            item.environment_variable for item in self.dependency_attachments
+        )
+        if len(attachment_ids) != len(set(attachment_ids)):
+            raise ValueError("dependency attachment ids must be unique")
+        if len(environment_variables) != len(set(environment_variables)):
+            raise ValueError("dependency attachment environment variables must be unique")
+        if len(self.validation_environment_allowlist) != len(
+            set(self.validation_environment_allowlist)
+        ):
+            raise ValueError("validation environment allowlist names must be unique")
+        unsafe_markers = ("TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "API_KEY")
+        for name in self.validation_environment_allowlist:
+            if (
+                not name
+                or len(name) > 128
+                or not name[0].isalpha()
+                or name.upper() != name
+                or any(not (character.isalnum() or character == "_") for character in name)
+                or any(marker in name for marker in unsafe_markers)
+            ):
+                raise ValueError(
+                    "validation environment allowlist contains an unsafe name"
+                )
+        if set(self.validation_environment_allowlist).intersection(
+            environment_variables
+        ):
+            raise ValueError(
+                "dependency and validation environment variable names must be distinct"
+            )
         return self
 
 

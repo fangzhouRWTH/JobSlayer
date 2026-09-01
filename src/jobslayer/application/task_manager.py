@@ -406,7 +406,7 @@ class TaskManagerService:
         run: TaskManagerRunRevisionRecord | None,
     ) -> ManagedTaskDetail:
         snapshot = record.snapshot
-        target, target_assessment = self._target_context(record)
+        target, target_assessment = self._target_context(record, run)
         nodes = self._nodes(record, assessment, run)
         backlog = tuple(
             TaskManagerBacklogItem(
@@ -673,10 +673,12 @@ class TaskManagerService:
         target_id = record.snapshot.execution_target_id
         if target_id is None:
             return (TARGET_NOT_SELECTED,)
-        assessment = assess_plan_for_target(
-            record.snapshot,
-            self.execution.resolve_target(target_id),
+        binding = (
+            run.snapshot.execution_binding
+            if run is not None
+            else self.execution.resolve_target(target_id)
         )
+        assessment = assess_plan_for_target(record.snapshot, binding)
         target_blockers = tuple(
             issue.message
             for issue in assessment.issues
@@ -733,13 +735,18 @@ class TaskManagerService:
     def _target_context(
         self,
         record: TaskPlanRevisionRecord,
+        run: TaskManagerRunRevisionRecord | None,
     ) -> tuple[
         TaskManagerExecutionTarget | None,
         TaskManagerExecutionTargetAssessment | None,
     ]:
         if self.execution is None or record.snapshot.execution_target_id is None:
             return None, None
-        binding = self.execution.resolve_target(record.snapshot.execution_target_id)
+        binding = (
+            run.snapshot.execution_binding
+            if run is not None
+            else self.execution.resolve_target(record.snapshot.execution_target_id)
+        )
         return (
             describe_execution_target(binding),
             assess_plan_for_target(record.snapshot, binding),

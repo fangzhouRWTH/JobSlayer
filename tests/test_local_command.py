@@ -13,6 +13,7 @@ from jobslayer.adapters.local_command import (
     GovernedLocalCommandRunner,
 )
 from jobslayer.domain.models import (
+    CommandEnvironmentVariable,
     CommandPolicy,
     CommandRequest,
     CommandRule,
@@ -233,6 +234,50 @@ class GovernedLocalCommandRunnerTests(unittest.TestCase):
                 os.environ[variable] = previous
 
         self.assertEqual(result.stdout, f"missing{os.linesep}")
+
+    def test_injects_only_explicit_content_bound_environment(self) -> None:
+        variable = CommandEnvironmentVariable(
+            name="ANYGINE_SOURCE_ROOT",
+            value="/content-bound/anygine",
+            source_id="anygine-source",
+            source_sha256="a" * 64,
+        )
+        argv = (
+            sys.executable,
+            "-c",
+            "import os; print(os.environ['ANYGINE_SOURCE_ROOT'])",
+        )
+        request = self.request_for(argv).model_copy(
+            update={"environment": (variable,)}
+        )
+
+        result = self.runner.run(
+            self.manifest,
+            request,
+            self.policy_for(argv),
+        )
+
+        self.assertEqual(result.stdout, f"/content-bound/anygine{os.linesep}")
+        self.assertEqual(result.environment, (variable,))
+
+    def test_rejects_override_of_runner_owned_environment(self) -> None:
+        variable = CommandEnvironmentVariable(
+            name="HOME",
+            value="/not-allowed",
+            source_id="bad-home",
+            source_sha256="b" * 64,
+        )
+        argv = (sys.executable, "verify.py")
+        request = self.request_for(argv).model_copy(
+            update={"environment": (variable,)}
+        )
+
+        with self.assertRaises(CommandPolicyError):
+            self.runner.run(
+                self.manifest,
+                request,
+                self.policy_for(argv),
+            )
 
     def test_reports_a_non_accepted_exit_code_as_failed(self) -> None:
         argv = (sys.executable, "-c", "import sys; sys.exit(7)")

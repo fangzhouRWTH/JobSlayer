@@ -3,6 +3,10 @@
 > 这是 2026-08-07 首次真实运行的证据快照。运行结果与当时限制保持原样；当前认证、
 > 预算和隔离入口已由 ADR-0025/0026 取代旧的自由文本授权。不要用原 run/workspace ID
 > 重放或覆盖历史记录。
+>
+> 2026-09-01 起，文中旧滤波 task/profile/runbook 已随 BraveNewWorld 重置退出 current
+> checkout，仅存于 Git 历史与离线归档。下文命令只是当时记录，不是当前可执行手册；
+> 新任务使用 `runbooks/bnw-anygine-small-app-001-codex.json`。
 
 ## 1. 本轮结果
 

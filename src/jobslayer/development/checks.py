@@ -137,38 +137,16 @@ class DevelopmentCheckRunner:
                 ),
             ),
             DevelopmentCheckStep(
-                step_id="runbook",
-                description="BraveNewWorld task, profile, and replay input binding",
-                argv=(
-                    python,
-                    "-m",
-                    "jobslayer",
-                    "validate-runbook",
-                    "runbooks/bnw-scenario-slow-001.json",
-                ),
-            ),
-            DevelopmentCheckStep(
-                step_id="codex-runbook",
-                description="BraveNewWorld real Codex task and validation binding",
-                argv=(
-                    python,
-                    "-m",
-                    "jobslayer",
-                    "validate-runbook",
-                    "runbooks/bnw-filter-demo-001-codex.json",
-                ),
-            ),
-            DevelopmentCheckStep(
-                step_id="codex-suspension-runbook",
+                step_id="anygine-app-runbook",
                 description=(
-                    "BraveNewWorld suspension target, budgets, and validation binding"
+                    "BraveNewWorld Anygine App target, budgets, and contract binding"
                 ),
                 argv=(
                     python,
                     "-m",
                     "jobslayer",
                     "validate-runbook",
-                    "runbooks/bnw-suspension-visualization-001-codex.json",
+                    "runbooks/bnw-anygine-small-app-001-codex.json",
                 ),
             ),
             DevelopmentCheckStep(

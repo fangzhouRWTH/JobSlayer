@@ -90,7 +90,8 @@ class UnifiedEntrypointTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["display_name"], "BraveNewWorld")
-        self.assertIn("控制理论", payload["purpose"])
+        self.assertIn("Anygine", payload["purpose"])
+        self.assertIn("任务规划", payload["purpose"])
 
     def test_readiness_command_reports_missing_evidence_with_a_nonzero_exit(self) -> None:
         with TemporaryDirectory() as state_root:

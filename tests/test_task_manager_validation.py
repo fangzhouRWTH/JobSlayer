@@ -11,6 +11,10 @@ import unittest
 
 from jobslayer.adapters.git_workspace import GitWorktreeManager
 from jobslayer.adapters.local_artifacts import LocalArtifactRegistry
+from jobslayer.adapters.local_dependency_attachments import (
+    directory_sha256,
+    resolve_local_dependency_attachment,
+)
 from jobslayer.adapters.task_manager_validation import (
     LocalTaskManagerValidationRunner,
     TaskManagerValidationError,
@@ -25,6 +29,7 @@ from jobslayer.domain.models import (
     ValidationProfile,
     WorkspaceSpec,
 )
+from jobslayer.application.runbook import LocalDependencyAttachmentConfig
 from jobslayer.orchestration import TaskPlanNode, TaskPlanNodeKind
 from jobslayer.task_manager import ManagedExecutionRequest, ManagedExecutionStatus
 from tests.task_manager_fixtures import fixture_execution_binding
@@ -40,7 +45,10 @@ class LocalTaskManagerValidationRunnerTests(unittest.TestCase):
         self._git("config", "user.name", "JobSlayer Test")
         self._git("config", "user.email", "jobslayer@example.invalid")
         (self.repository / "verify.py").write_text(
-            "print('deterministic validation passed')\n",
+            "import os\n"
+            "print('deterministic validation passed')\n"
+            "if value := os.getenv('FIXTURE_DEPENDENCY_ROOT'):\n"
+            "    print(value)\n",
             encoding="utf-8",
         )
         self._git("add", ".")
@@ -214,6 +222,38 @@ class LocalTaskManagerValidationRunnerTests(unittest.TestCase):
         with self.assertRaises(TaskManagerValidationError):
             self.runner.start_or_locate(self.request)
         self.assertEqual(tuple((self.state_root / "validations").iterdir()), ())
+
+    def test_injects_bound_dependency_and_rejects_post_run_drift(self) -> None:
+        dependency = self.root / "dependency"
+        dependency.mkdir()
+        (dependency / "fixture.txt").write_text("fixed\n", encoding="utf-8")
+        attachment = resolve_local_dependency_attachment(
+            LocalDependencyAttachmentConfig(
+                attachment_id="fixture-dependency",
+                kind="directory",
+                environment_variable="FIXTURE_DEPENDENCY_ROOT",
+                expected_sha256=directory_sha256(dependency),
+            ),
+            dependency,
+        )
+        binding = self.binding.model_copy(
+            update={"dependency_attachments": (attachment,)}
+        )
+        request = self.request.model_copy(update={"execution_binding": binding})
+
+        reference = self.runner.start_or_locate(request)
+        evidence = self.runner.collect_verification_evidence(reference)
+
+        self.assertEqual(evidence.dependency_attachments, (attachment,))
+        self.assertEqual(
+            evidence.validation_checks[0].result.environment,
+            (attachment.command_environment(),),
+        )
+        self.assertIn(str(dependency.resolve()), evidence.validation_checks[0].result.stdout)
+
+        (dependency / "fixture.txt").write_text("drifted\n", encoding="utf-8")
+        with self.assertRaises(TaskManagerValidationError):
+            self.runner.collect_verification_evidence(reference)
 
 
 if __name__ == "__main__":

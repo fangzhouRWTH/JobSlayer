@@ -111,10 +111,57 @@ from jobslayer.orchestration.web import (
 )
 from jobslayer.orchestration import PlanningAgent
 from jobslayer.evaluation import ExecutorComparisonError
+from jobslayer.task_manager.binding import describe_execution_target
 
 
 def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _task_manager_dependency_paths(values: tuple[str, ...]) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
+    for value in values:
+        attachment_id, separator, raw_path = value.partition("=")
+        if (
+            not separator
+            or not attachment_id
+            or not raw_path
+            or not attachment_id[0].isalnum()
+            or any(
+                not (character.isalnum() or character in "._-")
+                for character in attachment_id
+            )
+        ):
+            raise ValueError(
+                "TaskManager dependency attachments must use ID=PATH"
+            )
+        if attachment_id in paths:
+            raise ValueError(
+                f"duplicate TaskManager dependency attachment: {attachment_id}"
+            )
+        paths[attachment_id] = Path(raw_path).expanduser()
+    return paths
+
+
+def _task_manager_validation_environment(values: tuple[str, ...]) -> dict[str, str]:
+    environment: dict[str, str] = {}
+    for value in values:
+        name, separator, raw_value = value.partition("=")
+        if (
+            not separator
+            or not name
+            or not raw_value
+            or not name[0].isalpha()
+            or name.upper() != name
+            or any(not (character.isalnum() or character == "_") for character in name)
+        ):
+            raise ValueError(
+                "TaskManager validation environments must use UPPERCASE_NAME=VALUE"
+            )
+        if name in environment:
+            raise ValueError(f"duplicate TaskManager validation environment: {name}")
+        environment[name] = raw_value
+    return environment
 
 
 def _authenticated_principal(
@@ -232,6 +279,44 @@ def _cmd_validate_runbook(path: Path, *, repository_root: Path | None) -> int:
         )
     )
     return 0
+
+
+def _cmd_inspect_task_manager_target(
+    path: Path,
+    *,
+    target_id: str,
+    repository_root: Path | None,
+    dependency_attachments: tuple[str, ...],
+    validation_environment: tuple[str, ...],
+) -> int:
+    try:
+        root = find_repository_root(repository_root)
+        registry = LocalTaskManagerExecutionTargetRegistry(
+            root,
+            {target_id: str(path)},
+            dependency_paths=_task_manager_dependency_paths(
+                dependency_attachments
+            ),
+            validation_environment=_task_manager_validation_environment(
+                validation_environment
+            ),
+        )
+        binding = registry.get(target_id)
+        target = describe_execution_target(binding)
+    except (
+        OSError,
+        ValidationError,
+        DevelopmentCheckConfigurationError,
+        RunbookError,
+        TestbedInspectionError,
+        ValueError,
+    ) as exc:
+        print(f"TaskManager target inspection failed: {exc}", file=sys.stderr)
+        return 1
+    payload = target.model_dump(mode="json")
+    payload["ready"] = target.local_baseline_ready and target.dependencies_ready
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0 if payload["ready"] else 1
 
 
 def _cmd_verify_journal(path: Path) -> int:
@@ -617,6 +702,8 @@ def _cmd_serve_task_orchestration(
     allow_external_task_execution: bool,
     allow_task_manager_local_validation: bool,
     allow_task_manager_checkpoint_integration: bool,
+    task_manager_dependency_attachment: tuple[str, ...],
+    task_manager_validation_environment: tuple[str, ...],
     planning_artifact_root: Path | None,
     codex_binary: str,
     codex_model: str | None,
@@ -659,10 +746,16 @@ def _cmd_serve_task_orchestration(
         execution_targets = LocalTaskManagerExecutionTargetRegistry(
             repository_root,
             {
-                "brave-new-world-suspension-v1": (
-                    "runbooks/bnw-suspension-visualization-001-codex.json"
+                "brave-new-world-anygine-app-v1": (
+                    "runbooks/bnw-anygine-small-app-001-codex.json"
                 )
             },
+            dependency_paths=_task_manager_dependency_paths(
+                task_manager_dependency_attachment
+            ),
+            validation_environment=_task_manager_validation_environment(
+                task_manager_validation_environment
+            ),
         )
         task_executor = None
         if allow_external_task_execution:
@@ -723,7 +816,7 @@ def _cmd_serve_task_orchestration(
             targets=execution_targets,
         )
         task_manager_execution.list_latest()
-        task_manager_execution.list_targets()
+        resolved_targets = task_manager_execution.list_targets()
         server = create_task_orchestration_server(
             service,
             principal,
@@ -749,13 +842,28 @@ def _cmd_serve_task_orchestration(
     host, actual_port = server.server_address[:2]
     api_url = f"http://{host}:{actual_port}/api/task-manager"
     legacy_api_url = f"http://{host}:{actual_port}/api/orchestration"
-    ui_url = "http://127.0.0.1:4173/#/task-manager"
+    ui_url = "http://127.0.0.1:4173/"
     print(f"TaskManager API: {api_url}")
     print(f"Legacy orchestration API: {legacy_api_url}")
     print(f"authenticated principal: {principal.subject_id}")
     print(f"planning adapter: {planning_agent.adapter_id}")
     print("append-only plan revisions; agent output remains a pending proposal")
-    print("execution target: BraveNewWorld suspension v1 (fixed bnw-0 baseline)")
+    print(
+        "execution target: BraveNewWorld Anygine small-App v1 "
+        "(fixed bnw-anygine-0 baseline)"
+    )
+    attached_dependencies = sum(
+        item.ready
+        for target in resolved_targets
+        for item in target.dependency_attachments
+    )
+    required_dependencies = sum(
+        len(target.dependency_attachments) for target in resolved_targets
+    )
+    print(
+        "dependency attachments: "
+        f"{attached_dependencies}/{required_dependencies} content-bound and ready"
+    )
     print(
         "plan-bound run assembly: enabled; durable local Codex executor: connected"
         if task_manager_execution.adapter_available
@@ -771,7 +879,10 @@ def _cmd_serve_task_orchestration(
         if task_manager_execution.validation_available
         else "policy-constrained local validation: not connected"
     )
-    print("Workbench: sh ./init.sh -- npm --prefix ui-framework run dev")
+    print(
+        "Task graph UI: sh ./init.sh -- npm --prefix ui-framework "
+        "run task-manager"
+    )
     print(f"Open after Vite starts: {ui_url}")
     if open_browser:
         webbrowser.open(ui_url)
@@ -1357,6 +1468,26 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     orchestration.add_argument(
+        "--task-manager-dependency-attachment",
+        action="append",
+        default=[],
+        metavar="ID=PATH",
+        help=(
+            "bind one operator-owned dependency path to its source-controlled "
+            "TaskManager attachment requirement; repeat for multiple dependencies"
+        ),
+    )
+    orchestration.add_argument(
+        "--task-manager-validation-environment",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+        help=(
+            "inject one non-secret runtime value only when the target runbook "
+            "source-control allowlists its name; repeat as needed"
+        ),
+    )
+    orchestration.add_argument(
         "--planning-artifact-root",
         type=Path,
         help="immutable raw planning-interaction artifact registry",
@@ -1386,6 +1517,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     orchestration.add_argument("--port", type=int, default=8780)
     orchestration.add_argument("--open-browser", action="store_true")
+
+    inspect_target = commands.add_parser(
+        "inspect-task-manager-target",
+        help="resolve one target and attest its local baseline/dependency deployment",
+    )
+    inspect_target.add_argument("path", type=Path)
+    inspect_target.add_argument("--root", type=Path)
+    inspect_target.add_argument("--target-id", required=True)
+    inspect_target.add_argument(
+        "--dependency-attachment",
+        action="append",
+        default=[],
+        metavar="ID=PATH",
+    )
+    inspect_target.add_argument(
+        "--validation-environment",
+        action="append",
+        default=[],
+        metavar="NAME=VALUE",
+    )
 
     create_identity_key = commands.add_parser(
         "create-local-identity-key",
@@ -1612,6 +1763,14 @@ def main(argv: list[str] | None = None) -> int:
             arguments.path,
             repository_root=arguments.root,
         )
+    if arguments.command == "inspect-task-manager-target":
+        return _cmd_inspect_task_manager_target(
+            arguments.path,
+            target_id=arguments.target_id,
+            repository_root=arguments.root,
+            dependency_attachments=tuple(arguments.dependency_attachment),
+            validation_environment=tuple(arguments.validation_environment),
+        )
     if arguments.command == "verify-journal":
         return _cmd_verify_journal(arguments.path)
     if arguments.command == "review-decision":
@@ -1662,6 +1821,12 @@ def main(argv: list[str] | None = None) -> int:
             ),
             allow_task_manager_checkpoint_integration=(
                 arguments.allow_task_manager_checkpoint_integration
+            ),
+            task_manager_dependency_attachment=tuple(
+                arguments.task_manager_dependency_attachment
+            ),
+            task_manager_validation_environment=tuple(
+                arguments.task_manager_validation_environment
             ),
             planning_artifact_root=arguments.planning_artifact_root,
             codex_binary=arguments.codex_binary,

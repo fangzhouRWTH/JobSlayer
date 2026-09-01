@@ -104,6 +104,30 @@ class GovernedLocalCommandRunner:
             raise CommandPolicyError("request and workspace identifiers do not match")
         if request.task_id != manifest.task_id:
             raise CommandPolicyError("request and workspace tasks do not match")
+        protected_environment = {
+            "PATH",
+            "HOME",
+            "TMPDIR",
+            "TEMP",
+            "TMP",
+            "USERPROFILE",
+            "LANG",
+            "LC_ALL",
+            "GIT_TERMINAL_PROMPT",
+            "PYTHONNOUSERSITE",
+            "SYSTEMROOT",
+            "WINDIR",
+            "COMSPEC",
+            "PATHEXT",
+        }
+        attempted_overrides = protected_environment.intersection(
+            item.name for item in request.environment
+        )
+        if attempted_overrides:
+            raise CommandPolicyError(
+                "command environment cannot override runner-owned variables: "
+                + ", ".join(sorted(attempted_overrides))
+            )
 
         self.workspace_manager.inspect(manifest)
         rule = self._matching_rule(request, policy)
@@ -132,6 +156,9 @@ class GovernedLocalCommandRunner:
         started_clock = time.monotonic()
         with tempfile.TemporaryDirectory(prefix="jobslayer-command-") as runtime_home:
             environment = self._minimal_environment(Path(runtime_home))
+            environment.update(
+                {item.name: item.value for item in request.environment}
+            )
             try:
                 process = subprocess.Popen(
                     list(request.argv),
@@ -202,6 +229,7 @@ class GovernedLocalCommandRunner:
             rule_id=rule.rule_id,
             argv=request.argv,
             cwd=request.cwd,
+            environment=request.environment,
             status=status,
             exit_code=exit_code,
             started_at=started_at,
