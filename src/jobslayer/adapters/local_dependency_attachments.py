@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 
 from jobslayer.application.runbook import LocalDependencyAttachmentConfig
+from jobslayer.execution.platforms import local_host_platform
 from jobslayer.task_manager.binding import TaskManagerDependencyAttachment
 
 
@@ -18,15 +19,36 @@ class LocalDependencyAttachmentError(RuntimeError):
 def resolve_local_dependency_attachment(
     config: LocalDependencyAttachmentConfig,
     configured_path: str | os.PathLike[str] | None,
+    *,
+    _pinned_expected_sha256: str | None = None,
 ) -> TaskManagerDependencyAttachment:
+    host_platform = (
+        local_host_platform() if config.binding_mode == "run_pinned" else None
+    )
+    expected_sha256 = (
+        config.expected_sha256
+        if config.binding_mode == "source_pinned"
+        else _pinned_expected_sha256
+    )
     common = {
         "attachment_id": config.attachment_id,
         "kind": config.kind,
         "environment_variable": config.environment_variable,
-        "expected_sha256": config.expected_sha256,
+        "binding_mode": config.binding_mode,
+        "expected_sha256": expected_sha256,
+        "host_platform": host_platform,
+        "supported_platforms": config.supported_platforms,
         "expected_revision": config.expected_revision,
         "repository_urls": config.repository_urls,
     }
+    if host_platform is not None and host_platform not in config.supported_platforms:
+        return TaskManagerDependencyAttachment(
+            **common,
+            issue=(
+                f"host platform {host_platform!r} is not allowed by the "
+                "source-controlled attachment requirement"
+            ),
+        )
     if configured_path is None:
         return TaskManagerDependencyAttachment(
             **common,
@@ -81,21 +103,24 @@ def resolve_local_dependency_attachment(
                         "--untracked-files=all",
                     ).strip()
                 )
-                observed_sha256 = _git_archive_sha256(root, observed_revision)
+                observed_sha256 = _git_tree_sha256(root, observed_revision)
             else:
                 observed_sha256 = _directory_sha256(root)
                 observed_revision = None
                 observed_repository_url = None
                 working_tree_clean = None
+        if config.binding_mode == "run_pinned" and expected_sha256 is None:
+            expected_sha256 = observed_sha256
         issue = _identity_issue(
             config,
+            expected_sha256=expected_sha256,
             observed_sha256=observed_sha256,
             observed_revision=observed_revision,
             observed_repository_url=observed_repository_url,
             working_tree_clean=working_tree_clean,
         )
         return TaskManagerDependencyAttachment(
-            **common,
+            **(common | {"expected_sha256": expected_sha256}),
             observed_sha256=observed_sha256,
             observed_revision=observed_revision,
             observed_repository_url=observed_repository_url,
@@ -130,12 +155,26 @@ def reinspect_local_dependency_attachment(
         attachment_id=attachment.attachment_id,
         kind=attachment.kind,
         environment_variable=attachment.environment_variable,
-        expected_sha256=attachment.expected_sha256,
+        binding_mode=attachment.binding_mode,
+        expected_sha256=(
+            attachment.expected_sha256
+            if attachment.binding_mode == "source_pinned"
+            else None
+        ),
+        supported_platforms=attachment.supported_platforms,
         expected_revision=attachment.expected_revision,
         repository_urls=attachment.repository_urls,
         expose_relative_path=relative,
     )
-    return resolve_local_dependency_attachment(config, root)
+    return resolve_local_dependency_attachment(
+        config,
+        root,
+        _pinned_expected_sha256=(
+            attachment.expected_sha256
+            if attachment.binding_mode == "run_pinned"
+            else None
+        ),
+    )
 
 
 def directory_sha256(path: str | os.PathLike[str]) -> str:
@@ -144,15 +183,24 @@ def directory_sha256(path: str | os.PathLike[str]) -> str:
     return _directory_sha256(Path(path).resolve(strict=True))
 
 
+def git_tree_sha256(path: str | os.PathLike[str], revision: str) -> str:
+    """Hash Git tree identity without archive/container platform differences."""
+
+    return _git_tree_sha256(Path(path).resolve(strict=True), revision)
+
+
 def _identity_issue(
     config: LocalDependencyAttachmentConfig,
     *,
+    expected_sha256: str | None,
     observed_sha256: str,
     observed_revision: str | None,
     observed_repository_url: str | None,
     working_tree_clean: bool | None,
 ) -> str | None:
-    if observed_sha256 != config.expected_sha256:
+    if expected_sha256 is None:
+        return "attachment has no pinned content identity"
+    if observed_sha256 != expected_sha256:
         return "content SHA-256 does not match the source-controlled requirement"
     if config.kind == "git_checkout":
         assert config.expected_revision is not None
@@ -204,28 +252,19 @@ def _directory_sha256(root: Path) -> str:
     return digest.hexdigest()
 
 
-def _git_archive_sha256(root: Path, revision: str) -> str:
-    process = subprocess.Popen(
-        ["git", "-C", str(root), "archive", "--format=tar", revision],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+def _git_tree_sha256(root: Path, revision: str) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), "ls-tree", "--full-tree", "-r", "-z", revision],
+        check=False,
+        capture_output=True,
     )
-    assert process.stdout is not None
-    assert process.stderr is not None
-    digest = hashlib.sha256()
-    try:
-        while chunk := process.stdout.read(1_048_576):
-            digest.update(chunk)
-        stderr = process.stderr.read()
-        returncode = process.wait()
-    finally:
-        process.stdout.close()
-        process.stderr.close()
-    if returncode != 0:
+    if result.returncode != 0:
         raise LocalDependencyAttachmentError(
-            "could not hash Git attachment: "
-            + stderr.decode("utf-8", errors="replace").strip()
+            "could not inspect Git attachment tree: "
+            + result.stderr.decode("utf-8", errors="replace").strip()
         )
+    digest = hashlib.sha256(b"jobslayer-git-tree-v1\0")
+    digest.update(result.stdout)
     return digest.hexdigest()
 
 
@@ -243,6 +282,7 @@ def _git(root: Path, *arguments: str) -> str:
 
 __all__ = [
     "directory_sha256",
+    "git_tree_sha256",
     "LocalDependencyAttachmentError",
     "reinspect_local_dependency_attachment",
     "resolve_local_dependency_attachment",

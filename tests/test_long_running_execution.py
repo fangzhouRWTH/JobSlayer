@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 import json
 from pathlib import Path
@@ -576,23 +577,24 @@ class LongRunningExecutionTests(unittest.TestCase):
             policy=self.policy(),
             now=self.now,
         )
-        with sqlite3.connect(self.long_runs_path) as connection:
+        with closing(sqlite3.connect(self.long_runs_path)) as connection:
             with self.assertRaisesRegex(sqlite3.DatabaseError, "append-only"):
                 connection.execute(
                     "UPDATE long_run_events SET event_json = event_json "
                     "WHERE run_id = 'run-1' AND sequence = 1"
                 )
 
-        with sqlite3.connect(self.long_runs_path) as connection:
-            row = connection.execute(
-                "SELECT handle_json FROM long_runs WHERE run_id = 'run-1'"
-            ).fetchone()
-            payload = json.loads(row[0])
-            payload["task_id"] = "task-tampered"
-            connection.execute(
-                "UPDATE long_runs SET handle_json = ? WHERE run_id = 'run-1'",
-                (json.dumps(payload),),
-            )
+        with closing(sqlite3.connect(self.long_runs_path)) as connection:
+            with connection:
+                row = connection.execute(
+                    "SELECT handle_json FROM long_runs WHERE run_id = 'run-1'"
+                ).fetchone()
+                payload = json.loads(row[0])
+                payload["task_id"] = "task-tampered"
+                connection.execute(
+                    "UPDATE long_runs SET handle_json = ? WHERE run_id = 'run-1'",
+                    (json.dumps(payload),),
+                )
         with self.assertRaisesRegex(
             LongRunIntegrityError,
             "projection does not match event truth",

@@ -237,6 +237,22 @@ def _state_matches(path: Path, expected: Mapping[str, Any]) -> bool:
     return current is not None and all(current.get(key) == value for key, value in expected.items())
 
 
+def _python_state_matches(path: Path, expected: Mapping[str, Any]) -> bool:
+    """Accept an initialized Python environment with a superset of requested extras."""
+
+    current = _read_json(path)
+    if current is None:
+        return False
+    for key, value in expected.items():
+        if key == "extras":
+            installed = current.get("extras")
+            if not isinstance(installed, list) or not set(value).issubset(installed):
+                return False
+        elif current.get(key) != value:
+            return False
+    return True
+
+
 class BootstrapManager:
     def __init__(
         self,
@@ -478,7 +494,7 @@ class BootstrapManager:
                 "use a separate checkout per platform"
             )
         dependency_probe_ok = False
-        if not self.force and _state_matches(state_path, expected_state):
+        if not self.force and _python_state_matches(state_path, expected_state):
             try:
                 _run(
                     (self.venv_python, "-m", "pip", "check"),
@@ -618,7 +634,7 @@ class BootstrapManager:
                     capture=True,
                     timeout=30,
                 )
-                python_ready = _state_matches(
+                python_ready = _python_state_matches(
                     self.venv_root / STATE_FILENAME,
                     {
                         "schema_version": SCHEMA_VERSION,
@@ -750,7 +766,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--extra",
         dest="extras",
         action="append",
-        choices=("observability", "postgres"),
+        choices=("desktop", "observability", "postgres"),
         default=[],
         help="install one optional Python dependency group; may be repeated",
     )

@@ -49,5 +49,7 @@
 | [ADR-0045](0045-focused-serial-task-manager-and-anygine-app-testbed.md) | Accepted | 中期主线收紧为串行 TaskManager，并把 BraveNewWorld 重置为固定 Anygine 公共接口的小 App 测试床 |
 | [ADR-0046](0046-content-bound-local-dependency-attachments.md) | Accepted | 用源控需求、operator 路径、内容摘要和前后漂移证据将 Anygine 依赖接入隔离 validation |
 | [ADR-0047](0047-single-screen-task-graph-preview.md) | Accepted | 当前 Web App 只装配单屏任务图预览，以左 2/3 DAG 和右 1/3 节点详情/Agent 对话验证规划交互 |
+| [ADR-0048](0048-cross-platform-local-target-deployment.md) | Accepted | 用平台稳定 Git 树摘要、run-pinned 生成依赖和显式平台 argv 闭合本地目标的 Windows/Linux 部署 |
+| [ADR-0049](0049-single-command-cross-platform-desktop-launch.md) | Accepted | 用一个 Python 入口完成初始化、最小权限身份、API/UI 健康编排、原生 WebView 与进程树回收 |
 
 新增或取代 ADR 时，同时更新本索引和 `docs/DEVELOPMENT_LOG.md`。Accepted ADR 不通过静默编辑改变原决定；需要改变方向时新增 superseding ADR。

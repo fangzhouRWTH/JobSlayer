@@ -21,6 +21,19 @@ Python 3.11+（唯一系统前置条件）
 
 ## 2. 快速开始
 
+如果目标是直接打开 TaskManager，而不是单独操作开发工具链，Windows/Linux 推荐使用根目录单一
+应用入口；它会调用本页初始化协议并继续启动 API、UI 与原生桌面窗口：
+
+```powershell
+py -3 start.py
+```
+
+```bash
+python3 start.py
+```
+
+下列 `init` 入口保留给开发、CI、分组件初始化和高级手工服务编排。
+
 Windows PowerShell 或 CMD：
 
 ```powershell
@@ -56,6 +69,9 @@ sh ./init.sh -- npm --prefix ui-framework run dev
 ```
 
 只有显式列出的 `pyproject.toml` optional dependency group 可以安装。
+`desktop` 组由 `start.py` 自动选择：Windows 安装 pywebview/WebView2 binding，Linux 安装
+pywebview Qt backend；也可手工执行 `.\init.cmd --extra desktop` 或
+`sh ./init.sh --extra desktop`。
 
 ### Node/npm
 
@@ -167,9 +183,13 @@ npm
 
 ## 8. 与正式入口的关系
 
-`init.cmd` / `init.sh` 是“未准备环境时”的唯一初始化入口；`jobslayer.cmd` / `jobslayer` 仍是环境已准备后的正式应用入口：
+`start.py` 是普通 TaskManager 桌面应用入口；`init.cmd` / `init.sh` 是未准备环境时的开发初始化
+入口；`jobslayer.cmd` / `jobslayer` 是环境已准备后的治理 CLI：
 
 ```text
+start.py
+        -> init protocol + planner session + API/Vite + native WebView
+
 init.cmd / init.sh
         -> tools + .venv + project dependencies
 

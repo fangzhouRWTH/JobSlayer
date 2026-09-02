@@ -1,5 +1,26 @@
 # JobSlayer 统一入口
 
+## 单命令桌面应用
+
+普通 Windows/Linux 用户从源码 checkout 启动 TaskManager 时只需：
+
+```powershell
+py -3 start.py
+```
+
+```bash
+python3 start.py
+```
+
+`start.py` 先复用 manifest 初始化器检测并准备 `.venv`、Node/npm、UI 和 desktop extra，再以仅含
+`planner` 角色的临时本地身份启动 TaskManager API 与 Vite UI。只有 API 本身和 Vite same-origin
+proxy 都健康后，才打开独立 WebView2/Qt 窗口。关闭窗口会回收本次拥有的两个进程树和临时 session；
+它不会自动启用外部模型、执行、验证、审批或集成能力。
+
+只读环境检查、服务烟测和显式无窗口模式分别为 `python start.py --check`、
+`python start.py --smoke-test` 和 `python start.py --headless`。高级治理操作仍使用下述 `jobslayer`
+CLI，不把便利启动器当成权限旁路。
+
 ## 环境初始化与正式入口分层
 
 未准备的源码 checkout 先运行 `init.cmd`（Windows）或 `sh ./init.sh`（POSIX）。
@@ -228,6 +249,7 @@ $env:JOBSLAYER_PYTHON = 'C:\Python312\python.exe'
 
 | 文件/模块 | 责任 |
 |---|---|
+| `/start.py` | Windows/Linux 单命令初始化、服务健康编排与桌面 App 入口 |
 | `/jobslayer` | 仓库可执行入口、解释器选择和源码 bootstrap |
 | `/jobslayer.cmd` | Windows 仓库入口、解释器发现和退出码透传 |
 | `/init.sh`、`/init.cmd` | 未准备 checkout 的平台 Python 发现与统一初始化转发 |
@@ -236,6 +258,7 @@ $env:JOBSLAYER_PYTHON = 'C:\Python312\python.exe'
 | `jobslayer.launcher` | 源码、模块和安装后脚本共用的稳定公共入口 |
 | `jobslayer.cli` | 命令 schema 与功能分发 |
 | `jobslayer.development.checks` | 版本化开发验证步骤与退出汇总 |
+| `jobslayer.desktop.app` | 最小权限临时身份、API/Vite 进程组、健康检查、WebView 与清理生命周期 |
 | `jobslayer.recovery` | 提供方无关的恢复分类与安全恢复协议 |
 | `jobslayer.supervision.*` | UI/session/决定能力，不进入 launcher 环境逻辑 |
 | `jobslayer.integration.*` | 提供方无关的源码集成协议 |
@@ -255,6 +278,6 @@ CPU、内存、进程数、wall timeout 与进程树。原生 Windows 目前没�
 固定 patch 通过二进制 stdin 进入 Git，避免
 Windows 文本模式改写证据字节；源控 patch 文件也禁止行尾转换。
 
-外部测试床的验证 argv 是受治理输入，JobSlayer 不按操作系统偷偷改写。当前
-BraveNewWorld profile 明确登记 `./bnw`，所以 JobSlayer 自身的 Windows 开发
-门禁已经可用，并不代表该外部 POSIX 命令已自动获得 Windows 实现。
+外部测试床的验证 argv 是受治理输入，JobSlayer 不按操作系统偷偷改写。validation profile 可为
+同一 check 显式登记平台 argv；当前 BraveNewWorld profile 在 POSIX 授权 `./bnw`，在 Windows
+授权 `.\bnw.cmd`。领域校验会逐平台复核 check/policy 一致性，未登记的平台变体仍失败关闭。

@@ -20,6 +20,7 @@ from jobslayer.adapters.local_dependency_attachments import (
 from jobslayer.adapters.local_command import GovernedLocalCommandRunner
 from jobslayer.artifacts.registry import ArtifactRegistry
 from jobslayer.domain.models import CommandRequest, CommandStatus, WorkspaceManifest
+from jobslayer.execution.platforms import local_host_platform
 from jobslayer.orchestration import TaskPlanNodeKind
 from jobslayer.task_manager.execution import (
     ManagedExecutionObservation,
@@ -349,14 +350,16 @@ class LocalTaskManagerValidationRunner:
         evidence: list[ManagedValidationCheckEvidence] = []
         profile = request.execution_binding.validation_profile
         environment = request.execution_binding.command_environment()
+        platform = local_host_platform()
         for check in profile.checks:
+            argv = check.argv_for(platform)
             result = runner.run(
                 workspace,
                 CommandRequest(
                     command_id=f"validation-{check.check_id}",
                     workspace_id=workspace.workspace_id,
                     task_id=request.execution_binding.task.task_id,
-                    argv=check.argv,
+                    argv=argv,
                     cwd=check.cwd,
                     timeout_seconds=check.timeout_seconds,
                     environment=environment,

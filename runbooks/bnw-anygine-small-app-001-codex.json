@@ -9,7 +9,7 @@
       "attachment_id": "anygine-source",
       "kind": "git_checkout",
       "environment_variable": "ANYGINE_SOURCE_ROOT",
-      "expected_sha256": "8845cbbe2c3936dce4bfda4b84bd949995ac77089ccaf8ec3a92fb5b179c62a7",
+      "expected_sha256": "b90178fc33169ce086cdddc406d280c78e0b64f82d3efaf2e9b733e8114a79ff",
       "expected_revision": "28b4934c24fdad6b8f45b945a89a6ada51703f5d",
       "repository_urls": [
         "https://github.com/fangzhouRWTH/Anygine.git",
@@ -21,7 +21,8 @@
       "attachment_id": "anygine-conan-toolchain",
       "kind": "directory",
       "environment_variable": "ANYGINE_CONAN_TOOLCHAIN",
-      "expected_sha256": "cabbe349eeb78c4ea63d0f4a75b9f36cead145f0ecba33545e685ea0a88fbaf9",
+      "binding_mode": "run_pinned",
+      "supported_platforms": ["linux", "windows"],
       "expose_relative_path": "conan_toolchain.cmake"
     }
   ],
@@ -49,7 +50,7 @@
       "maximum_context_bytes": 8388608,
       "output_schema": "none"
     },
-    "prompt": "Implement only the concrete small-App node and acceptance criteria from the finalized TaskManager DAG in this BraveNewWorld checkout. Obey AGENTS.md and the source-controlled task contract. Keep BraveNewWorld as the top-level CMake consumer; use only the pinned Anygine public targets, do not copy or edit engine sources, and do not add private include paths or implicit network fetches. Keep the App bounded and thin, add or update its Config/Apps manifest and deterministic contract checks, and append accurate documentation and development evidence. Run ./bnw contract and inspect the complete Git diff. Do not access operator-owned Anygine/toolchain paths during implementation; JobSlayer injects their content-bound attachment environments only into the separately authorized validation node, where ./bnw test --jobs 4 and ./bnw run --jobs 4 produce structured evidence. Leave changes uncommitted for JobSlayer to collect. Do not claim approval, integration, completion, merge, push, deployment, or build/runtime evidence that was not actually observed."
+    "prompt": "Implement only the concrete small-App node and acceptance criteria from the finalized TaskManager DAG in this BraveNewWorld checkout. Obey AGENTS.md and the source-controlled task contract. Keep BraveNewWorld as the top-level CMake consumer; use only the pinned Anygine public targets, do not copy or edit engine sources, and do not add private include paths or implicit network fetches. Keep the App bounded and thin, add or update its Config/Apps manifest and deterministic contract checks, and append accurate documentation and development evidence. Run the source-controlled platform launcher (`./bnw contract` on POSIX or `.\\bnw.cmd contract` on Windows) and inspect the complete Git diff. Do not access operator-owned Anygine/toolchain paths during implementation; JobSlayer injects their content-bound attachment environments only into the separately authorized validation node, where the explicit platform variants of `bnw test --jobs 4` and `bnw run --jobs 4` produce structured evidence. Leave changes uncommitted for JobSlayer to collect. Do not claim approval, integration, completion, merge, push, deployment, or build/runtime evidence that was not actually observed."
   },
   "executor": {
     "adapter": "codex_cli",

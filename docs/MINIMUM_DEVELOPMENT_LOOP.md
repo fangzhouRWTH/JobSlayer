@@ -55,8 +55,9 @@ Draft → Planned → Implementing → Verifying → Reviewing → MergeReview
 拒绝并要求人工处理；恢复器不会覆盖可疑文件或重复执行 Agent、验证和审查。
 
 Windows PowerShell 使用 `.\jobslayer.cmd` 替换上述 `./jobslayer`。控制平面、
-临时 Git 仓库闭环和完整开发检查可原生运行；本节现成 BraveNewWorld runbook
-仍调用测试床的 `./bnw`，实际执行它时需要 POSIX 兼容环境。
+临时 Git 仓库闭环和完整开发检查可原生运行；BraveNewWorld profile 已显式将 POSIX `./bnw`
+映射为源控授权的 Windows `.\bnw.cmd`，不要求 WSL。真实 C++/GPU validation 仍要求操作者绑定
+当前平台准备好的 Anygine source、Conan toolchain 和图形/Vulkan 主机前置条件。
 
 `build-phase0-corpus` 从 `corpora/phase0-foundation-v1.json` 在新的忽略目录中
 重建 21 个真实 run，并拒绝覆盖既有输出。它用于自动回归且明确标记 fixture；
@@ -84,11 +85,13 @@ issuer、session、actor、decision kind、策略版本和有效期。key/sessio
 
 ## BraveNewWorld 当前基线
 
-- 本地仓库：`/home/fangzhou/projects/JobSlayer/TestProjects/BraveNewWorld`
+- 本地仓库：仓库根相对路径 `../TestProjects/BraveNewWorld`；当前 Windows 部署为
+  `D:\projects\JobSlayer\TestProjects\BraveNewWorld`
 - Git 地址：`https://github.com/fangzhouRWTH/BraveNewWorld.git`
 - 当前固定基线：`e7bff4aceca5dee998d0db1dc1c50e4b935fabda` / `bnw-anygine-0`
 - 当前 target：`brave-new-world-anygine-app-v1`
-- 当前 validation gates：`./bnw contract`、`./bnw test --jobs 4`、`./bnw run --jobs 4`
+- 当前 validation gates：POSIX 为 `./bnw contract/test/run`，Windows 为对应
+  `.\bnw.cmd contract/test/run` 显式变体
 
 旧滤波/悬架 run 仍可作为追加式历史证据读取，但其源码 worktree 已在完整归档后移除，不再是当前
 可集成候选。下一次体验应从 TaskManager 新建具体 Anygine 小 App 任务；启动 API 时

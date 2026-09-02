@@ -3476,3 +3476,118 @@ ADR-0035 的 lease/checkpoint/recovery 控制面。随后接 verifier/reviewer/h
 4. 本轮有意只做预览/讨论 UI，因此操作者暂时不能从页面固化或执行 DAG；相应受认证 API、权限、
    Kernel、验证和审批链仍完整存在。下一步先加强 running/blocked/next-ready 视觉焦点、候选图 diff
    与节点对话焦点保持，再以串行 coordinator 设计渐进披露的唯一下一动作。
+
+## DEV-2026-09-03-04 — 上级 BraveNewWorld 同步与原生 Windows 目标部署修复
+
+- 状态：完成（JobSlayer Windows 统一门禁通过；外部原生构建仍受 Vulkan SDK 许可前置条件约束）
+- 类型：external testbed sync、cross-platform command contract、dependency binding、Windows evidence
+- 关联决策：[ADR-0048](adr/0048-cross-platform-local-target-deployment.md)
+
+### 现场与决定
+
+1. 当前 JobSlayer checkout 干净，但完整 Windows 门禁为 6/7：297 项中 3 failure、1 error。确认
+   `../TestProjects/BraveNewWorld` 仍停在旧 `fb49bf6`，本地 tracking ref 未 fetch；Anygine 只有含用户
+   未提交修改的 `Anygine_main`，而 2026-09-01 attachment/profile 只按 Linux 目录与 argv 验证。
+2. BraveNewWorld 在 clean 检查后 fetch，并以 `--ff-only` 更新到发布基线
+   `e7bff4aceca5dee998d0db1dc1c50e4b935fabda` / `bnw-anygine-0`。旧版本遗留的未跟踪 `.venv`/`src`
+   没有删除，已移动到可恢复归档
+   `D:\projects\JobSlayer\TestProjects\Archive\BraveNewWorld-pre-anygine-windows-sync-20260903`。
+3. 保留用户脏的 `Anygine_main` 不动，从同一 repository 创建固定 commit `28b4934c...` 的 detached
+   `D:\projects\Anygine\Anygine_JobSlayer`；复用已有 Conan 2.31.2，在其忽略目录成功生成
+   `build\conan-windows-debug` MSVC toolchain。
+4. Git attachment 摘要从平台相关 tar 字节改为版本化 Git tree 摘要。Conan 生成目录改为仅允许
+   Linux/Windows 的 `run_pinned`：装配时固定实际哈希，验证前后继续拒绝漂移。
+5. command policy/check 新增显式平台 argv；BraveNewWorld 在 Windows 授权 `.\bnw.cmd`，不对未知
+   命令做扩展名猜测。文本投影统一为 LF，raw byte count/hash 保持原始字节。
+6. Windows SQLite 篡改测试用 `closing(...)` 真正关闭连接；目标契约单测不再把开发机的外部绝对
+   路径当作确定性 fixture，同时明确断言测试床解析到仓库上级 `TestProjects`。
+
+### 变更文件
+
+- contracts/adapters：`src/jobslayer/domain/models.py`、`execution/platforms.py`、
+  `adapters/local_command.py`、`adapters/local_dependency_attachments.py`、
+  `adapters/task_manager_validation.py`、`application/runbook.py`、
+  `application/task_manager_execution.py`、`task_manager/binding.py`、`verification/engine.py`；
+- source-controlled target：`runbooks/bnw-anygine-small-app-001-codex.json`、
+  `validation-profiles/brave-new-world-anygine-app-v1.json`；
+- tests/docs：`tests/test_local_command.py`、`tests/test_local_dependency_attachments.py`、
+  `tests/test_long_running_execution.py`、`tests/test_task_manager_targets.py`、README、相关手册、ADR-0048
+  与索引；
+- 外部 BraveNewWorld Windows dispatcher、ADR/架构与追加开发日志在其上级 checkout 单独记录。
+
+### 当前验证、限制与下一步
+
+1. 28 项首轮 Windows 聚焦回归通过；加入 platform argv 后的 60 项扩展回归通过，`skipped=1`。
+2. 在写入外部 Windows 适配补丁前，`inspect-testbed` 已证明 sibling checkout 的
+   HEAD/tag/origin/clean/published 全匹配；使用固定 Anygine
+   worktree 和 `conan-windows-debug` 的 `inspect-task-manager-target` 报告 baseline ready、2/2 attachment
+   ready、总 `ready=true`。Git tree 期望/观察摘要同为 `b90178fc...`，Windows toolchain 本次捕获摘要
+   为 `aee9b17e...`。
+3. BraveNewWorld `bnw.cmd contract` 通过；Windows dispatcher 已能解析 Visual Studio CMake/CTest、
+   `cl` 和 Ninja。当前机器没有 Vulkan SDK，本轮未代替操作者接受许可或运行安装器，因此外部完整
+   build/GPU smoke 仍以该前置条件失败关闭；`bnw.cmd doctor` 因缺失 SDK 确定性返回非零，未把
+   `contract` 通过冒充为完整原生验证。
+4. 最终 `.\jobslayer.cmd check` 退出码 0，7/7 全部通过：299 项 unittest 用时 122.366 秒，
+   `OK (skipped=7)`；compile、Python dependency consistency、UI production build、BraveNewWorld
+   testbed contract、Anygine App runbook 与 Git diff 门禁均通过。Node 24.19.0/npm 11.17.0 的 UI
+   build 转换 1951 modules，用时 358 ms；diff 子门禁只有既有 LF/CRLF 转换提示，无
+   whitespace/conflict error。
+5. BraveNewWorld 当前在同步后的 `main@e7bff4a...` 上保留 3 个已修改文件和 1 个新增 ADR，均为本轮
+   Windows 适配且尚未提交、未 push；因此它在补丁完成后按设计不再宣称 clean baseline。本轮也没有
+   修改用户已有的脏 `Anygine_main`。下一步需由操作者决定是否接受固定 Vulkan SDK 许可并部署；之后
+   才能运行外部 `bnw.cmd check` 与 GPU smoke，并在独立审查后提交该测试床补丁。
+
+## DEV-2026-09-03-05 — 单命令跨平台 TaskManager 桌面入口
+
+- 状态：完成（单命令 Windows 桌面闭环与完整统一门禁已通过；Linux 真实图形会话待跨机验证）
+- 类型：desktop launcher、bootstrap orchestration、owned process lifecycle、least-privilege identity
+- 关联决策：[ADR-0049](adr/0049-single-command-cross-platform-desktop-launch.md)
+
+### 需求与决定
+
+1. 原 TaskManager 普通启动需要初始化、创建 key、签发 session、分别启动 API/Vite 和手工打开浏览器。
+   新根入口统一为 Windows/Linux 都执行的 `start.py`；Python 3.11+ 仍是唯一宿主前置条件。
+2. 入口直接复用 `scripts/bootstrap.py` 的 `BootstrapManager`，按需准备 `.venv`、固定 Node/npm、
+   lockfile UI 与 `desktop` extra。bootstrap state 允许已安装 extra 的超集满足基础检查，避免完整开发
+   门禁把 desktop 环境降回 base stamp。
+3. desktop extra 固定 pywebview 6.2.1：Windows 强制 `edgechromium`/WebView2，Linux 安装并强制 Qt；
+   不可用时失败关闭，不回退普通浏览器或旧 MSHTML。Vite proxy 从显式 `JOBSLAYER_API_PORT` 读取
+   本次 API 端口，支持受检查的自定义 loopback 端口。
+4. 首次启动创建受保护 signing key，每次只签发最长 24 小时、仅 `planner` 角色的唯一临时 session。
+   入口不启用外部 planning/执行/validation/integration。API 与 Vite 使用现有跨平台 process
+   supervisor 创建独立进程组；窗口关闭、烟测结束或失败时逆序回收并删除临时 session，日志写入
+   `.jobslayer/desktop/logs`。
+5. 启动顺序固定为 checkout/端口前检、API session 健康检查、Vite same-origin proxy 健康检查、
+   原生窗口。`--check` 只读，`--smoke-test` 完整启动后立即清理，`--headless` 明确只运行服务。
+
+### 变更文件
+
+- 入口/实现：`start.py`、`src/jobslayer/desktop/__init__.py`、`desktop/app.py`；
+- 初始化/依赖/UI：`pyproject.toml`、`scripts/bootstrap.py`、`ui-framework/vite.config.ts`；
+- 测试：`tests/test_desktop_app.py`、`tests/test_bootstrap.py`；
+- 文档：README、`docs/INITIALIZATION.md`、`docs/UNIFIED_ENTRYPOINT.md`、`docs/TASK_MANAGER.md`、
+  `ui-framework/README.md`、ADR-0049 与 ADR 索引。
+
+### 当前验证、限制与下一步
+
+1. `.\.venv\Scripts\python.exe -m unittest tests.test_desktop_app tests.test_bootstrap
+   tests.test_unified_entrypoint -v`：25 项通过，用时 2.340 秒；修正一处仅属于测试正则的换行匹配后，
+   18 项 desktop/bootstrap 聚焦回归再次通过，用时 0.570 秒。最终加入 Linux Qt renderer 契约后，
+   desktop/bootstrap/unified-entrypoint/orchestration-web 共 34 项通过，用时 2.552 秒。
+2. `.\.venv\Scripts\python.exe -m compileall -q start.py scripts src tests` 通过；
+   `.\init.cmd -- npm --prefix ui-framework run build` 通过，Vite 转换 1951 modules，用时 340 ms。
+3. `.\init.cmd --extra desktop` 成功安装 pywebview 6.2.1、pythonnet 3.1.0 及 Windows binding 依赖，
+   `pip check` 通过。首次 `py -3 start.py --check --json` 在安装前准确返回 `ready=false`，没有把缺失
+   desktop extra 冒充为就绪。
+4. `py -3 start.py --smoke-test --startup-timeout 30` 通过默认 8780/4173 的 API 与代理健康闭环；
+   `py -3 start.py --smoke-test --api-port 18880 --ui-port 14183 --startup-timeout 30` 证明自定义端口
+   与动态 Vite proxy 同样通过。两次结束后均无 listener 或临时 session。
+5. `py -3 start.py --window-smoke-seconds 2 --startup-timeout 30` 真实打开强制 EdgeChromium 的原生
+   WebView2 窗口并正常自动关闭，退出码 0；后台和临时身份同步回收。
+6. Linux 代码路径使用官方 pywebview Qt extra、强制 `gui="qt"` 并检查 `DISPLAY`/`WAYLAND_DISPLAY`；
+   本机为 Windows，尚未在真实 Linux 图形会话运行。该限制不被 Windows 烟测或 renderer 单测
+   冒充为跨机运行证据；下一步建议在 Linux X11/Wayland 主机执行同一 `python3 start.py`。
+7. 最终 `.\jobslayer.cmd check` 退出码 0，7/7 全部通过：310 项 unittest 用时 109.827 秒，
+   `OK (skipped=7)`；compile、包含 pywebview/pythonnet 的 Python dependency consistency、UI、
+   BraveNewWorld testbed、Anygine App runbook 与 Git diff 门禁均通过。UI 转换 1951 modules，用时
+   276 ms；diff 仅有既有 working-tree 行尾转换提示，无 whitespace/conflict error。

@@ -67,7 +67,12 @@ class LocalDependencyAttachmentConfig(_RunbookModel):
         pattern=r"^[A-Z][A-Z0-9_]*$",
         max_length=128,
     )
-    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    binding_mode: Literal["source_pinned", "run_pinned"] = "source_pinned"
+    expected_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    supported_platforms: tuple[Literal["linux", "windows", "macos"], ...] = ()
     expected_revision: str | None = Field(
         default=None,
         pattern=r"^[0-9a-fA-F]{40}$",
@@ -82,6 +87,22 @@ class LocalDependencyAttachmentConfig(_RunbookModel):
 
     @model_validator(mode="after")
     def validate_kind_contract(self) -> LocalDependencyAttachmentConfig:
+        if self.binding_mode == "source_pinned":
+            if self.expected_sha256 is None or self.supported_platforms:
+                raise ValueError(
+                    "source-pinned attachments require expected_sha256 and no "
+                    "supported_platforms"
+                )
+        else:
+            if self.expected_sha256 is not None or not self.supported_platforms:
+                raise ValueError(
+                    "run-pinned attachments require supported_platforms and no "
+                    "expected_sha256"
+                )
+            if self.kind == "git_checkout":
+                raise ValueError("Git checkout attachments must remain source-pinned")
+            if len(self.supported_platforms) != len(set(self.supported_platforms)):
+                raise ValueError("dependency attachment platforms must be unique")
         if self.kind == "git_checkout":
             if self.expected_revision is None or not self.repository_urls:
                 raise ValueError(

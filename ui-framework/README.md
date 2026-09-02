@@ -14,7 +14,18 @@
 
 ## 运行
 
-推荐从仓库根运行统一初始化；没有全局 Node/npm 时会自动准备经校验的项目 Node：
+普通 Windows/Linux 使用推荐从仓库根运行单一桌面入口；它会完成初始化、API/UI 启动、代理健康
+检查和 WebView2/Qt 窗口生命周期：
+
+```powershell
+py -3 start.py
+```
+
+```bash
+python3 start.py
+```
+
+开发前端时仍可单独运行统一初始化；没有全局 Node/npm 时会自动准备经校验的项目 Node：
 
 ```powershell
 .\init.cmd

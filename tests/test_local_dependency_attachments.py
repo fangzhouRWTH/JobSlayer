@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-import hashlib
+import os
 from pathlib import Path
 import subprocess
+import sys
 from tempfile import TemporaryDirectory
 import unittest
 
 from jobslayer.adapters.local_dependency_attachments import (
     directory_sha256,
+    git_tree_sha256,
     reinspect_local_dependency_attachment,
     resolve_local_dependency_attachment,
 )
@@ -39,16 +41,11 @@ class LocalDependencyAttachmentTests(unittest.TestCase):
         self._git(repository, "add", ".")
         self._git(repository, "commit", "-m", "baseline")
         revision = self._git(repository, "rev-parse", "HEAD").strip()
-        archive = subprocess.run(
-            ["git", "-C", str(repository), "archive", "--format=tar", revision],
-            check=True,
-            capture_output=True,
-        ).stdout
         config = LocalDependencyAttachmentConfig(
             attachment_id="engine-source",
             kind="git_checkout",
             environment_variable="ENGINE_SOURCE_ROOT",
-            expected_sha256=hashlib.sha256(archive).hexdigest(),
+            expected_sha256=git_tree_sha256(repository, revision),
             expected_revision=revision,
             repository_urls=("https://example.invalid/engine.git",),
         )
@@ -90,6 +87,39 @@ class LocalDependencyAttachmentTests(unittest.TestCase):
         rejected = resolve_local_dependency_attachment(wrong, toolchain)
         self.assertFalse(rejected.ready)
         self.assertIn("SHA-256", rejected.issue or "")
+
+    def test_run_pinned_directory_captures_host_identity_and_detects_drift(self) -> None:
+        toolchain = self.root / "generated-toolchain"
+        toolchain.mkdir()
+        exposed = toolchain / "conan_toolchain.cmake"
+        exposed.write_text("set(CMAKE_CXX_COMPILER cl)\n", encoding="utf-8")
+        host_platform = (
+            "windows"
+            if os.name == "nt"
+            else "linux"
+            if sys.platform.startswith("linux")
+            else "macos"
+        )
+        config = LocalDependencyAttachmentConfig(
+            attachment_id="generated-toolchain",
+            kind="directory",
+            environment_variable="ENGINE_TOOLCHAIN",
+            binding_mode="run_pinned",
+            supported_platforms=(host_platform,),
+            expose_relative_path="conan_toolchain.cmake",
+        )
+
+        attachment = resolve_local_dependency_attachment(config, toolchain)
+
+        self.assertTrue(attachment.ready)
+        self.assertEqual(attachment.binding_mode, "run_pinned")
+        self.assertEqual(attachment.host_platform, host_platform)
+        self.assertEqual(attachment.expected_sha256, attachment.observed_sha256)
+
+        exposed.write_text("set(CMAKE_CXX_COMPILER changed)\n", encoding="utf-8")
+        drifted = reinspect_local_dependency_attachment(attachment)
+        self.assertFalse(drifted.ready)
+        self.assertIn("SHA-256", drifted.issue or "")
 
     def test_missing_path_is_an_explicit_unready_projection(self) -> None:
         config = LocalDependencyAttachmentConfig(

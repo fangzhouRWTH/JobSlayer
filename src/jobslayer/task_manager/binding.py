@@ -39,8 +39,14 @@ class TaskManagerDependencyAttachment(DomainModel):
         max_length=128,
     )
     access_mode: Literal["read_only"] = "read_only"
-    expected_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    binding_mode: Literal["source_pinned", "run_pinned"] = "source_pinned"
+    expected_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     observed_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    host_platform: Literal["linux", "windows", "macos"] | None = None
+    supported_platforms: tuple[Literal["linux", "windows", "macos"], ...] = ()
     expected_revision: str | None = Field(
         default=None,
         pattern=r"^[0-9a-fA-F]{40}$",
@@ -58,6 +64,33 @@ class TaskManagerDependencyAttachment(DomainModel):
 
     @model_validator(mode="after")
     def validate_attachment(self) -> TaskManagerDependencyAttachment:
+        if self.binding_mode == "source_pinned":
+            if self.expected_sha256 is None or self.host_platform is not None:
+                raise ValueError(
+                    "source-pinned dependency attachments require one expected hash "
+                    "without a host platform"
+                )
+            if self.supported_platforms:
+                raise ValueError(
+                    "source-pinned dependency attachments cannot list host platforms"
+                )
+        else:
+            if not self.supported_platforms:
+                raise ValueError(
+                    "run-pinned dependency attachments require supported platforms"
+                )
+            if len(self.supported_platforms) != len(set(self.supported_platforms)):
+                raise ValueError("dependency attachment platforms must be unique")
+            if self.host_platform is None:
+                raise ValueError(
+                    "run-pinned dependency attachments require the observed host"
+                )
+            if self.issue is None and self.host_platform not in self.supported_platforms:
+                raise ValueError(
+                    "run-pinned dependency attachment host is not source-control allowed"
+                )
+            if self.kind == "git_checkout":
+                raise ValueError("Git checkout dependencies must remain source-pinned")
         if len(self.repository_urls) != len(set(self.repository_urls)):
             raise ValueError("dependency attachment repository URLs must be unique")
         if self.kind == "git_checkout":
@@ -87,6 +120,7 @@ class TaskManagerDependencyAttachment(DomainModel):
             self.issue is None
             and self.root_path is not None
             and self.exposed_path is not None
+            and self.expected_sha256 is not None
             and self.observed_sha256 == self.expected_sha256
         )
         if self.kind != "git_checkout":

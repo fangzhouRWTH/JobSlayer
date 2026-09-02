@@ -19,6 +19,7 @@ from jobslayer.domain.models import (
     WorkspaceManifest,
 )
 from jobslayer.execution.runner import CommandExecutionError
+from jobslayer.execution.platforms import local_host_platform
 from jobslayer.execution.processes import (
     ProcessGroupTerminationError,
     ProcessSupervisor,
@@ -70,7 +71,8 @@ class _OutputCapture:
 
     @property
     def text(self) -> str:
-        return bytes(self.buffer).decode("utf-8", errors="replace")
+        decoded = bytes(self.buffer).decode("utf-8", errors="replace")
+        return decoded.replace("\r\n", "\n").replace("\r", "\n")
 
     @property
     def sha256(self) -> str:
@@ -250,9 +252,11 @@ class GovernedLocalCommandRunner:
         request: CommandRequest, policy: CommandPolicy
     ) -> CommandRule:
         matches = []
+        platform = local_host_platform()
         for rule in policy.rules:
-            prefix_length = len(rule.argv_prefix)
-            prefix_matches = request.argv[:prefix_length] == rule.argv_prefix
+            argv_prefix = rule.argv_prefix_for(platform)
+            prefix_length = len(argv_prefix)
+            prefix_matches = request.argv[:prefix_length] == argv_prefix
             length_matches = (
                 rule.allow_additional_arguments
                 or len(request.argv) == prefix_length
@@ -261,7 +265,10 @@ class GovernedLocalCommandRunner:
                 matches.append(rule)
         if not matches:
             raise CommandPolicyError("command does not match an allowed policy rule")
-        return max(matches, key=lambda candidate: len(candidate.argv_prefix))
+        return max(
+            matches,
+            key=lambda candidate: len(candidate.argv_prefix_for(platform)),
+        )
 
     @staticmethod
     def _minimal_environment(runtime_home: Path) -> dict[str, str]:

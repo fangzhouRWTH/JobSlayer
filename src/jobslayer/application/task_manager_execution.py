@@ -1086,7 +1086,11 @@ class TaskManagerExecutionService:
                     if (
                         observed_check.check_id != expected_check.check_id
                         or observed_check.required != expected_check.required
-                        or result.argv != expected_check.argv
+                        or result.argv
+                        not in {
+                            expected_check.argv,
+                            *expected_check.platform_argv.values(),
+                        }
                         or result.cwd != expected_check.cwd
                         or result.environment != expected_environment
                         or result.workspace_id != evidence.workspace.workspace_id
@@ -1115,7 +1119,7 @@ class TaskManagerExecutionService:
                             check_id=expected_check.check_id,
                             status=status,
                             required=expected_check.required,
-                            command=expected_check.argv,
+                            command=result.argv,
                             artifact_ids=(observed_check.evidence_artifact_id,),
                             summary=summary,
                             evidence_hash=self._fact_hash(

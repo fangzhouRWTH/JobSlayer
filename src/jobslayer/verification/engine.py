@@ -17,6 +17,7 @@ from jobslayer.domain.models import (
     WorkspacePatch,
 )
 from jobslayer.execution.runner import CommandExecutionError, CommandRunner
+from jobslayer.execution.platforms import local_host_platform
 
 
 class VerificationError(RuntimeError):
@@ -53,12 +54,14 @@ class VerificationEngine:
     ) -> VerificationReport:
         self._validate_bindings(task, workspace, patch, profile)
         checks: list[CheckResult] = []
+        platform = local_host_platform()
         for check in profile.checks:
+            argv = check.argv_for(platform)
             request = CommandRequest(
                 command_id=f"validation-{check.check_id}",
                 workspace_id=workspace.workspace_id,
                 task_id=task.task_id,
-                argv=check.argv,
+                argv=argv,
                 cwd=check.cwd,
                 timeout_seconds=check.timeout_seconds,
             )
@@ -90,7 +93,7 @@ class VerificationEngine:
                         check_id=check.check_id,
                         status=CheckStatus.ERROR,
                         required=check.required,
-                        command=check.argv,
+                        command=argv,
                         artifact_ids=(artifact.artifact_id,),
                         summary=f"{check.title}: command execution was rejected",
                         evidence_hash=artifact.sha256,
@@ -125,7 +128,7 @@ class VerificationEngine:
                     check_id=check.check_id,
                     status=status,
                     required=check.required,
-                    command=check.argv,
+                    command=argv,
                     artifact_ids=(artifact.artifact_id,),
                     summary=summary,
                     evidence_hash=artifact.sha256,

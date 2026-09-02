@@ -17,6 +17,8 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
 - 串联工作区、Agent、补丁、验证与合并决策卡的应用控制器；
 - 统一源码、UI、完整开发验证与安装后 CLI 的 POSIX/Windows 根入口；
 - manifest 驱动的跨平台开发初始化、固定校验的项目 Node LTS 和 lockfile 前端依赖；
+- 单命令 Windows/Linux 桌面入口：自动检测/初始化依赖、启动 API/UI、验证代理健康状态，并在独立
+  WebView2/Qt 窗口关闭时回收后台进程；
 - 由版本化 task/profile/runbook 驱动的本地真实运行协调器；
 - 必须由外部显式授权、且仍服从相同工作树/验证/审查门禁的真实 Codex runbook；
 - append-only 运行记录链、确定性补丁重放 adapter 和 run 级监督入口；
@@ -46,20 +48,24 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
 
 ## 快速开始
 
-需要 Python 3.11 或更高版本。首次 checkout 使用跨平台初始化入口准备 Python、
-Node/npm 和项目依赖：
+需要 Python 3.11 或更高版本。普通使用只需一个跨平台 Python 入口；首次运行会自动检测并初始化
+仓库 venv、Node/npm、lockfile UI 依赖和桌面 WebView，然后启动后台与独立 App 窗口：
 
 ```powershell
-.\init.cmd
-.\init.cmd --check
+py -3 start.py
 ```
 
 ```bash
-sh ./init.sh
-sh ./init.sh --check
+python3 start.py
 ```
 
-初始化不会安装系统软件或修改 `PATH`；没有全局 npm 时可通过
+关闭桌面窗口会同时停止本次入口拥有的 API/Vite 进程。只读检查使用
+`python start.py --check`，无窗口服务模式使用 `python start.py --headless`；Windows 强制 WebView2，
+Linux 使用 Qt 且需要 `DISPLAY` 或 `WAYLAND_DISPLAY`。入口自动签发的临时身份只有 `planner` 权限，
+不会启用外部模型、任务执行、验证、审批或集成。
+
+开发、CI 或需要手工高级参数时仍可单独运行 `init.cmd`/`init.sh`。初始化不会安装系统软件或修改
+持久 `PATH`；没有全局 npm 时可通过
 `.\init.cmd -- npm --prefix ui-framework run dev`（POSIX 使用 `sh ./init.sh -- ...`）
 运行前端。完整参数与集成协议见[跨平台开发环境初始化](docs/INITIALIZATION.md)。
 
@@ -105,17 +111,14 @@ POSIX（Linux/macOS/WSL）公共命令示例：
   --open-browser
 ```
 
-TaskManager 单屏任务图应用需要 planner 身份，随后分别启动 API 与专用 UI 入口：
+TaskManager 单屏任务图应用的推荐入口是：
 
 ```bash
-./jobslayer task-manager-api \
-  --identity-session .jobslayer/identity/task-manager-session.json \
-  --identity-key .jobslayer/identity/task-manager-key.json
-sh ./init.sh -- npm --prefix ui-framework run task-manager
+python3 start.py
 ```
 
-打开 `http://127.0.0.1:4173/`。页面左侧 2/3 为任务图，右侧 1/3 同时显示节点详情与
-Agent 对话；身份创建、Codex opt-in 和接口说明见
+Windows 使用 `py -3 start.py`。入口在独立原生窗口加载 `http://127.0.0.1:4173/`；页面左侧 2/3
+为任务图，右侧 1/3 同时显示节点详情与 Agent 对话。手工身份、Codex opt-in 和高级接口说明见
 [TaskManager 聚焦应用](docs/TASK_MANAGER.md)。
 
 Windows PowerShell 使用原生 Python，不要求 WSL：
@@ -133,7 +136,8 @@ Windows PowerShell 使用原生 Python，不要求 WSL：
 下文的 `./jobslayer` 在 Windows 上均对应 `.\jobslayer.cmd`。JobSlayer
 控制平面和完整开发门禁可原生运行。BraveNewWorld profile 现在包含 contract、C++ build/CTest
 和 runtime smoke；实际运行前必须用 TaskManager 部置参数绑定对应平台的 Anygine source/toolchain
-和所需图形会话环境，缺失时目标失败关闭。
+和所需图形会话环境，缺失时目标失败关闭。profile 显式登记 POSIX `./bnw` 与 Windows
+`.\bnw.cmd` 两套 argv；生成型 Conan toolchain 在 run 装配时按主机平台捕获哈希并持续检查漂移。
 
 演示会依次经过：
 

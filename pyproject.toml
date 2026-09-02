@@ -13,6 +13,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+desktop = [
+    "pywebview==6.2.1; sys_platform == 'win32'",
+    "pywebview[qt]==6.2.1; sys_platform == 'linux'",
+]
 postgres = [
     "psycopg[binary]>=3.2,<4",
 ]

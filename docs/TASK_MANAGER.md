@@ -44,7 +44,34 @@ portable contract 冒充真实 C++ build/Vulkan 证据。
 
 ## 运行
 
-首次使用可以创建一个本地 planner 身份：
+普通 Windows/Linux 使用只需从仓库根启动一个 Python 脚本：
+
+```powershell
+py -3 start.py
+```
+
+```bash
+python3 start.py
+```
+
+入口会检查并按需初始化 Python/Node/UI/桌面依赖，创建或复用受保护的本地 key，签发仅含
+`planner` 角色的临时 session，依次启动并健康检查 TaskManager API 与 Vite proxy，再把唯一入口
+`http://127.0.0.1:4173/` 装入独立 WebView2（Windows）或 Qt（Linux）窗口。关闭窗口会回收两个
+后台进程树并删除本次临时 session；日志保留在 `.jobslayer/desktop/logs/`。
+
+常用诊断模式：
+
+```bash
+python3 start.py --check
+python3 start.py --smoke-test
+python3 start.py --headless
+```
+
+Linux 桌面模式需要 `DISPLAY` 或 `WAYLAND_DISPLAY`；headless 模式不创建窗口。默认便捷入口不会
+打开外部 planning、执行、validation 或集成 adapter。
+
+需要显式选择身份、adapter、模型或 dependency attachment 时，继续使用高级手工入口。首先创建
+一个本地 planner 身份：
 
 ```bash
 ./jobslayer create-local-identity-key .jobslayer/identity/task-manager-key.json
@@ -71,7 +98,7 @@ portable contract 冒充真实 C++ build/Vulkan 证据。
 sh ./init.sh -- npm --prefix ui-framework run task-manager
 ```
 
-打开唯一入口 `http://127.0.0.1:4173/`。Windows 使用等价的
+手工模式打开 `http://127.0.0.1:4173/`。Windows 使用等价的
 `.\jobslayer.cmd task-manager-api ...` 和
 `.\init.cmd -- npm --prefix ui-framework run task-manager`。
 
@@ -139,6 +166,20 @@ source-bundle hash：
   --validation-environment "DISPLAY=${DISPLAY}" \
   --validation-environment "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
 ```
+
+原生 Windows 使用上级 `TestProjects` 中已同步的 BraveNewWorld、固定 Anygine detached worktree 和
+Windows Conan 输出；profile 会显式执行 `.\bnw.cmd`：
+
+```powershell
+.\jobslayer.cmd inspect-task-manager-target `
+  runbooks\bnw-anygine-small-app-001-codex.json `
+  --target-id brave-new-world-anygine-app-v1 `
+  --dependency-attachment anygine-source=D:\projects\Anygine\Anygine_JobSlayer `
+  --dependency-attachment anygine-conan-toolchain=D:\projects\Anygine\Anygine_JobSlayer\build\conan-windows-debug
+```
+
+Conan 生成目录采用 `run_pinned`：源控限定支持的平台，本次装配捕获精确内容哈希，之后每次验证
+继续重检并拒绝漂移。Git source 仍是 `source_pinned`，使用跨平台稳定的 Git tree 摘要。
 
 命令终止后还需调用 `observe`、`verify` 并由 Reviewer 接受 passing report，节点
 才会满足后继依赖。当前 profile 必须是幂等、非发布型检查；进程在 terminal 结果原子落盘前崩溃时，

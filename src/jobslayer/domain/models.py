@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from enum import Enum
 import hashlib
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -401,6 +401,9 @@ class SourceIntegrationResult(DomainModel):
 class CommandRule(DomainModel):
     rule_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     argv_prefix: tuple[str, ...] = Field(min_length=1)
+    platform_argv_prefixes: dict[
+        Literal["linux", "windows", "macos"], tuple[str, ...]
+    ] = Field(default_factory=dict)
     allow_additional_arguments: bool = False
     accepted_exit_codes: tuple[int, ...] = (0,)
     max_timeout_seconds: float | None = Field(default=None, gt=0)
@@ -411,6 +414,27 @@ class CommandRule(DomainModel):
         if any(not value or "\0" in value for value in arguments):
             raise ValueError("command arguments must be non-empty and contain no NUL")
         return arguments
+
+    @field_validator("platform_argv_prefixes")
+    @classmethod
+    def validate_platform_rule_arguments(
+        cls,
+        arguments: dict[str, tuple[str, ...]],
+    ) -> dict[str, tuple[str, ...]]:
+        if any(
+            not values or any(not value or "\0" in value for value in values)
+            for values in arguments.values()
+        ):
+            raise ValueError(
+                "platform command arguments must be non-empty and contain no NUL"
+            )
+        return arguments
+
+    def argv_prefix_for(
+        self,
+        platform: Literal["linux", "windows", "macos"],
+    ) -> tuple[str, ...]:
+        return self.platform_argv_prefixes.get(platform, self.argv_prefix)
 
     @field_validator("accepted_exit_codes")
     @classmethod
@@ -434,9 +458,18 @@ class CommandPolicy(DomainModel):
         rule_ids = tuple(rule.rule_id for rule in self.rules)
         if len(rule_ids) != len(set(rule_ids)):
             raise ValueError("command rule ids must be unique")
-        prefixes = tuple(rule.argv_prefix for rule in self.rules)
-        if len(prefixes) != len(set(prefixes)):
-            raise ValueError("command rule prefixes must be unique")
+        for platform in (None, "linux", "windows", "macos"):
+            prefixes = tuple(
+                rule.argv_prefix
+                if platform is None
+                else rule.argv_prefix_for(platform)
+                for rule in self.rules
+            )
+            if len(prefixes) != len(set(prefixes)):
+                raise ValueError(
+                    "command rule prefixes must be unique on "
+                    + (platform or "the canonical profile")
+                )
         return self
 
 
@@ -524,6 +557,9 @@ class ValidationCheckSpec(DomainModel):
     check_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     title: str = Field(min_length=1)
     argv: tuple[str, ...] = Field(min_length=1)
+    platform_argv: dict[
+        Literal["linux", "windows", "macos"], tuple[str, ...]
+    ] = Field(default_factory=dict)
     cwd: str = "."
     timeout_seconds: float = Field(default=60, gt=0)
     required: bool = True
@@ -534,6 +570,27 @@ class ValidationCheckSpec(DomainModel):
         if any(not value or "\0" in value for value in arguments):
             raise ValueError("validation arguments must be non-empty and contain no NUL")
         return arguments
+
+    @field_validator("platform_argv")
+    @classmethod
+    def validate_platform_check_arguments(
+        cls,
+        arguments: dict[str, tuple[str, ...]],
+    ) -> dict[str, tuple[str, ...]]:
+        if any(
+            not values or any(not value or "\0" in value for value in values)
+            for values in arguments.values()
+        ):
+            raise ValueError(
+                "platform validation arguments must be non-empty and contain no NUL"
+            )
+        return arguments
+
+    def argv_for(
+        self,
+        platform: Literal["linux", "windows", "macos"],
+    ) -> tuple[str, ...]:
+        return self.platform_argv.get(platform, self.argv)
 
     @field_validator("cwd")
     @classmethod
@@ -554,31 +611,49 @@ class ValidationProfile(DomainModel):
             raise ValueError("validation check ids must be unique")
         if not any(check.required for check in self.checks):
             raise ValueError("a validation profile needs at least one required check")
-        for check in self.checks:
-            matching_rules = []
-            for rule in self.command_policy.rules:
-                prefix_length = len(rule.argv_prefix)
-                prefix_matches = check.argv[:prefix_length] == rule.argv_prefix
-                length_matches = (
-                    rule.allow_additional_arguments
-                    or len(check.argv) == prefix_length
+        for platform in (None, "linux", "windows", "macos"):
+            for check in self.checks:
+                check_argv = (
+                    check.argv if platform is None else check.argv_for(platform)
                 )
-                if prefix_matches and length_matches:
-                    matching_rules.append(rule)
-            if not matching_rules:
-                raise ValueError(
-                    f"validation check {check.check_id} has no command policy rule"
+                matching_rules = []
+                for rule in self.command_policy.rules:
+                    rule_prefix = (
+                        rule.argv_prefix
+                        if platform is None
+                        else rule.argv_prefix_for(platform)
+                    )
+                    prefix_length = len(rule_prefix)
+                    prefix_matches = check_argv[:prefix_length] == rule_prefix
+                    length_matches = (
+                        rule.allow_additional_arguments
+                        or len(check_argv) == prefix_length
+                    )
+                    if prefix_matches and length_matches:
+                        matching_rules.append(rule)
+                if not matching_rules:
+                    raise ValueError(
+                        f"validation check {check.check_id} has no command policy "
+                        f"rule on {platform or 'the canonical profile'}"
+                    )
+                rule = max(
+                    matching_rules,
+                    key=lambda item: len(
+                        item.argv_prefix
+                        if platform is None
+                        else item.argv_prefix_for(platform)
+                    ),
                 )
-            rule = max(matching_rules, key=lambda item: len(item.argv_prefix))
-            timeout_limit = min(
-                self.command_policy.max_timeout_seconds,
-                rule.max_timeout_seconds
-                or self.command_policy.max_timeout_seconds,
-            )
-            if check.timeout_seconds > timeout_limit:
-                raise ValueError(
-                    f"validation check {check.check_id} exceeds its timeout policy"
+                timeout_limit = min(
+                    self.command_policy.max_timeout_seconds,
+                    rule.max_timeout_seconds
+                    or self.command_policy.max_timeout_seconds,
                 )
+                if check.timeout_seconds > timeout_limit:
+                    raise ValueError(
+                        f"validation check {check.check_id} exceeds its timeout "
+                        f"policy on {platform or 'the canonical profile'}"
+                    )
         return self
 
 

@@ -8,6 +8,9 @@
       {
         "rule_id": "manifest-contract",
         "argv_prefix": ["./bnw", "contract"],
+        "platform_argv_prefixes": {
+          "windows": [".\\bnw.cmd", "contract"]
+        },
         "allow_additional_arguments": false,
         "accepted_exit_codes": [0],
         "max_timeout_seconds": 30
@@ -15,6 +18,9 @@
       {
         "rule_id": "native-build-and-test",
         "argv_prefix": ["./bnw", "test", "--jobs", "4"],
+        "platform_argv_prefixes": {
+          "windows": [".\\bnw.cmd", "test", "--jobs", "4"]
+        },
         "allow_additional_arguments": false,
         "accepted_exit_codes": [0],
         "max_timeout_seconds": 1800
@@ -22,6 +28,9 @@
       {
         "rule_id": "native-runtime-smoke",
         "argv_prefix": ["./bnw", "run", "--jobs", "4"],
+        "platform_argv_prefixes": {
+          "windows": [".\\bnw.cmd", "run", "--jobs", "4"]
+        },
         "allow_additional_arguments": false,
         "accepted_exit_codes": [0],
         "max_timeout_seconds": 1800
@@ -35,6 +44,9 @@
       "check_id": "manifest-contract",
       "title": "BraveNewWorld Anygine App 清单与公共依赖契约",
       "argv": ["./bnw", "contract"],
+      "platform_argv": {
+        "windows": [".\\bnw.cmd", "contract"]
+      },
       "cwd": ".",
       "timeout_seconds": 30,
       "required": true
@@ -43,6 +55,9 @@
       "check_id": "native-build-and-test",
       "title": "BraveNewWorld/Anygine 原生构建与 CTest",
       "argv": ["./bnw", "test", "--jobs", "4"],
+      "platform_argv": {
+        "windows": [".\\bnw.cmd", "test", "--jobs", "4"]
+      },
       "cwd": ".",
       "timeout_seconds": 1800,
       "required": true
@@ -51,6 +66,9 @@
       "check_id": "native-runtime-smoke",
       "title": "BraveNewWorld/Anygine 固定帧运行验证",
       "argv": ["./bnw", "run", "--jobs", "4"],
+      "platform_argv": {
+        "windows": [".\\bnw.cmd", "run", "--jobs", "4"]
+      },
       "cwd": ".",
       "timeout_seconds": 1800,
       "required": true

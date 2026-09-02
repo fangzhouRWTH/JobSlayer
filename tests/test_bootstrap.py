@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import tomllib
 import unittest
 import zipfile
 from pathlib import Path
@@ -11,6 +12,7 @@ from unittest.mock import patch
 from scripts.bootstrap import (
     BootstrapError,
     BootstrapManager,
+    _python_state_matches,
     parse_version,
     platform_key,
     safe_extract_archive,
@@ -75,6 +77,48 @@ class BootstrapContractTests(unittest.TestCase):
         self.assertFalse(version_at_least("20.19.9", "22.12.0"))
         with self.assertRaises(BootstrapError):
             parse_version("latest")
+
+    def test_python_environment_with_extra_superset_satisfies_base_checks(self) -> None:
+        with TemporaryDirectory() as directory:
+            state = Path(directory) / "state.json"
+            state.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "component": "python",
+                        "platform": "windows-x86_64",
+                        "manifest_sha256": "abc",
+                        "extras": ["desktop", "observability"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            expected = {
+                "schema_version": "1.0",
+                "component": "python",
+                "platform": "windows-x86_64",
+                "manifest_sha256": "abc",
+                "extras": [],
+            }
+
+            self.assertTrue(_python_state_matches(state, expected))
+            self.assertFalse(
+                _python_state_matches(state, {**expected, "extras": ["postgres"]})
+            )
+
+    def test_desktop_extra_pins_platform_specific_webview_backends(self) -> None:
+        configuration = tomllib.loads(
+            (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )
+
+        desktop = configuration["project"]["optional-dependencies"]["desktop"]
+        self.assertEqual(
+            desktop,
+            [
+                "pywebview==6.2.1; sys_platform == 'win32'",
+                "pywebview[qt]==6.2.1; sys_platform == 'linux'",
+            ],
+        )
 
     def test_archive_extraction_accepts_normal_members_and_rejects_escape(self) -> None:
         with TemporaryDirectory() as directory:

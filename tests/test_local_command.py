@@ -21,6 +21,7 @@ from jobslayer.domain.models import (
     WorkspaceSpec,
 )
 from jobslayer.execution import ProcessSupervisor, native_process_supervisor
+from jobslayer.execution.platforms import local_host_platform
 
 
 class RecordingProcessSupervisor:
@@ -135,13 +136,35 @@ class GovernedLocalCommandRunnerTests(unittest.TestCase):
 
         self.assertEqual(result.status, CommandStatus.PASSED)
         self.assertEqual(result.exit_code, 0)
-        self.assertEqual(result.stdout, expected_output.decode())
+        self.assertEqual(result.stdout, "verification passed\n")
         self.assertEqual(
             result.stdout_sha256,
             hashlib.sha256(expected_output).hexdigest(),
         )
         self.assertFalse(result.stdout_truncated)
         self.assertEqual(self.process_supervisor.launch_count, 1)
+
+    def test_uses_only_the_explicit_host_platform_command_override(self) -> None:
+        argv = (sys.executable, "verify.py")
+        policy = CommandPolicy(
+            policy_id="platform-policy",
+            rules=(
+                CommandRule(
+                    rule_id="platform-rule",
+                    argv_prefix=("not-the-local-command",),
+                    platform_argv_prefixes={local_host_platform(): argv},
+                ),
+            ),
+        )
+
+        result = self.runner.run(
+            self.manifest,
+            self.request_for(argv),
+            policy,
+        )
+
+        self.assertEqual(result.status, CommandStatus.PASSED)
+        self.assertEqual(result.rule_id, "platform-rule")
 
     def test_rejects_unapproved_additional_arguments(self) -> None:
         allowed = (sys.executable, "verify.py")
@@ -233,7 +256,7 @@ class GovernedLocalCommandRunnerTests(unittest.TestCase):
             else:
                 os.environ[variable] = previous
 
-        self.assertEqual(result.stdout, f"missing{os.linesep}")
+        self.assertEqual(result.stdout, "missing\n")
 
     def test_injects_only_explicit_content_bound_environment(self) -> None:
         variable = CommandEnvironmentVariable(
@@ -257,7 +280,7 @@ class GovernedLocalCommandRunnerTests(unittest.TestCase):
             self.policy_for(argv),
         )
 
-        self.assertEqual(result.stdout, f"/content-bound/anygine{os.linesep}")
+        self.assertEqual(result.stdout, "/content-bound/anygine\n")
         self.assertEqual(result.environment, (variable,))
 
     def test_rejects_override_of_runner_owned_environment(self) -> None:

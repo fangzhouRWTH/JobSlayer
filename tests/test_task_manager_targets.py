@@ -30,30 +30,14 @@ class TaskManagerExecutionTargetTests(unittest.TestCase):
                 )
             },
         )
-        projects_root = cls.repository_root.parents[1]
-        cls.configured_registry = LocalTaskManagerExecutionTargetRegistry(
-            cls.repository_root,
-            {
-                "brave-new-world-anygine-app-v1": (
-                    "runbooks/bnw-anygine-small-app-001-codex.json"
-                )
-            },
-            dependency_paths={
-                "anygine-source": projects_root / "Anygine/Anygine_JobSlayer",
-                "anygine-conan-toolchain": projects_root / "Anygine/Anygine/build/conan",
-            },
-            validation_environment={
-                "DISPLAY": ":fixture",
-                "XDG_RUNTIME_DIR": "/run/user/fixture",
-            },
-        )
-
-    def test_source_controlled_bnw_target_is_exact_and_baseline_ready(self) -> None:
-        binding = self.configured_registry.get("brave-new-world-anygine-app-v1")
+    def test_source_controlled_bnw_target_is_exact_and_uses_sibling_checkout(self) -> None:
+        binding = self.registry.get("brave-new-world-anygine-app-v1")
         target = describe_execution_target(binding)
 
-        self.assertTrue(target.local_baseline_ready)
-        self.assertTrue(target.dependencies_ready)
+        expected_checkout = (
+            self.repository_root / "../TestProjects/BraveNewWorld"
+        ).resolve()
+        self.assertEqual(Path(target.checkout_path), expected_checkout)
         self.assertEqual(target.testbed_id, "brave-new-world")
         self.assertEqual(target.model_profile, "gpt-5.6-sol-xhigh")
         self.assertEqual(target.executor_model, "gpt-5.6-sol")
@@ -64,11 +48,8 @@ class TaskManagerExecutionTargetTests(unittest.TestCase):
             tuple(item.attachment_id for item in binding.dependency_attachments),
             ("anygine-source", "anygine-conan-toolchain"),
         )
-        self.assertTrue(all(item.ready for item in binding.dependency_attachments))
-        self.assertEqual(
-            target.validation_environment_names,
-            ("DISPLAY", "XDG_RUNTIME_DIR"),
-        )
+        self.assertTrue(all(not item.ready for item in binding.dependency_attachments))
+        self.assertEqual(target.validation_environment_names, ())
         self.assertIn(("./bnw", "contract"), target.validation_commands)
         self.assertIn(
             ("./bnw", "test", "--jobs", "4"), target.validation_commands
@@ -94,7 +75,42 @@ class TaskManagerExecutionTargetTests(unittest.TestCase):
         )
 
     def test_target_preflight_allows_bnw_commands_and_rejects_cross_project_rules(self) -> None:
-        binding = self.configured_registry.get("brave-new-world-anygine-app-v1")
+        unresolved = self.registry.get("brave-new-world-anygine-app-v1")
+        inspection = unresolved.testbed_inspection.model_copy(
+            update={
+                "head_commit": unresolved.task.base_commit,
+                "tag_commit": unresolved.task.base_commit,
+                "working_tree_clean": True,
+                "head_matches_baseline": True,
+                "tag_matches_baseline": True,
+                "origin_registered": True,
+            }
+        )
+        ready_attachments = []
+        for index, attachment in enumerate(unresolved.dependency_attachments, start=1):
+            digest = f"{index}" * 64
+            update = {
+                "expected_sha256": digest,
+                "observed_sha256": digest,
+                "root_path": f"/fixture/dependency-{index}",
+                "exposed_path": f"/fixture/dependency-{index}",
+                "issue": None,
+            }
+            if attachment.kind == "git_checkout":
+                update.update(
+                    {
+                        "observed_revision": attachment.expected_revision,
+                        "observed_repository_url": attachment.repository_urls[0],
+                        "working_tree_clean": True,
+                    }
+                )
+            ready_attachments.append(attachment.model_copy(update=update))
+        binding = unresolved.model_copy(
+            update={
+                "testbed_inspection": inspection,
+                "dependency_attachments": tuple(ready_attachments),
+            }
+        )
         good = TaskPlanSnapshot(
             plan_id="bnw-good-plan",
             revision=1,
