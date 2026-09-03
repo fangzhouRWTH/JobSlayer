@@ -608,6 +608,9 @@ code, pre, kbd { font-family: "SFMono-Regular", Consolas, "Liberation Mono", mon
 .task-manager-heading { min-width: 260px; margin-right: auto; }
 .task-manager-heading h1 { display: inline; margin: 0; color: #f0f2f4; font-size: 21px; font-weight: 650; letter-spacing: -.035em; }
 .task-manager-heading p { display: inline; margin: 0 0 0 12px; color: #68717c; font-size: 9px; }
+.task-manager-design-state { display: grid; gap: 2px; max-width: 230px; padding: 5px 8px; border: 1px solid #293229; background: #10150f; font: 8px "SFMono-Regular", Consolas, monospace; }
+.task-manager-design-state span { display: flex; align-items: center; gap: 5px; color: #c5dbad; white-space: nowrap; }
+.task-manager-design-state small { overflow: hidden; color: #65715e; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 .task-manager-task-picker { width: min(360px, 29vw); display: grid; gap: 4px; }
 .task-manager-task-picker > label { color: #5d6570; font-size: 7px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .task-manager-task-picker > div { position: relative; height: 36px; display: flex; align-items: center; border: 1px solid var(--line); background: #101318; }

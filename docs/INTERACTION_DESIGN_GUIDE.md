@@ -13,6 +13,15 @@
 
 原型不能通过视觉暗示改变更高层规则。模型、Agent 和浏览器可以提出动作、生成展示状态与制品，但 JobSlayer 的确定性代码始终拥有工作流状态、权限、重试政策、验证要求、审计与完成判定。
 
+页面设计意图的结构化交换、版本、状态和活动方案遵守
+[语义弹性 UI 描述框架](SEMANTIC_UI_DESIGN.md)与
+[ADR-0050](adr/0050-semantic-elastic-ui-design-contract.md)。该描述层保留自然语言弹性，但不是
+React/CSS 运行时，也不改变本指南的控制平面边界。
+
+通用 UI/UX 知识通过[固定快照的只读建议层](UI_ADVICE.md)补充：第三方检索结果先成为绑定活动 SUID
+的 evidence，由 Agent 或人工筛选后才能影响下一 revision；它不自动写页面、不调用模型，也不覆盖
+本指南和 SUID 的设计决定。
+
 ## 2. 产品交互定义
 
 JobSlayer 的图形界面应是一个工程工作台，而不是聊天窗口或独立 CRUD 页面集合。主要心智模型是：
@@ -339,6 +348,14 @@ Run Inspector 先读取带版本的快照，再从 `sequence + 1` 订阅事件�
 
 `ui-framework/` 是长期交互方向工作台；当前 TaskManager 和高级 Task Orchestration 已接通受限本地
 API：
+
+- 当前产品入口只装配 TaskManager；其左缘窄栏切换首页、Quick Agent、任务总控、任务编排和具体执行，
+  不是旧通用 Workbench sidebar，决定见 ADR-0052；
+- 当前活动视觉遵循 ADR-0053 的 Calm Ops：正文按 13–17px 分层、机器元数据不低于 10px，深炭灰表面
+  具有明确层级，首屏删去重复摘要但不删除后端历史、候选/门禁或执行证据；
+- Quick Agent 页采用同一 Calm Ops 层级，只显示 provider 原始额度窗口、由本机 `model/list` 驱动的
+  模型/effort/速度能力选单、明确权限模式和一个主流式控制台。讨论/执行提示、运行/中断状态与任务链
+  隔离说明必须保持可见，不能折叠成仅图标状态；
 
 - Workflow Studio、Run Inspector、Artifact Review 与 Observability 使用固定 mock data；
 - Task Orchestration 调用 loopback 计划 API，权威 revision 位于 Python store；

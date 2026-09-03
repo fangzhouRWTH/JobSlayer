@@ -35,10 +35,22 @@ from jobslayer.adapters.local_orchestration import (
     LocalTaskPlanStore,
     TaskPlanJournalError,
 )
+from jobslayer.adapters.source_ui_designs import (
+    SourceControlledUIDesignRegistry,
+    UIDesignCatalogError,
+)
+from jobslayer.adapters.ui_ux_pro_max import (
+    UIUXProMaxAdvisor,
+    UIUXProMaxError,
+)
 from jobslayer.adapters.local_planning_agent import LocalPlanningAgent
 from jobslayer.adapters.local_task_manager_runs import (
     LocalTaskManagerRunStore,
     TaskManagerRunJournalError,
+)
+from jobslayer.adapters.local_task_manager_coordinator import (
+    LocalTaskManagerCoordinatorStore,
+    TaskManagerCoordinatorJournalError,
 )
 from jobslayer.adapters.local_task_manager_targets import (
     LocalTaskManagerExecutionTargetRegistry,
@@ -58,13 +70,22 @@ from jobslayer.adapters.codex_planning_agent import (
     CodexPlanningAgent,
     CodexPlanningAgentConfigurationError,
 )
+from jobslayer.adapters.codex_quick_agent import CodexQuickAgent
+from jobslayer.adapters.codex_human_action_assistant import (
+    CodexHumanActionAssistant,
+    CodexHumanActionAssistantError,
+)
+from jobslayer.adapters.local_human_action_assistant import LocalHumanActionAssistant
 from jobslayer.adapters.persistent_management import PersistentManagementQuery
 from jobslayer.adapters.local_artifacts import LocalArtifactRegistry
 from jobslayer.adapters.sqlite_state import SqliteControlPlaneStore
+from jobslayer.adapters.sqlite_workers import SqliteWorkerLeaseStore
 from jobslayer.application.runbook import LocalRunbookLoader, RunbookError
 from jobslayer.application.task_orchestration import TaskOrchestrationService
 from jobslayer.application.task_manager_execution import TaskManagerExecutionService
+from jobslayer.application.task_manager_coordinator import TaskManagerSerialCoordinator
 from jobslayer.application.planning_artifacts import PlanningArtifactQuery
+from jobslayer.application.ui_advice import UIAdviceService
 from jobslayer.artifacts.registry import ArtifactRegistry
 from jobslayer.development.checks import (
     DevelopmentCheckConfigurationError,
@@ -110,8 +131,14 @@ from jobslayer.orchestration.web import (
     create_task_orchestration_server,
 )
 from jobslayer.orchestration import PlanningAgent
+from jobslayer.quick_agent import QuickAgentUnavailableError
 from jobslayer.evaluation import ExecutorComparisonError
 from jobslayer.task_manager.binding import describe_execution_target
+from jobslayer.ui_design import (
+    UIDesignObservationSet,
+    assess_ui_design_execution,
+)
+from jobslayer.ui_advice import UIAdviceMode, UIAdviceRequest
 
 
 def _digest(text: str) -> str:
@@ -209,6 +236,167 @@ def _cmd_validate_testbed(path: Path) -> int:
         print(f"testbed is invalid: {exc}", file=sys.stderr)
         return 1
     print(testbed.model_dump_json(indent=2))
+    return 0
+
+
+def _cmd_validate_ui_design(path: Path) -> int:
+    try:
+        registry = SourceControlledUIDesignRegistry(path)
+    except UIDesignCatalogError as exc:
+        print(f"UI design catalog is invalid: {exc}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "valid": True,
+                "descriptors": [
+                    item.model_dump(mode="json")
+                    for item in registry.list_references()
+                ],
+                "active": [
+                    {
+                        "binding": item.binding.model_dump(mode="json"),
+                        "state_counts": item.state_counts.model_dump(mode="json"),
+                    }
+                    for item in registry.list_active()
+                ],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _cmd_inspect_ui_design(
+    path: Path,
+    *,
+    page_id: str,
+    observations_path: Path | None,
+) -> int:
+    try:
+        registry = SourceControlledUIDesignRegistry(path)
+        active = registry.get_active(page_id)
+        observations = None
+        if observations_path is not None:
+            raw = json.loads(observations_path.read_text(encoding="utf-8"))
+            observations = UIDesignObservationSet.model_validate(raw)
+        execution_plan = assess_ui_design_execution(active, observations)
+    except (
+        UIDesignCatalogError,
+        OSError,
+        json.JSONDecodeError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"could not inspect UI design: {exc}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "active_design": active.model_dump(mode="json"),
+                "execution_plan": execution_plan.model_dump(mode="json"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _cmd_validate_ui_advisor(path: Path, *, root: Path | None) -> int:
+    try:
+        repository_root = find_repository_root(root)
+        advisor = UIUXProMaxAdvisor(repository_root, path)
+        identity = advisor.validate_snapshot(run_upstream_validation=True)
+    except (DevelopmentCheckConfigurationError, UIUXProMaxError, OSError) as exc:
+        print(f"UI advisor integration is invalid: {exc}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "valid": True,
+                "provider": identity.model_dump(mode="json"),
+                "snapshot_path": advisor.lock.snapshot_path,
+                "file_count": advisor.lock.expected_file_count,
+                "total_bytes": advisor.lock.expected_total_bytes,
+                "core_only": True,
+                "project_writes_allowed": False,
+                "agent_invocation": False,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def _cmd_collect_ui_advice(
+    *,
+    lock_path: Path,
+    catalog_path: Path,
+    page_id: str,
+    task_id: str,
+    request_id: str | None,
+    query: str,
+    mode: str,
+    domain: str | None,
+    stack: str | None,
+    project_name: str | None,
+    max_results: int,
+    variance: int | None,
+    motion: int | None,
+    density: int | None,
+    artifact_root: Path,
+    root: Path | None,
+) -> int:
+    try:
+        repository_root = find_repository_root(root)
+        resolved_catalog = (
+            catalog_path
+            if catalog_path.is_absolute()
+            else repository_root / catalog_path
+        )
+        active = SourceControlledUIDesignRegistry(resolved_catalog).get_active(page_id)
+        request = UIAdviceRequest(
+            request_id=request_id or f"ui-advice-request-{uuid4().hex}",
+            page_id=active.binding.page_id,
+            scheme_id=active.binding.scheme_id,
+            revision=active.binding.revision,
+            descriptor_sha256=active.binding.descriptor_sha256,
+            query=query,
+            mode=UIAdviceMode(mode),
+            domain=domain,
+            stack=stack,
+            project_name=project_name,
+            max_results=max_results,
+            variance=variance,
+            motion=motion,
+            density=density,
+        )
+        resolved_artifact_root = (
+            artifact_root
+            if artifact_root.is_absolute()
+            else repository_root / artifact_root
+        )
+        collection = UIAdviceService(
+            UIUXProMaxAdvisor(repository_root, lock_path),
+            LocalArtifactRegistry(resolved_artifact_root),
+        ).collect(task_id=task_id, request=request)
+    except (
+        DevelopmentCheckConfigurationError,
+        UIDesignCatalogError,
+        UIUXProMaxError,
+        OSError,
+        ValidationError,
+        ValueError,
+    ) as exc:
+        print(f"could not collect UI advice: {exc}", file=sys.stderr)
+        return 1
+    print(collection.model_dump_json(indent=2))
     return 0
 
 
@@ -700,6 +888,7 @@ def _cmd_serve_task_orchestration(
     planning_agent_name: str,
     allow_external_planning_agent: bool,
     allow_external_task_execution: bool,
+    allow_quick_agent: bool,
     allow_task_manager_local_validation: bool,
     allow_task_manager_checkpoint_integration: bool,
     task_manager_dependency_attachment: tuple[str, ...],
@@ -709,6 +898,9 @@ def _cmd_serve_task_orchestration(
     codex_model: str | None,
     codex_reasoning_effort: str | None,
     codex_timeout_seconds: float,
+    quick_agent_model: str,
+    quick_agent_reasoning_effort: str,
+    quick_agent_timeout_seconds: int,
     port: int,
     open_browser: bool,
 ) -> int:
@@ -743,6 +935,10 @@ def _cmd_serve_task_orchestration(
             actor_id=principal.subject_id,
         )
         service.list_latest()
+        ui_designs = SourceControlledUIDesignRegistry(
+            repository_root / "ui-designs" / "catalog.json"
+        )
+        ui_designs.get_active("task-manager")
         execution_targets = LocalTaskManagerExecutionTargetRegistry(
             repository_root,
             {
@@ -806,6 +1002,18 @@ def _cmd_serve_task_orchestration(
                 plan_root / "task-manager-codex",
                 artifact_registry,
             )
+        human_action_assistant = (
+            CodexHumanActionAssistant(
+                repository_root,
+                artifact_registry,
+                codex_binary=codex_binary,
+                model=quick_agent_model,
+                reasoning_effort=quick_agent_reasoning_effort,
+                timeout_seconds=min(float(quick_agent_timeout_seconds), 900.0),
+            )
+            if allow_quick_agent
+            else LocalHumanActionAssistant()
+        )
         task_manager_execution = TaskManagerExecutionService(
             LocalTaskManagerRunStore(plan_root / "task-manager-runs"),
             artifact_registry,
@@ -814,14 +1022,55 @@ def _cmd_serve_task_orchestration(
             validator=task_validator,
             source_integrator=source_integrator,
             targets=execution_targets,
+            human_action_assistant=human_action_assistant,
         )
         task_manager_execution.list_latest()
+        task_manager_coordinator = None
+        if task_executor is not None or task_validator is not None or source_integrator is not None:
+            coordinator_leases = SqliteWorkerLeaseStore(
+                plan_root / "task-manager-coordinator-leases.sqlite3"
+            )
+            coordinator_leases.migrate()
+            task_manager_coordinator = TaskManagerSerialCoordinator(
+                task_manager_execution,
+                LocalTaskManagerCoordinatorStore(
+                    plan_root / "task-manager-coordinators"
+                ),
+                coordinator_leases,
+                worker_id="task-manager-serial-coordinator",
+            )
         resolved_targets = task_manager_execution.list_targets()
+        quick_agent = None
+        if allow_quick_agent:
+            authorizer = RoleBasedAuthorizer()
+            for action in (
+                AuthorizationAction.USE_QUICK_AGENT,
+                AuthorizationAction.EXECUTE_QUICK_AGENT,
+                AuthorizationAction.ASSIST_HUMAN_DECISION,
+            ):
+                verdict = authorizer.authorize(
+                    AuthorizationRequest(principal=principal, action=action)
+                )
+                if not verdict.permitted:
+                    raise LocalIdentityError(
+                        "Quick Agent requires an active quick-agent role"
+                    )
+            quick_agent = CodexQuickAgent(
+                repository_root,
+                plan_root / "quick-agent",
+                codex_binary=codex_binary,
+                model=quick_agent_model,
+                reasoning_effort=quick_agent_reasoning_effort,
+                maximum_turn_seconds=quick_agent_timeout_seconds,
+            )
         server = create_task_orchestration_server(
             service,
             principal,
             planning_artifacts=PlanningArtifactQuery(artifact_registry),
             task_manager_execution=task_manager_execution,
+            task_manager_coordinator=task_manager_coordinator,
+            ui_designs=ui_designs,
+            quick_agent=quick_agent,
             port=port,
         )
     except (
@@ -829,11 +1078,15 @@ def _cmd_serve_task_orchestration(
         LocalIdentityError,
         TaskPlanJournalError,
         TaskManagerRunJournalError,
+        TaskManagerCoordinatorJournalError,
         TaskOrchestrationServerError,
         CodexPlanningAgentConfigurationError,
         TaskManagerCodexError,
         TaskManagerValidationError,
         TestbedInspectionError,
+        UIDesignCatalogError,
+        QuickAgentUnavailableError,
+        CodexHumanActionAssistantError,
         OSError,
         ValueError,
     ) as exc:
@@ -847,6 +1100,18 @@ def _cmd_serve_task_orchestration(
     print(f"Legacy orchestration API: {legacy_api_url}")
     print(f"authenticated principal: {principal.subject_id}")
     print(f"planning adapter: {planning_agent.adapter_id}")
+    print(
+        "Quick Agent: connected "
+        f"({quick_agent_model}, {quick_agent_reasoning_effort}, "
+        f"{quick_agent_timeout_seconds}s local turn limit)"
+        if quick_agent is not None
+        else "Quick Agent: not connected"
+    )
+    print(
+        "human-action assistant: "
+        f"{task_manager_execution.human_action_assistant_id} "
+        "(explanation and feedback drafting only; no decision authority)"
+    )
     print("append-only plan revisions; agent output remains a pending proposal")
     print(
         "execution target: BraveNewWorld Anygine small-App v1 "
@@ -1349,6 +1614,73 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_testbed.add_argument("path", type=Path)
 
+    validate_ui_design = commands.add_parser(
+        "validate-ui-design",
+        help="validate semantic UI revisions and exact active bindings",
+    )
+    validate_ui_design.add_argument("path", type=Path)
+
+    inspect_ui_design = commands.add_parser(
+        "inspect-ui-design",
+        help="inspect one active semantic UI design and elastic execution plan",
+    )
+    inspect_ui_design.add_argument("path", type=Path)
+    inspect_ui_design.add_argument("--page-id", required=True)
+    inspect_ui_design.add_argument(
+        "--observations",
+        type=Path,
+        help="optional implementation-observation JSON bound to the active revision",
+    )
+
+    validate_ui_advisor = commands.add_parser(
+        "validate-ui-advisor",
+        help="verify the pinned, core-only external UI advice snapshot",
+    )
+    validate_ui_advisor.add_argument(
+        "path",
+        nargs="?",
+        type=Path,
+        default=Path("integrations/ui-ux-pro-max/lock.json"),
+    )
+    validate_ui_advisor.add_argument("--root", type=Path)
+
+    collect_ui_advice = commands.add_parser(
+        "collect-ui-advice",
+        help="collect immutable UI/UX advice for one exact active SUID revision",
+    )
+    collect_ui_advice.add_argument(
+        "--advisor-lock",
+        type=Path,
+        default=Path("integrations/ui-ux-pro-max/lock.json"),
+    )
+    collect_ui_advice.add_argument(
+        "--catalog",
+        type=Path,
+        default=Path("ui-designs/catalog.json"),
+    )
+    collect_ui_advice.add_argument("--page-id", required=True)
+    collect_ui_advice.add_argument("--task-id", required=True)
+    collect_ui_advice.add_argument("--request-id")
+    collect_ui_advice.add_argument("--query", required=True)
+    collect_ui_advice.add_argument(
+        "--mode",
+        choices=[item.value for item in UIAdviceMode],
+        required=True,
+    )
+    collect_ui_advice.add_argument("--domain")
+    collect_ui_advice.add_argument("--stack")
+    collect_ui_advice.add_argument("--project-name")
+    collect_ui_advice.add_argument("--max-results", type=int, default=3)
+    collect_ui_advice.add_argument("--variance", type=int)
+    collect_ui_advice.add_argument("--motion", type=int)
+    collect_ui_advice.add_argument("--density", type=int)
+    collect_ui_advice.add_argument(
+        "--artifact-root",
+        type=Path,
+        default=Path(".jobslayer/ui-advice-artifacts"),
+    )
+    collect_ui_advice.add_argument("--root", type=Path)
+
     inspect_testbed = commands.add_parser(
         "inspect-testbed",
         help="inspect a registered baseline in a local testbed checkout",
@@ -1452,6 +1784,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     orchestration.add_argument(
+        "--allow-quick-agent",
+        action="store_true",
+        help=(
+            "connect the task-independent local Codex Quick Agent; the signed "
+            "session must also have the quick-agent role"
+        ),
+    )
+    orchestration.add_argument(
         "--allow-task-manager-checkpoint-integration",
         action="store_true",
         help=(
@@ -1495,7 +1835,7 @@ def build_parser() -> argparse.ArgumentParser:
     orchestration.add_argument(
         "--codex-binary",
         default="codex",
-        help="Codex CLI executable used by explicitly enabled planning/task adapters",
+        help="Codex CLI executable used by explicitly enabled planning/task/Quick Agent adapters",
     )
     orchestration.add_argument(
         "--codex-model",
@@ -1514,6 +1854,23 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=120,
         help="single-attempt Codex planning timeout (1-900 seconds)",
+    )
+    orchestration.add_argument(
+        "--quick-agent-model",
+        default="gpt-5.6-sol",
+        help="model for the independently authorized Quick Agent surface",
+    )
+    orchestration.add_argument(
+        "--quick-agent-reasoning-effort",
+        choices=("none", "low", "medium", "high", "xhigh", "max", "ultra"),
+        default="xhigh",
+        help="reasoning effort for Quick Agent turns (default: xhigh)",
+    )
+    orchestration.add_argument(
+        "--quick-agent-timeout-seconds",
+        type=int,
+        default=1800,
+        help="local limit for one Quick Agent turn (30-7200 seconds)",
     )
     orchestration.add_argument("--port", type=int, default=8780)
     orchestration.add_argument("--open-browser", action="store_true")
@@ -1752,6 +2109,35 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_validate_task(arguments.path)
     if arguments.command == "validate-testbed":
         return _cmd_validate_testbed(arguments.path)
+    if arguments.command == "validate-ui-design":
+        return _cmd_validate_ui_design(arguments.path)
+    if arguments.command == "inspect-ui-design":
+        return _cmd_inspect_ui_design(
+            arguments.path,
+            page_id=arguments.page_id,
+            observations_path=arguments.observations,
+        )
+    if arguments.command == "validate-ui-advisor":
+        return _cmd_validate_ui_advisor(arguments.path, root=arguments.root)
+    if arguments.command == "collect-ui-advice":
+        return _cmd_collect_ui_advice(
+            lock_path=arguments.advisor_lock,
+            catalog_path=arguments.catalog,
+            page_id=arguments.page_id,
+            task_id=arguments.task_id,
+            request_id=arguments.request_id,
+            query=arguments.query,
+            mode=arguments.mode,
+            domain=arguments.domain,
+            stack=arguments.stack,
+            project_name=arguments.project_name,
+            max_results=arguments.max_results,
+            variance=arguments.variance,
+            motion=arguments.motion,
+            density=arguments.density,
+            artifact_root=arguments.artifact_root,
+            root=arguments.root,
+        )
     if arguments.command == "inspect-testbed":
         return _cmd_inspect_testbed(
             arguments.path,
@@ -1816,6 +2202,7 @@ def main(argv: list[str] | None = None) -> int:
             planning_agent_name=arguments.planning_agent,
             allow_external_planning_agent=arguments.allow_external_planning_agent,
             allow_external_task_execution=arguments.allow_external_task_execution,
+            allow_quick_agent=arguments.allow_quick_agent,
             allow_task_manager_local_validation=(
                 arguments.allow_task_manager_local_validation
             ),
@@ -1833,6 +2220,9 @@ def main(argv: list[str] | None = None) -> int:
             codex_model=arguments.codex_model,
             codex_timeout_seconds=arguments.codex_timeout_seconds,
             codex_reasoning_effort=arguments.codex_reasoning_effort,
+            quick_agent_model=arguments.quick_agent_model,
+            quick_agent_reasoning_effort=arguments.quick_agent_reasoning_effort,
+            quick_agent_timeout_seconds=arguments.quick_agent_timeout_seconds,
             port=arguments.port,
             open_browser=arguments.open_browser,
         )

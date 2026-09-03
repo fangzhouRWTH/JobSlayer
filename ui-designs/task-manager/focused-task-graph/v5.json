@@ -1,0 +1,1025 @@
+{
+  "schema_version": "1.0",
+  "page_id": "task-manager",
+  "scheme_id": "focused-task-graph",
+  "revision": 5,
+  "parent_revision_sha256": "4fbd7ea7d31c7fed8c00fdd36d202fc689758cc8203b79f89270219ada740521",
+  "title": "TaskManager 动态 Codex 模型与会话控制台",
+  "language": "zh-CN",
+  "design_intent": "保持五版面、任务编排核心、Calm Ops 可读性与 Quick Agent 任务链隔离不变；Agent 版面从本机 Codex App Server 动态读取可用模型、推理强度、速度层、输入能力与 Agent runtime 版本，让用户在每轮发送前选择真实受支持的组合，并持续显示剩余容量、权限边界和流式会话。",
+  "non_goals": [
+    "不以更大字号为由改变任务 DAG、工作流或后端 read model",
+    "不引入 Fluent、Spectrum 或其他运行时组件依赖",
+    "不采用霓虹、扫描线、故障动画或高强度 Cyberpunk 装饰",
+    "不隐藏候选图、权限门禁、无 run 等影响用户决定的关键事实",
+    "不把低密度解释为空白营销页面或删除审计信息",
+    "不让 Quick Agent 创建、更新或完成任务 DAG 与执行 Run",
+    "不估算 Codex 未返回的额度、成本或刷新时间",
+    "不自动批准 Codex 权限升级、网络访问或沙箱逃逸请求"
+  ],
+  "authorship": {
+    "actor_type": "human",
+    "actor_id": "product-owner",
+    "agent_adapter": null,
+    "created_at": "2026-09-03T15:47:36+08:00"
+  },
+  "regions": [
+    {
+      "unit_id": "region.task-graph",
+      "state": "stable",
+      "intent": "任务图是页面的主要工作区，首先表达任务节点、依赖关系、候选/已应用边界和执行反馈。",
+      "stability_evidence_ids": [
+        "adr-0047",
+        "ui-task-manager-production-build"
+      ],
+      "label": "任务 DAG",
+      "role": "主要空间与任务拓扑导航",
+      "responsibilities": [
+        "显示当前任务的节点和语义边",
+        "同时表达候选、规划、执行、验证和终态，但不自行推导权威状态",
+        "允许用户选择节点并把上下文传给右侧面板"
+      ],
+      "content": [
+        "任务节点名称、类型、状态和问题摘要",
+        "带关系标签的有向边",
+        "缩放、平移和适配视口控件"
+      ],
+      "interactions": [
+        "选择节点后右侧节点详情立即切换",
+        "图布局可由前端计算，但不写入领域任务 DAG"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/TaskManager.tsx",
+        "ui-framework/src/styles.css"
+      ]
+    },
+    {
+      "unit_id": "region.context-column",
+      "state": "stable",
+      "intent": "右侧上下文列在同一视野内承载当前节点详情和 Agent 对话，避免切换页面或隐藏任务图。",
+      "stability_evidence_ids": [
+        "adr-0047",
+        "ui-task-manager-production-build"
+      ],
+      "label": "上下文列",
+      "role": "所选节点与讨论的持续上下文容器",
+      "responsibilities": [
+        "纵向组织节点详情和 Agent 对话",
+        "在窄屏时允许按阅读顺序移动到任务图之后"
+      ],
+      "content": [
+        "节点详情区域",
+        "Agent 对话区域"
+      ],
+      "interactions": [
+        "保持当前节点选择对详情和对话输入同时可见"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/TaskManager.tsx",
+        "ui-framework/src/styles.css"
+      ]
+    },
+    {
+      "unit_id": "region.node-detail",
+      "state": "stable",
+      "intent": "节点详情只解释当前所选节点的结构化计划和权威执行投影，不提供绕过后端的直接状态编辑。",
+      "stability_evidence_ids": [
+        "task-manager-node-view-contract",
+        "ui-task-manager-production-build"
+      ],
+      "label": "节点详情",
+      "role": "当前节点检查器",
+      "responsibilities": [
+        "显示节点描述、类型、依赖、验收和验证要求",
+        "存在执行运行时显示 Kernel 投影和最新反馈"
+      ],
+      "content": [
+        "结构化节点字段",
+        "当前执行状态与最近反馈"
+      ],
+      "interactions": [
+        "没有选择时给出明确的选择提示"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/TaskManager.tsx"
+      ]
+    },
+    {
+      "unit_id": "region.agent-dialog",
+      "state": "stable",
+      "intent": "Agent 对话围绕当前任务和可选节点逐轮具体化计划；Agent 输出始终是待用户决定的候选内容。",
+      "stability_evidence_ids": [
+        "adr-0031",
+        "adr-0033",
+        "task-manager-api-tests"
+      ],
+      "label": "Agent 对话",
+      "role": "任务描述、讨论历史与候选 DAG 调整入口",
+      "responsibilities": [
+        "完整显示用户与 Agent 的讨论记录",
+        "把当前节点作为可见而可撤销的讨论上下文",
+        "提交消息后等待后端 revision 和候选提案"
+      ],
+      "content": [
+        "带角色和时间的消息",
+        "当前节点上下文",
+        "自然语言输入与发送反馈"
+      ],
+      "interactions": [
+        "发送期间禁用重复提交",
+        "失败时保留可见错误，不伪造新的任务图"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/TaskManager.tsx"
+      ]
+    },
+    {
+      "unit_id": "region.app-shell",
+      "state": "planned",
+      "intent": "一个持久、平静而可读的应用壳承载左侧版面导航与单一活动内容区，切换版面不复制任务真相。",
+      "stability_evidence_ids": [],
+      "label": "TaskManager 应用壳",
+      "role": "五版面共享的空间和会话边界",
+      "responsibilities": [
+        "持续显示版面导航",
+        "一次只装配一个活动版面",
+        "复用同一认证 session、任务列表和选中任务"
+      ],
+      "content": [
+        "垂直版面栏",
+        "活动版面容器"
+      ],
+      "interactions": [
+        "浏览器前进后退恢复版面",
+        "未知 hash 安全回到首页"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/TaskManager.tsx",
+        "ui-framework/src/components/task-manager/TaskManagerRail.tsx"
+      ]
+    },
+    {
+      "unit_id": "region.view-rail",
+      "state": "planned",
+      "intent": "窗口左缘的垂直栏以足够大的图标和短标签切换五个版面，并持续表达当前位置和本地连接状态。",
+      "stability_evidence_ids": [],
+      "label": "垂直版面栏",
+      "role": "主要版面导航",
+      "responsibilities": [
+        "固定顺序展示五个版面入口",
+        "以非颜色单一线索显示活动版面",
+        "显示需要关注的任务数量和本地连接状态"
+      ],
+      "content": [
+        "JobSlayer 标记",
+        "五个原生按钮",
+        "活动指示",
+        "连接状态"
+      ],
+      "interactions": [
+        "鼠标、触摸和键盘均可切换",
+        "按钮提供可访问名称、title 与 aria-current"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/task-manager/TaskManagerRail.tsx",
+        "ui-framework/src/components/task-manager/taskManagerShell.css"
+      ]
+    },
+    {
+      "unit_id": "region.home-view",
+      "state": "planned",
+      "intent": "首页只用一句产品边界、三个真实任务指标和四个工作入口建立心智模型，避免重复连接信息。",
+      "stability_evidence_ids": [],
+      "label": "首页",
+      "role": "产品说明与入口概览",
+      "responsibilities": [
+        "简短解释 JobSlayer 的控制平面边界",
+        "显示三个决策相关任务摘要",
+        "提供到其他版面的明确入口"
+      ],
+      "content": [
+        "Logo/名称",
+        "一句说明",
+        "任务记录/活动/关注统计",
+        "四个工作入口",
+        "活动 SUID 简写"
+      ],
+      "interactions": [
+        "入口卡片切换到对应版面"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/task-manager/TaskManagerViews.tsx"
+      ]
+    },
+    {
+      "unit_id": "region.agent-status-view",
+      "state": "planned",
+      "intent": "Agent 版面是与任务链解耦的本机 Codex Quick Agent，优先显示可信额度窗口、运行边界和持续可读的实时会话。",
+      "stability_evidence_ids": [],
+      "label": "Codex Quick Agent",
+      "role": "本机 Codex 容量与独立快速会话",
+      "responsibilities": [
+        "显示 Codex 官方接口返回的剩余百分比、绝对刷新时间与相对倒计时",
+        "承载独立于任务 DAG 和执行 Run 的多轮流式会话",
+        "明确区分只读讨论与当前仓库可写的快速执行",
+        "允许中断活动 turn 和从空白 UI 会话开始"
+      ],
+      "content": [
+        "额度主窗口与可选次级窗口",
+        "模型、推理强度、单轮本地上限与工作区",
+        "用户、Agent、工具和系统事件",
+        "权限模式、输入、中断和新会话操作"
+      ],
+      "interactions": [
+        "每 30 秒查询额度并允许人工强制刷新",
+        "每 750 毫秒投影规范化流式事件",
+        "turn 运行时禁用重复提交并显示中断操作",
+        "刷新失败时显示不可用原因而非估算值"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/task-manager/TaskManagerViews.tsx",
+        "ui-framework/src/components/task-manager/taskManagerShell.css",
+        "src/jobslayer/adapters/codex_quick_agent.py"
+      ]
+    },
+    {
+      "unit_id": "region.control-view",
+      "state": "planned",
+      "intent": "总控页把多任务选择、当前 Backlog 和最多六条最近事件组织为一个可扫描版面。",
+      "stability_evidence_ids": [],
+      "label": "任务 Backlog/总控",
+      "role": "跨任务态势与积压检查",
+      "responsibilities": [
+        "列出所有任务和关注数量",
+        "投影选中任务的 backlog",
+        "只在首屏投影最多六条最近 append-only 事件"
+      ],
+      "content": [
+        "任务组合列表",
+        "Backlog 节点",
+        "最近六条事件",
+        "刷新与新建入口"
+      ],
+      "interactions": [
+        "切换当前任务",
+        "跳转任务编排",
+        "刷新后端投影"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/task-manager/TaskManagerViews.tsx"
+      ]
+    },
+    {
+      "unit_id": "region.orchestration-view",
+      "state": "planned",
+      "intent": "任务编排版面封装既有 DAG、节点详情和 Agent 对话，以较大文字和更清楚面板层次保持 2:1 聚焦关系。",
+      "stability_evidence_ids": [],
+      "label": "任务编排",
+      "role": "计划讨论与候选 DAG 决定",
+      "responsibilities": [
+        "承载既有真实规划闭环",
+        "保留候选图应用/拒绝与任务新建",
+        "提高节点、详情、消息和输入区的持续阅读可读性"
+      ],
+      "content": [
+        "任务图",
+        "节点详情",
+        "Agent 对话",
+        "任务选择与候选图反馈"
+      ],
+      "interactions": [
+        "进入版面时保留当前任务与节点选择"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/TaskManager.tsx"
+      ]
+    },
+    {
+      "unit_id": "region.execution-view",
+      "state": "planned",
+      "intent": "具体任务执行页以三个摘要块和可读节点行展示 Kernel 状态、Agent observation、transition 与证据；没有 run 时显示诚实空状态。",
+      "stability_evidence_ids": [],
+      "label": "具体任务执行",
+      "role": "任务 run 与节点反馈检查",
+      "responsibilities": [
+        "合并显示 run binding、stage 与 revision",
+        "按计划顺序显示节点状态和最新反馈",
+        "区分未装配 run 与已执行事实"
+      ],
+      "content": [
+        "三个 run 摘要",
+        "节点执行序列",
+        "反馈",
+        "证据和 transition 计数"
+      ],
+      "interactions": [
+        "切换需要检查的任务",
+        "无 run 时返回任务编排"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/task-manager/TaskManagerViews.tsx"
+      ]
+    },
+    {
+      "unit_id": "region.quick-agent-capacity",
+      "state": "planned",
+      "intent": "容量摘要只投影 Codex account/rateLimits/read 返回的窗口，不从订阅价格、token 用量或时间推算余额。",
+      "stability_evidence_ids": [],
+      "label": "Codex 容量",
+      "role": "当前可用容量与刷新时间的可信摘要",
+      "responsibilities": [
+        "显示主窗口剩余百分比",
+        "同时显示相对倒计时与绝对刷新时间",
+        "保留 provider 观测时间和读取失败状态"
+      ],
+      "content": [
+        "remaining percent",
+        "reset timestamp",
+        "plan/bucket label",
+        "observation timestamp"
+      ],
+      "interactions": [
+        "周期刷新",
+        "人工立即刷新"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/task-manager/TaskManagerViews.tsx",
+        "src/jobslayer/adapters/codex_quick_agent.py"
+      ]
+    },
+    {
+      "unit_id": "region.quick-agent-console",
+      "state": "planned",
+      "intent": "控制台以大字号顺序展示用户、Agent、工具与系统事件，在长 turn 中持续给出进度且不暴露隐藏推理。",
+      "stability_evidence_ids": [],
+      "label": "Quick Agent 控制台",
+      "role": "独立 Codex 对话与快速执行表面",
+      "responsibilities": [
+        "显示规范化流式事件",
+        "提供多行输入与快捷发送",
+        "显示活动、失败、中断和超时反馈"
+      ],
+      "content": [
+        "会话事件",
+        "活动 turn 指示",
+        "错误反馈",
+        "输入区"
+      ],
+      "interactions": [
+        "发送一轮",
+        "中断活动 turn",
+        "开始新 UI 会话",
+        "内容更新后跟随最新事件"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/task-manager/TaskManagerViews.tsx",
+        "ui-framework/src/components/task-manager/taskManagerShell.css"
+      ]
+    },
+    {
+      "unit_id": "region.quick-agent-mode",
+      "state": "planned",
+      "intent": "每轮发送前显式选择只读讨论或仓库可写的快速执行，执行能力不可由自然语言暗示升级。",
+      "stability_evidence_ids": [],
+      "label": "权限模式",
+      "role": "单轮权限边界选择",
+      "responsibilities": [
+        "显示讨论为只读",
+        "显示快速执行为当前仓库可写且默认禁网",
+        "权限不足时禁用执行选择"
+      ],
+      "content": [
+        "讨论按钮",
+        "快速执行按钮",
+        "当前模式安全提示"
+      ],
+      "interactions": [
+        "活动 turn 外切换模式",
+        "执行权限由后端 capability 决定"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/task-manager/TaskManagerViews.tsx",
+        "src/jobslayer/orchestration/web.py"
+      ]
+    },
+    {
+      "unit_id": "region.quick-agent-model-controls",
+      "state": "planned",
+      "intent": "模型设置只呈现本机 Codex model/list 当前公布的选项，并在每轮发送前把模型、推理强度与速度层作为结构化参数交给后端。",
+      "stability_evidence_ids": [],
+      "label": "模型与性能选单",
+      "role": "当前 Quick Agent turn 的模型能力配置",
+      "responsibilities": [
+        "按当前模型过滤其实际支持的 reasoning effort",
+        "提供标准与 provider 公布的额外速度层",
+        "展示模型说明、输入模态、默认标记和多 Agent runtime 版本",
+        "模型切换时把失效的 effort 或速度选择恢复到受支持值"
+      ],
+      "content": [
+        "模型/版本选择",
+        "推理强度选择",
+        "响应速度选择",
+        "能力标签和当前选项说明"
+      ],
+      "interactions": [
+        "活动 turn 中锁定配置以避免中途漂移",
+        "目录不可用时禁止发送并显示明确错误",
+        "不把仅供展示的 runtime 版本伪装成可切换参数"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/task-manager/TaskManagerViews.tsx",
+        "src/jobslayer/adapters/codex_quick_agent.py"
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "unit_id": "relation.graph-context",
+      "state": "stable",
+      "intent": "宽屏中任务图位于上下文列左侧并拥有约两倍可用宽度；比例是结构意图而不是固定像素。",
+      "stability_evidence_ids": [
+        "adr-0047",
+        "ui-task-manager-production-build"
+      ],
+      "source_region_id": "region.task-graph",
+      "target_region_id": "region.context-column",
+      "relation": "left_of",
+      "preferred_ratio": "2:1",
+      "constraints": [
+        "任务图始终是宽屏主区域",
+        "窄屏可改为任务图在前、上下文列在后的单列阅读顺序"
+      ]
+    },
+    {
+      "unit_id": "relation.context-node",
+      "state": "stable",
+      "intent": "节点详情是右侧上下文列的组成部分。",
+      "stability_evidence_ids": [
+        "adr-0047"
+      ],
+      "source_region_id": "region.context-column",
+      "target_region_id": "region.node-detail",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": []
+    },
+    {
+      "unit_id": "relation.context-agent",
+      "state": "stable",
+      "intent": "Agent 对话是右侧上下文列的组成部分。",
+      "stability_evidence_ids": [
+        "adr-0047"
+      ],
+      "source_region_id": "region.context-column",
+      "target_region_id": "region.agent-dialog",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": []
+    },
+    {
+      "unit_id": "relation.node-agent",
+      "state": "stable",
+      "intent": "节点详情位于 Agent 对话之上，使用户先确认对象再输入调整意见。",
+      "stability_evidence_ids": [
+        "ui-task-manager-production-build"
+      ],
+      "source_region_id": "region.node-detail",
+      "target_region_id": "region.agent-dialog",
+      "relation": "above",
+      "preferred_ratio": "1:1",
+      "constraints": [
+        "两部分都应在正常桌面视口内保持可操作"
+      ]
+    },
+    {
+      "unit_id": "relation.shell-rail",
+      "state": "planned",
+      "intent": "应用壳持续包含版面导航。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.app-shell",
+      "target_region_id": "region.view-rail",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": []
+    },
+    {
+      "unit_id": "relation.shell-home",
+      "state": "planned",
+      "intent": "应用壳按活动状态包含首页。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.app-shell",
+      "target_region_id": "region.home-view",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": [
+        "与其他主版面互斥显示"
+      ]
+    },
+    {
+      "unit_id": "relation.shell-agent",
+      "state": "planned",
+      "intent": "应用壳按活动状态包含 Agent 状态页。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.app-shell",
+      "target_region_id": "region.agent-status-view",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": [
+        "与其他主版面互斥显示"
+      ]
+    },
+    {
+      "unit_id": "relation.shell-control",
+      "state": "planned",
+      "intent": "应用壳按活动状态包含任务总控页。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.app-shell",
+      "target_region_id": "region.control-view",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": [
+        "与其他主版面互斥显示"
+      ]
+    },
+    {
+      "unit_id": "relation.shell-orchestration",
+      "state": "planned",
+      "intent": "应用壳按活动状态包含任务编排页。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.app-shell",
+      "target_region_id": "region.orchestration-view",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": [
+        "与其他主版面互斥显示"
+      ]
+    },
+    {
+      "unit_id": "relation.shell-execution",
+      "state": "planned",
+      "intent": "应用壳按活动状态包含具体执行页。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.app-shell",
+      "target_region_id": "region.execution-view",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": [
+        "与其他主版面互斥显示"
+      ]
+    },
+    {
+      "unit_id": "relation.orchestration-graph",
+      "state": "planned",
+      "intent": "任务编排页包含任务图。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.orchestration-view",
+      "target_region_id": "region.task-graph",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": []
+    },
+    {
+      "unit_id": "relation.orchestration-context",
+      "state": "planned",
+      "intent": "任务编排页包含持续上下文列。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.orchestration-view",
+      "target_region_id": "region.context-column",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": []
+    },
+    {
+      "unit_id": "relation.rail-home",
+      "state": "planned",
+      "intent": "宽屏中版面栏位于首页左侧。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.view-rail",
+      "target_region_id": "region.home-view",
+      "relation": "left_of",
+      "preferred_ratio": "1:16",
+      "constraints": [
+        "窄屏保持左缘图标栏并隐藏短标签"
+      ]
+    },
+    {
+      "unit_id": "relation.rail-agent",
+      "state": "planned",
+      "intent": "宽屏中版面栏位于 Agent 状态页左侧。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.view-rail",
+      "target_region_id": "region.agent-status-view",
+      "relation": "left_of",
+      "preferred_ratio": "1:16",
+      "constraints": [
+        "导航不覆盖状态内容"
+      ]
+    },
+    {
+      "unit_id": "relation.rail-control",
+      "state": "planned",
+      "intent": "宽屏中版面栏位于任务总控页左侧。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.view-rail",
+      "target_region_id": "region.control-view",
+      "relation": "left_of",
+      "preferred_ratio": "1:16",
+      "constraints": [
+        "关注数量不改变栏宽"
+      ]
+    },
+    {
+      "unit_id": "relation.rail-orchestration",
+      "state": "planned",
+      "intent": "宽屏中版面栏位于任务编排页左侧。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.view-rail",
+      "target_region_id": "region.orchestration-view",
+      "relation": "left_of",
+      "preferred_ratio": "1:16",
+      "constraints": [
+        "任务图仍获得剩余空间中的主要比例"
+      ]
+    },
+    {
+      "unit_id": "relation.rail-execution",
+      "state": "planned",
+      "intent": "宽屏中版面栏位于具体执行页左侧。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.view-rail",
+      "target_region_id": "region.execution-view",
+      "relation": "left_of",
+      "preferred_ratio": "1:16",
+      "constraints": [
+        "执行序列可独立滚动"
+      ]
+    },
+    {
+      "unit_id": "relation.agent-capacity",
+      "state": "planned",
+      "intent": "Agent 版面包含容量摘要。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.agent-status-view",
+      "target_region_id": "region.quick-agent-capacity",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": []
+    },
+    {
+      "unit_id": "relation.agent-console",
+      "state": "planned",
+      "intent": "Agent 版面包含主要控制台。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.agent-status-view",
+      "target_region_id": "region.quick-agent-console",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": []
+    },
+    {
+      "unit_id": "relation.console-mode",
+      "state": "planned",
+      "intent": "权限模式是控制台输入区的组成部分。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.quick-agent-console",
+      "target_region_id": "region.quick-agent-mode",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": []
+    },
+    {
+      "unit_id": "relation.capacity-console",
+      "state": "planned",
+      "intent": "宽屏中容量与运行摘要位于主控制台左侧，控制台占主要宽度。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.quick-agent-capacity",
+      "target_region_id": "region.quick-agent-console",
+      "relation": "left_of",
+      "preferred_ratio": "1:3",
+      "constraints": [
+        "窄屏按容量摘要、边界、控制台的单列顺序排列"
+      ]
+    },
+    {
+      "unit_id": "relation.console-model-controls",
+      "state": "planned",
+      "intent": "模型与性能选单是控制台输入区的组成部分，并与权限模式共同约束下一轮，而不改变既有历史事件。",
+      "stability_evidence_ids": [],
+      "source_region_id": "region.quick-agent-console",
+      "target_region_id": "region.quick-agent-model-controls",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": [
+        "选单应在消息输入之前可见",
+        "窄屏按模型、effort、速度顺序堆叠"
+      ]
+    }
+  ],
+  "journeys": [
+    {
+      "unit_id": "journey.inspect-node",
+      "state": "stable",
+      "intent": "用户从拓扑选择一个节点并检查其完整上下文。",
+      "stability_evidence_ids": [
+        "ui-task-manager-production-build"
+      ],
+      "label": "选择并检查节点",
+      "trigger": "用户在任务图中选择一个节点",
+      "steps": [
+        {
+          "step_id": "select",
+          "actor": "user",
+          "action": "选择任务图节点",
+          "region_id": "region.task-graph",
+          "expected_feedback": "所选节点具有明确的选中反馈"
+        },
+        {
+          "step_id": "inspect",
+          "actor": "system",
+          "action": "投影对应节点的计划与执行详情",
+          "region_id": "region.node-detail",
+          "expected_feedback": "详情标题、状态和结构化信息与节点一致"
+        }
+      ],
+      "completion_signal": "用户能够确认当前讨论和检查针对同一个节点"
+    },
+    {
+      "unit_id": "journey.refine-task",
+      "state": "stable",
+      "intent": "用户以自然语言调整任务，系统记录讨论并只预览 Agent 候选 DAG。",
+      "stability_evidence_ids": [
+        "task-manager-api-tests",
+        "adr-0031"
+      ],
+      "label": "讨论并调整候选 DAG",
+      "trigger": "用户输入对任务或当前节点的调整意见",
+      "steps": [
+        {
+          "step_id": "compose",
+          "actor": "user",
+          "action": "输入并发送自然语言调整意见",
+          "region_id": "region.agent-dialog",
+          "expected_feedback": "输入进入忙碌状态且不会重复提交"
+        },
+        {
+          "step_id": "preview",
+          "actor": "system",
+          "action": "记录讨论 revision 并投影 Agent 候选 DAG",
+          "region_id": "region.task-graph",
+          "expected_feedback": "候选图明确标为尚未应用，并提供独立应用或拒绝决定"
+        }
+      ],
+      "completion_signal": "用户决定候选图后，后端返回新的权威 plan revision"
+    },
+    {
+      "unit_id": "journey.switch-view",
+      "state": "planned",
+      "intent": "用户通过左侧图标在五个版面之间建立清楚、可返回的工作位置。",
+      "stability_evidence_ids": [],
+      "label": "切换工作版面",
+      "trigger": "用户点击或键盘激活左侧版面按钮",
+      "steps": [
+        {
+          "step_id": "choose-view",
+          "actor": "user",
+          "action": "激活一个带可访问名称的导航按钮",
+          "region_id": "region.view-rail",
+          "expected_feedback": "按钮出现边框、位置指示和 aria-current"
+        },
+        {
+          "step_id": "show-view",
+          "actor": "system",
+          "action": "只显示对应主版面并更新 URL hash",
+          "region_id": "region.app-shell",
+          "expected_feedback": "标题和内容职责与所选入口一致"
+        }
+      ],
+      "completion_signal": "刷新或浏览器前进后退后仍能恢复同一版面"
+    },
+    {
+      "unit_id": "journey.inspect-execution",
+      "state": "planned",
+      "intent": "用户从任务总控定位任务，再检查该任务真实 run 与节点反馈。",
+      "stability_evidence_ids": [],
+      "label": "从总控检查具体执行",
+      "trigger": "用户在总控选择任务并进入具体任务执行页",
+      "steps": [
+        {
+          "step_id": "select-task",
+          "actor": "user",
+          "action": "选择任务组合中的一项",
+          "region_id": "region.control-view",
+          "expected_feedback": "Backlog 和最近事件同步为该任务"
+        },
+        {
+          "step_id": "open-execution",
+          "actor": "user",
+          "action": "切换到具体任务执行版面",
+          "region_id": "region.view-rail",
+          "expected_feedback": "显示同一任务的 run 或明确未装配空状态"
+        },
+        {
+          "step_id": "inspect-run",
+          "actor": "system",
+          "action": "投影 Kernel 节点状态、反馈与证据计数",
+          "region_id": "region.execution-view",
+          "expected_feedback": "状态文字与结构信号并存，不用颜色冒充完成"
+        }
+      ],
+      "completion_signal": "用户能区分计划积压、provider 反馈、验证证据和最终完成"
+    },
+    {
+      "unit_id": "journey.quick-agent-turn",
+      "state": "planned",
+      "intent": "用户先确认额度与权限模式，再发起一个与任务链无关的 Codex turn，并持续看到反馈直到终态。",
+      "stability_evidence_ids": [],
+      "label": "独立讨论或快速执行",
+      "trigger": "用户进入 Agent 版面并准备处理当前仓库中的即时问题",
+      "steps": [
+        {
+          "step_id": "inspect-capacity",
+          "actor": "user",
+          "action": "确认剩余容量与下次刷新时间",
+          "region_id": "region.quick-agent-capacity",
+          "expected_feedback": "显示 provider 原始百分比、绝对时间、倒计时和观测时间"
+        },
+        {
+          "step_id": "choose-model",
+          "actor": "user",
+          "action": "从本机目录选择模型/版本、推理强度和速度",
+          "region_id": "region.quick-agent-model-controls",
+          "expected_feedback": "只显示所选模型实际支持的组合，并解释能力与速度用量取舍"
+        },
+        {
+          "step_id": "choose-mode",
+          "actor": "user",
+          "action": "选择只读讨论或快速执行",
+          "region_id": "region.quick-agent-mode",
+          "expected_feedback": "当前权限边界以文字和选中结构同时显示"
+        },
+        {
+          "step_id": "start-turn",
+          "actor": "user",
+          "action": "发送自然语言内容",
+          "region_id": "region.quick-agent-console",
+          "expected_feedback": "输入成为用户事件，控制台进入运行中并禁止重复提交"
+        },
+        {
+          "step_id": "follow-events",
+          "actor": "system",
+          "action": "顺序投影 Agent、工具和系统事件",
+          "region_id": "region.quick-agent-console",
+          "expected_feedback": "长 turn 持续反馈，可请求中断，最终显示明确终态"
+        }
+      ],
+      "completion_signal": "本地 Codex turn 到达 completed、failed、cancelled 或 timed_out；该信号不改变任何任务状态"
+    }
+  ],
+  "requirements": [
+    {
+      "unit_id": "requirement.single-screen",
+      "state": "stable",
+      "intent": "保持一个聚焦应用壳，同时用渐进版面分离规划、总控与执行职责。",
+      "stability_evidence_ids": [
+        "user-direction-2026-09-03-view-rail",
+        "adr-0052"
+      ],
+      "strength": "must",
+      "statement": "默认 TaskManager 必须只装配一个应用壳和一个活动主版面；左侧窄栏切换首页、Agent 状态、任务总控、任务编排和具体执行，任务编排内部仍保持 DAG、节点详情与 Agent 对话的聚焦结构。",
+      "verification_hint": "检查 App DOM、hash navigation 和 production build，确认每次只有一个主版面可见且旧 mock workbench 未重新装配。"
+    },
+    {
+      "unit_id": "requirement.control-plane-truth",
+      "state": "stable",
+      "intent": "语义 UI 描述只能记录设计意图，不能成为工作流真相。",
+      "stability_evidence_ids": [
+        "product-invariant",
+        "adr-0001"
+      ],
+      "strength": "must_not",
+      "statement": "前端、描述文件和 Agent 均不得直接改变任务状态、权限、重试、验证或完成判定。",
+      "verification_hint": "所有任务状态改变仍经应用服务和 WorkflowKernel，UI design API 仅提供 read model。"
+    },
+    {
+      "unit_id": "requirement.design-status-projection",
+      "state": "planned",
+      "intent": "在编排页低干扰地显示后端活动方案 revision 与状态计数，首页只显示方案简写。",
+      "stability_evidence_ids": [],
+      "strength": "should",
+      "statement": "TaskManager 应从后端 read API 获取活动设计摘要，不能直接导入源控 JSON 或在浏览器决定活动方案。",
+      "verification_hint": "API 测试证明活动绑定唯一；浏览器检查摘要没有挤压任务选择与主任务图。"
+    },
+    {
+      "unit_id": "requirement.no-runtime-renderer",
+      "state": "stable",
+      "intent": "保留 AI 实现弹性，避免描述框架演化为低质量动态页面生成器。",
+      "stability_evidence_ids": [
+        "adr-0050"
+      ],
+      "strength": "must_not",
+      "statement": "运行时不得把语义描述自动解释为 React 组件树、CSS 或可执行命令。",
+      "verification_hint": "前端只消费活动方案摘要；具体组件仍由受测试和评审的源码实现。"
+    },
+    {
+      "unit_id": "requirement.navigation-accessibility",
+      "state": "planned",
+      "intent": "版面栏必须对指针、键盘和辅助技术同样可理解，且活动状态不只依赖颜色。",
+      "stability_evidence_ids": [],
+      "strength": "must",
+      "statement": "所有版面入口必须使用原生 button、桌面可见短标签、可访问名称、可见 focus 和 aria-current；活动项还需边框与位置标记。",
+      "verification_hint": "键盘遍历五个按钮，检查 focus、aria-label、aria-current、DOM 顺序与视觉顺序一致。"
+    },
+    {
+      "unit_id": "requirement.deep-linked-view",
+      "state": "planned",
+      "intent": "当前版面成为可恢复的展示状态，但不把任务工作流状态编码进前端路由。",
+      "stability_evidence_ids": [],
+      "strength": "should",
+      "statement": "版面切换应更新稳定 hash，刷新、前进和后退可恢复版面；旧 task-manager hash 兼容映射到任务编排。",
+      "verification_hint": "依次访问 #/home、#/agent、#/control、#/orchestration、#/execution 并验证活动入口和单一内容区。"
+    },
+    {
+      "unit_id": "requirement.honest-status",
+      "state": "planned",
+      "intent": "Agent 与执行版面只能显示后端已知事实，避免把配置、能力或空数据误称为正在运行。",
+      "stability_evidence_ids": [],
+      "strength": "must",
+      "statement": "没有 provider reference 或 run 时必须显示明确空状态；已配置 adapter、session capability、running observation 和 completed workflow state 必须分开表达。",
+      "verification_hint": "用无任务、无 run、有 run 三类 read model 检查标签与空状态，不允许前端合成完成。"
+    },
+    {
+      "unit_id": "requirement.calm-ops-style",
+      "state": "planned",
+      "intent": "用平静、低眩光而层级清楚的暗色控制台取代接近纯黑和霓虹化的技术界面。",
+      "stability_evidence_ids": [],
+      "strength": "must",
+      "statement": "TaskManager 应使用深炭灰背景、至少三级可辨表面、单一低饱和绿色强调和克制阴影；不得加入扫描线、故障动画、装饰性渐变或大面积发光。",
+      "verification_hint": "在桌面与窄屏截图中检查背景、面板、边框和活动状态层级，并确认状态仍有文字或结构信号。"
+    },
+    {
+      "unit_id": "requirement.readable-type",
+      "state": "planned",
+      "intent": "把持续阅读内容从 7–10px 微型文字提升到适合长时任务工作的字号和行距。",
+      "stability_evidence_ids": [],
+      "strength": "must",
+      "statement": "主要正文应为 13–17px，任务与节点标题至少 13px，机器元数据至少 10px；窄屏普通说明应达到 14–16px。等宽字体只用于 ID、时间、revision 和状态。",
+      "verification_hint": "检查 CSS computed rules和 1440×900、700×900 截图；确认正文、日志、节点详情、对话和输入框不再使用 7–10px。"
+    },
+    {
+      "unit_id": "requirement.information-restraint",
+      "state": "planned",
+      "intent": "每个版面只保留支持当前判断的摘要，Agent 版面以额度、运行边界和会话为唯一主线。",
+      "stability_evidence_ids": [],
+      "strength": "should",
+      "statement": "首页和执行摘要分别最多显示三个主要指标；总控首屏最多显示六条最近事件；Agent 版面不得重复任务 target/run 状态，只显示额度、会话边界和一个主控制台。",
+      "verification_hint": "检查组件和真实数据截图，确认 Agent 版面没有复制任务链状态卡，关键额度与权限边界仍直接可见。"
+    },
+    {
+      "unit_id": "requirement.quick-agent-independence",
+      "state": "planned",
+      "intent": "快速会话是便利工具而不是第二套工作流控制面。",
+      "stability_evidence_ids": [],
+      "strength": "must_not",
+      "statement": "Quick Agent API 和 UI 不得创建、更新、固化、执行或完成任务计划与 Run，也不得把会话终态写成 WorkflowKernel 状态。",
+      "verification_hint": "API 测试使用独立 adapter 并证明端点没有 task/revision 参数；检查 Quick Agent 事件不进入任务 plan/run journal。"
+    },
+    {
+      "unit_id": "requirement.provider-capacity-truth",
+      "state": "planned",
+      "intent": "容量显示必须来自 Codex 官方机器接口，缺失即不可用。",
+      "stability_evidence_ids": [],
+      "strength": "must",
+      "statement": "剩余容量必须由 account/rateLimits/read 的 usedPercent 确定性换算并保留 resetsAt；接口失败、窗口缺失或字段非法时显示不可用，不得依据订阅价格、token 或历史速度估算。",
+      "verification_hint": "以 fake app-server 测试百分比、时间戳、缓存、强制刷新和非法响应；真实只读探针确认本机登录态可返回窗口。"
+    },
+    {
+      "unit_id": "requirement.quick-agent-permission-mode",
+      "state": "planned",
+      "intent": "执行权限是显式且可验证的后端策略，不是聊天文案。",
+      "stability_evidence_ids": [],
+      "strength": "must",
+      "statement": "每轮必须显式选择 discuss 或 execute；discuss 使用 readOnly，execute 使用仅当前仓库 writableRoots，两者默认 networkAccess=false、approvalPolicy=never，后端拒绝任何 server-initiated approval 且不得调用 process/*。",
+      "verification_hint": "adapter 测试捕获 JSON-RPC 请求并断言 sandboxPolicy、writableRoots、networkAccess、approvalPolicy，RBAC 测试覆盖允许与拒绝。"
+    },
+    {
+      "unit_id": "requirement.quick-agent-streaming",
+      "state": "planned",
+      "intent": "长时 Codex 工作必须持续反馈并可控停止。",
+      "stability_evidence_ids": [],
+      "strength": "must",
+      "statement": "控制台必须投影 Agent 消息、工具输出、状态与终态，活动 turn 可中断且单进程最多一个活动 turn；本地 watchdog 必须在配置上限时请求中断。",
+      "verification_hint": "fake app-server 流式测试覆盖 delta 合并、token usage、busy 拒绝、中断与终态；浏览器检查运行指示和中断按钮。"
+    },
+    {
+      "unit_id": "requirement.provider-model-catalog-truth",
+      "state": "planned",
+      "intent": "模型选项和能力必须来自当前本机 Codex，而不是前端硬编码或根据公开模型列表推测。",
+      "stability_evidence_ids": [],
+      "strength": "must",
+      "statement": "Quick Agent 必须使用 model/list 构建模型、effort、service tier、输入模态和 Agent runtime 信息；后端必须拒绝目录未公布的组合，UI 不得把不可配置的 runtime 版本呈现成可选设置。",
+      "verification_hint": "fake App Server 覆盖目录缓存、字段归一化和非法组合拒绝；真实只读目录探针确认本机账户选项，并以最小讨论 turn 验证所选配置。"
+    }
+  ],
+  "stable_change_authorizations": [],
+  "change_summary": "修复 Quick Agent 的真实 App Server 会话兼容性，并按产品负责人指示增加动态模型/版本、reasoning effort 与响应速度选择；选项、能力与组合校验全部来自本机 model/list，保留全部 stable 设计单元、任务链隔离和 Calm Ops 可读性。"
+}

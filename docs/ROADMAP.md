@@ -63,8 +63,18 @@
 - [ ] Langfuse 或 Phoenix 二选一的观测验证；
 - [ ] Promptfoo 的模型/提示回归套件；
 - [x] 本地认证项目仪表板、证据面板和审批状态视图；
-- [~] TaskManager 聚焦 UI（当前 App 已激进收束为单屏任务图：左 2/3 React Flow DAG，右 1/3 同时显示节点详情与 Agent 对话；legacy route、Backlog/总日志 tab 和常驻治理控件已退出装配；下一步强化当前节点状态和对话调整闭环）；
-- [~] 协作式任务编排与执行（计划讨论/固化、source-pinned target、run 装配、持久 Codex、确定性 validation、源码 review/checkpoint、最终 evidence-bound human gate、真实 11-node 完成证据和 Anygine source/toolchain 内容绑定已具备；默认 target 已切换为 `brave-new-world-anygine-app-v1`；下一步是单活节点串行 coordinator 与重启恢复）；
+- [~] TaskManager 聚焦 UI（当前 App 以左缘垂直栏切换首页、Quick Agent、Backlog/总控、任务编排和
+  具体执行；编排仍保持左 2/3 DAG、右 1/3 节点详情/Agent 对话，其他版面只投影真实 read model；
+  当前 v8 在 Calm Ops、动态 Codex Quick Agent 和持久 coordinator 上加入 revision-bound 人工处理
+  指导、证据核对、正式治理按钮、追加式反馈和任务绑定只读 Agent；下一步补充 artifact 直接打开与
+  人工停顿通知）；
+- [x] 建立版本化语义弹性 UI 描述：逐单元 dirty/planned/stable、内容 hash、stable 保护、后端唯一
+  活动方案、Agent request/draft 和确定性差异处置已落地；当前 TaskManager v8 已登记并绑定外部
+  advice、真实模型目录/会话 smoke、串行 coordinator 与受治理人工确认闭环；在线编辑与
+  认证 activation command 继续后置；
+- [x] 隔离接入固定版本 UI/UX Pro Max 核心知识：只读 provider adapter、整树内容锁、原始/规范化
+  制品和 SUID/Agent evidence 约束已落地；自动查询进入 TaskManager DAG 前仍需三组人工接受试验；
+- [~] 协作式任务编排与执行（计划讨论/固化、source-pinned target、run 装配、持久 Codex、确定性 validation、源码 review/checkpoint、最终 evidence-bound human gate、真实 11-node 完成证据、Anygine source/toolchain 内容绑定和持久单步 coordinator 已具备；默认 target 为 `brave-new-world-anygine-app-v1`；Life Game 已经最终人类批准、coordinator 归档并发布到 BraveNewWorld `main`；自动 repair/取消与机器重启恢复继续后置）；
 - [x] 跨平台开发环境初始化入口（仓库 venv、固定校验的用户级 Node LTS、lockfile UI install、只读 JSON 检测与离线/分组件模式）；
 - [ ] OpenHands 适配器的有界 PoC。
 
@@ -111,19 +121,23 @@
 
 ### 迭代 A：UI 收束与可观察当前节点
 
-1. [x] 移除全局 workbench 导航和 legacy route，根入口只装配 TaskManager；
-2. [x] 固定左 2/3 DAG、右 1/3 节点详情与 Agent 对话的单屏结构；
-3. [ ] DAG 默认突出 running/blocked/next-ready 节点，详情先显示当前反馈；
-4. [ ] 强化围绕所选节点的对话调整、候选图 diff 与焦点保持；
-5. [~] 已用真实 API 数据完成 1440×1000 浏览器检查；待加入自动交互/截图回归。
+1. [x] 移除旧全局 workbench 导航和 legacy mock route，根入口只装配 TaskManager；
+2. [x] 以左缘垂直栏拆分五个聚焦版面，并在任务编排内保留左 2/3 DAG、右 1/3 上下文结构；
+3. [x] 将当前页面逐版演进并固化为后端选择的 SUID v8，在 UI 投影 scheme/revision 与设计状态摘要；
+4. [ ] DAG 默认突出 running/blocked/next-ready 节点，详情先显示当前反馈；
+5. [ ] 强化围绕所选节点的对话调整、候选图 diff 与焦点保持；
+6. [~] 已用真实 API 数据完成 Calm Ops 五版面 1440×900，以及首页/总控/编排 700×900 浏览器检查；
+   待加入自动交互/截图回归和人工接受。
 
 ### 迭代 B：持久串行 coordinator
 
-1. [ ] 定义 provider-neutral coordinator intent/cursor/lease，不新增状态所有者；
-2. [ ] 确定性选择唯一 next-ready node，同一 run 至多一个自动副作用；
-3. [ ] 按 node kind 路由 Agent、validation 或 human wait，并在每一步后刷新投影；
-4. [ ] 覆盖 API/worker/机器重启、重复 tick、失败、阻塞、取消和显式 retry；
-5. [ ] 保留所有权限、verification、独立 review/approval 与最终 completion gate。
+1. [x] 定义 provider-neutral coordinator intent/cursor/lease，不新增状态所有者；
+2. [x] 确定性选择唯一 next-ready node，同一 run 至多一个自动副作用；
+3. [x] 按 node kind 路由 Agent、validation 或 human wait，并在每一步后刷新投影；
+4. [~] 已覆盖 API、重复 tick/revision、live lease、intent 对账、失败停顿和显式 retry；机器重启、自动 repair 与取消仍待真实故障矩阵；
+5. [x] 保留所有权限、verification、独立 review/approval 与最终 completion gate。
+6. [x] 对所有当前人工计划/run 停顿投影 revision-bound 的要求、详细步骤、证据、决定和禁止动作。
+7. [x] 在执行页接入证据核对后的正式命令、append-only 人工反馈与无决定权的任务 Agent 辅助。
 
 ### 迭代 C：Anygine 小 App 真实闭环
 
@@ -131,7 +145,8 @@
 2. [x] 建立 public Anygine build-tree consumer、`hello-task`、真实 C++ build 与 3-frame Vulkan smoke；
 3. [x] 为 run workspace 建立固定 Anygine checkout/toolchain 的内容绑定、前后漂移检查 attachment；
 4. [x] 将真实 build/CTest/GPU smoke 作为 source-controlled validation checks，并在隔离 worktree 通过真实部署验证；
-5. [ ] 选择一个具体小 App，经 TaskManager 串行完成完整规划、执行、反馈和最终人工门禁。
+5. [x] Life Game 已经 TaskManager 串行完成规划、源码检查点、原生 build/CTest、Vulkan/UI smoke、
+   policy 验证接受、最终人类批准和 coordinator 归档；目标库 `main` 已发布并核对远端提交。
 
 ## 风险登记
 

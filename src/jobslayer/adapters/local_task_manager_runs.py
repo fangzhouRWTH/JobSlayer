@@ -97,6 +97,11 @@ def build_task_manager_run_record(
                 raise TaskManagerRunRevisionConflictError(
                     "TaskManager run append rewrote Kernel transition history"
                 )
+            interaction_prefix = new.human_interactions[: len(old.human_interactions)]
+            if interaction_prefix != old.human_interactions:
+                raise TaskManagerRunRevisionConflictError(
+                    "TaskManager run append rewrote human interaction history"
+                )
     payload: dict[str, object] = {
         "schema_version": "1.0",
         "record_id": f"task-manager-run-record-{uuid4().hex}",

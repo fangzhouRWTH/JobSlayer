@@ -53,6 +53,12 @@ from jobslayer.task_manager.binding import (
     assess_plan_for_target,
     describe_execution_target,
 )
+from jobslayer.task_manager.guidance import (
+    TaskManagerHumanActionAssistant,
+    TaskManagerHumanActionGuidance,
+    TaskManagerHumanInteraction,
+    TaskManagerHumanInteractionKind,
+)
 from jobslayer.workflow.kernel import WorkflowKernel
 
 
@@ -117,6 +123,7 @@ class TaskManagerExecutionService:
         validator: TaskManagerValidator | None = None,
         source_integrator: TaskManagerSourceIntegrator | None = None,
         targets: TaskManagerExecutionTargetRegistry | None = None,
+        human_action_assistant: TaskManagerHumanActionAssistant | None = None,
     ):
         if not actor_id.strip():
             raise ValueError("TaskManager execution actor id must not be blank")
@@ -127,6 +134,7 @@ class TaskManagerExecutionService:
         self.validator = validator
         self.source_integrator = source_integrator
         self.targets = targets
+        self.human_action_assistant = human_action_assistant
         self._command_lock = threading.Lock()
 
     @property
@@ -154,6 +162,18 @@ class TaskManagerExecutionService:
         return (
             self.source_integrator.adapter_id
             if self.source_integrator is not None
+            else None
+        )
+
+    @property
+    def human_action_assistant_available(self) -> bool:
+        return self.human_action_assistant is not None
+
+    @property
+    def human_action_assistant_id(self) -> str | None:
+        return (
+            self.human_action_assistant.adapter_id
+            if self.human_action_assistant is not None
             else None
         )
 
@@ -1307,9 +1327,14 @@ class TaskManagerExecutionService:
         *,
         expected_run_revision: int,
         rationale: str,
+        reviewer_actor_type: ActorType = ActorType.HUMAN,
     ) -> TaskManagerRunRevisionRecord:
         """Accept a verified artifact-only node without claiming source integration."""
 
+        if reviewer_actor_type not in {ActorType.HUMAN, ActorType.POLICY}:
+            raise TaskManagerExecutionNodeNotReadyError(
+                "artifact-only acceptance requires a human or policy reviewer"
+            )
         reason = " ".join(rationale.split()).strip()
         if not reason:
             raise TaskManagerExecutionNodeNotReadyError(
@@ -1359,6 +1384,7 @@ class TaskManagerExecutionService:
                 "workflow_task_id": node.workflow_task_id,
                 "verification_report_id": node.verification_report.report_id,
                 "verification_artifact_id": node.verification_artifact_id,
+                "reviewer_actor_type": reviewer_actor_type.value,
                 "reviewer_id": self.actor_id,
                 "rationale": reason,
                 "accepted_deliverables": list(node.node.deliverables),
@@ -1389,7 +1415,7 @@ class TaskManagerExecutionService:
             WorkflowKernel(journal).transition(
                 task_id=node.workflow_task_id,
                 to_state=TaskState.DELIVERABLE_ACCEPTED,
-                actor_type=ActorType.HUMAN,
+                actor_type=reviewer_actor_type,
                 actor_id=self.actor_id,
                 reason=reason,
                 verification_report=node.verification_report,
@@ -1408,7 +1434,7 @@ class TaskManagerExecutionService:
             )
             return self.store.append(
                 changed,
-                actor_type=ActorType.HUMAN,
+                actor_type=reviewer_actor_type,
                 actor_id=self.actor_id,
                 operation="node.verified_deliverable_accepted",
                 node_id=node_id,
@@ -1422,9 +1448,14 @@ class TaskManagerExecutionService:
         expected_run_revision: int,
         rationale: str,
         findings: tuple[str, ...] = (),
+        reviewer_actor_type: ActorType = ActorType.HUMAN,
     ) -> TaskManagerRunRevisionRecord:
         """Accept one verified source patch for an independent merge decision."""
 
+        if reviewer_actor_type not in {ActorType.HUMAN, ActorType.AGENT}:
+            raise TaskManagerExecutionNodeNotReadyError(
+                "source review requires a human or agent reviewer"
+            )
         reason = " ".join(rationale.split()).strip()
         normalized_findings = tuple(
             item for item in (" ".join(value.split()).strip() for value in findings) if item
@@ -1457,7 +1488,7 @@ class TaskManagerExecutionService:
             review = ReviewReport(
                 review_id=f"tmreview-{uuid4().hex}",
                 task_id=node.workflow_task_id,
-                reviewer_actor_type=ActorType.HUMAN,
+                reviewer_actor_type=reviewer_actor_type,
                 reviewer_id=self.actor_id,
                 patch_sha256=report.source_patch_sha256,
                 status=ReviewStatus.ACCEPTED,
@@ -1498,7 +1529,7 @@ class TaskManagerExecutionService:
             WorkflowKernel(journal).transition(
                 task_id=node.workflow_task_id,
                 to_state=TaskState.MERGE_REVIEW,
-                actor_type=ActorType.HUMAN,
+                actor_type=reviewer_actor_type,
                 actor_id=self.actor_id,
                 reason=reason,
                 verification_report=report,
@@ -1518,7 +1549,7 @@ class TaskManagerExecutionService:
             )
             return self.store.append(
                 changed,
-                actor_type=ActorType.HUMAN,
+                actor_type=reviewer_actor_type,
                 actor_id=self.actor_id,
                 operation="node.source_review_accepted",
                 node_id=node_id,
@@ -1751,6 +1782,249 @@ class TaskManagerExecutionService:
                 actor_id=self.actor_id,
                 operation="node.source_checkpoint_integrated",
                 node_id=node_id,
+            )
+
+    def record_human_feedback(
+        self,
+        run_id: str,
+        node_id: str,
+        *,
+        guidance: TaskManagerHumanActionGuidance,
+        decision_id: str,
+        content: str,
+        expected_run_revision: int,
+    ) -> TaskManagerRunRevisionRecord:
+        """Append explicit non-transitioning feedback to the governed run journal."""
+
+        message = self._human_message(content)
+        with self._command_lock:
+            latest = self._expected(run_id, expected_run_revision)
+            node = self._node(latest.snapshot, node_id)
+            self._validate_human_guidance(latest, node, guidance)
+            decision = next(
+                (item for item in guidance.decisions if item.decision_id == decision_id),
+                None,
+            )
+            if decision is None:
+                raise TaskManagerExecutionNodeNotReadyError(
+                    "human feedback decision is not offered by the current guidance"
+                )
+            now = datetime.now(UTC)
+            interaction_id = f"tminteraction-{uuid4().hex}"
+            artifact = self.artifacts.register_bytes(
+                task_id=node.workflow_task_id,
+                run_id=run_id,
+                artifact_type="task-manager-human-feedback",
+                producer=self.actor_id,
+                content=json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "interaction_id": interaction_id,
+                        "guidance_id": guidance.guidance_id,
+                        "decision_id": decision.decision_id,
+                        "decision_label": decision.label,
+                        "content": message,
+                        "actor_type": ActorType.HUMAN.value,
+                        "actor_id": self.actor_id,
+                        "based_on_plan_revision": guidance.expected_plan_revision,
+                        "based_on_run_revision": guidance.expected_run_revision,
+                        "created_at": now.isoformat(),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8"),
+                metadata={
+                    "guidance_id": guidance.guidance_id,
+                    "node_id": node_id,
+                    "decision_id": decision.decision_id,
+                    "based_on_plan_revision": guidance.expected_plan_revision,
+                    "based_on_run_revision": guidance.expected_run_revision,
+                },
+            )
+            interaction = TaskManagerHumanInteraction(
+                interaction_id=interaction_id,
+                guidance_id=guidance.guidance_id,
+                kind=TaskManagerHumanInteractionKind.FEEDBACK,
+                node_id=node_id,
+                actor_type=ActorType.HUMAN,
+                actor_id=self.actor_id,
+                content=message,
+                decision_id=decision.decision_id,
+                based_on_plan_revision=guidance.expected_plan_revision,
+                based_on_run_revision=expected_run_revision,
+                evidence_artifact_ids=(artifact.artifact_id,),
+                created_at=now,
+            )
+            changed = self._replace_node(
+                latest.snapshot,
+                node_id,
+                human_interactions=(*node.human_interactions, interaction),
+            )
+            return self.store.append(
+                changed,
+                actor_type=ActorType.HUMAN,
+                actor_id=self.actor_id,
+                operation=f"node.human_feedback_recorded:{decision.decision_id}",
+                node_id=node_id,
+            )
+
+    def request_human_action_assistance(
+        self,
+        run_id: str,
+        node_id: str,
+        *,
+        guidance: TaskManagerHumanActionGuidance,
+        content: str,
+        expected_run_revision: int,
+    ) -> TaskManagerRunRevisionRecord:
+        """Record an intent and one read-only assistant outcome without deciding."""
+
+        assistant = self.human_action_assistant
+        if assistant is None:
+            raise TaskManagerExecutionAdapterUnavailableError(
+                "TaskManager human-action assistant is not configured"
+            )
+        message = self._human_message(content)
+        with self._command_lock:
+            latest = self._expected(run_id, expected_run_revision)
+            node = self._node(latest.snapshot, node_id)
+            self._validate_human_guidance(latest, node, guidance)
+            now = datetime.now(UTC)
+            request_id = f"tminteraction-{uuid4().hex}"
+            request_artifact = self.artifacts.register_bytes(
+                task_id=node.workflow_task_id,
+                run_id=run_id,
+                artifact_type="task-manager-human-assistant-request",
+                producer=self.actor_id,
+                content=json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "interaction_id": request_id,
+                        "guidance": guidance.model_dump(mode="json"),
+                        "content": message,
+                        "actor_id": self.actor_id,
+                        "created_at": now.isoformat(),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8"),
+                metadata={
+                    "guidance_id": guidance.guidance_id,
+                    "node_id": node_id,
+                    "based_on_plan_revision": guidance.expected_plan_revision,
+                    "based_on_run_revision": guidance.expected_run_revision,
+                },
+            )
+            request = TaskManagerHumanInteraction(
+                interaction_id=request_id,
+                guidance_id=guidance.guidance_id,
+                kind=TaskManagerHumanInteractionKind.ASSISTANT_REQUEST,
+                node_id=node_id,
+                actor_type=ActorType.HUMAN,
+                actor_id=self.actor_id,
+                content=message,
+                based_on_plan_revision=guidance.expected_plan_revision,
+                based_on_run_revision=expected_run_revision,
+                evidence_artifact_ids=(request_artifact.artifact_id,),
+                created_at=now,
+            )
+            requested = self.store.append(
+                self._replace_node(
+                    latest.snapshot,
+                    node_id,
+                    human_interactions=(*node.human_interactions, request),
+                ),
+                actor_type=ActorType.HUMAN,
+                actor_id=self.actor_id,
+                operation="node.human_assistance_requested",
+                node_id=node_id,
+            )
+            requested_node = self._node(requested.snapshot, node_id)
+            try:
+                reply = assistant.assist(
+                    task_id=node.workflow_task_id,
+                    run_id=run_id,
+                    guidance=guidance,
+                    interactions=requested_node.human_interactions,
+                    user_message=message,
+                )
+                if reply.evidence_artifact_ids:
+                    self._verify_evidence(
+                        reply.evidence_artifact_ids,
+                        task_id=node.workflow_task_id,
+                        run_id=run_id,
+                    )
+                kind = TaskManagerHumanInteractionKind.ASSISTANT_RESPONSE
+                actor_id = reply.adapter_id
+                response = reply.content
+                evidence_ids = reply.evidence_artifact_ids
+                operation = "node.human_assistance_responded"
+            except (OSError, RuntimeError, TypeError, ValueError, ValidationError) as exc:
+                kind = TaskManagerHumanInteractionKind.ASSISTANT_ERROR
+                actor_id = assistant.adapter_id
+                response = f"Agent 辅助失败：{str(exc)[:900]}"
+                failure = self.artifacts.register_bytes(
+                    task_id=node.workflow_task_id,
+                    run_id=run_id,
+                    artifact_type="task-manager-human-assistant-error",
+                    producer=assistant.adapter_id,
+                    content=response.encode("utf-8"),
+                    metadata={
+                        "guidance_id": guidance.guidance_id,
+                        "node_id": node_id,
+                        "request_interaction_id": request_id,
+                    },
+                )
+                evidence_ids = (failure.artifact_id,)
+                operation = "node.human_assistance_failed"
+            outcome = TaskManagerHumanInteraction(
+                interaction_id=f"tminteraction-{uuid4().hex}",
+                guidance_id=guidance.guidance_id,
+                kind=kind,
+                node_id=node_id,
+                actor_type=ActorType.AGENT,
+                actor_id=actor_id,
+                content=response,
+                based_on_plan_revision=guidance.expected_plan_revision,
+                based_on_run_revision=expected_run_revision,
+                evidence_artifact_ids=evidence_ids,
+                created_at=datetime.now(UTC),
+            )
+            changed = self._replace_node(
+                requested.snapshot,
+                node_id,
+                human_interactions=(*requested_node.human_interactions, outcome),
+            )
+            return self.store.append(
+                changed,
+                actor_type=ActorType.AGENT,
+                actor_id=actor_id,
+                operation=operation,
+                node_id=node_id,
+            )
+
+    @staticmethod
+    def _human_message(content: str) -> str:
+        message = content.strip()
+        if not message or len(message) > 12_000 or "\x00" in message:
+            raise ValueError("human interaction content must be 1-12000 characters without NUL bytes")
+        return message
+
+    @staticmethod
+    def _validate_human_guidance(
+        run: TaskManagerRunRevisionRecord,
+        node: TaskManagerNodeExecution,
+        guidance: TaskManagerHumanActionGuidance,
+    ) -> None:
+        if (
+            guidance.node_id != node.node.node_id
+            or guidance.expected_plan_revision != run.snapshot.plan_revision
+            or guidance.expected_run_revision != run.sequence
+        ):
+            raise TaskManagerExecutionNodeNotReadyError(
+                "human interaction guidance is stale or belongs to another node"
             )
 
     def _expected(

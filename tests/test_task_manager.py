@@ -14,7 +14,11 @@ from jobslayer.application.task_orchestration import (
     StaleTaskPlanRevisionError,
     TaskOrchestrationService,
 )
-from jobslayer.task_manager import ManagedNodeState, ManagedTaskStage
+from jobslayer.task_manager import (
+    ManagedNodeState,
+    ManagedTaskStage,
+    TaskManagerHumanActionKind,
+)
 
 
 class TaskManagerServiceTests(unittest.TestCase):
@@ -45,6 +49,13 @@ class TaskManagerServiceTests(unittest.TestCase):
         )
         self.assertEqual(len(created.backlog), len(created.nodes))
         self.assertFalse(created.execution_available)
+        self.assertEqual(len(created.human_actions), 1)
+        self.assertEqual(
+            created.human_actions[0].kind,
+            TaskManagerHumanActionKind.PROPOSAL_DECISION,
+        )
+        self.assertGreaterEqual(len(created.human_actions[0].steps), 5)
+        self.assertEqual(created.human_actions[0].expected_plan_revision, created.task.revision)
         self.assertEqual(
             created.execution_blockers,
             (RUN_ASSEMBLY_NOT_CONFIGURED,),
@@ -62,6 +73,10 @@ class TaskManagerServiceTests(unittest.TestCase):
         self.assertTrue(
             all(item.state is ManagedNodeState.PLANNED for item in applied.nodes)
         )
+        self.assertEqual(
+            applied.human_actions[0].kind,
+            TaskManagerHumanActionKind.PLAN_FINALIZATION,
+        )
 
         finalized = self.manager.finalize(
             applied.task.task_id,
@@ -72,6 +87,10 @@ class TaskManagerServiceTests(unittest.TestCase):
             all(item.state is ManagedNodeState.READY for item in finalized.nodes)
         )
         self.assertFalse(finalized.execution_available)
+        self.assertEqual(
+            finalized.human_actions[0].kind,
+            TaskManagerHumanActionKind.RUN_ASSEMBLY,
+        )
         self.assertIn("执行运行", finalized.backlog[0].reason)
 
         summaries = self.manager.list_tasks()

@@ -7,7 +7,12 @@ from jobslayer.application.task_orchestration import (
     StaleTaskPlanRevisionError,
     TaskOrchestrationService,
 )
-from jobslayer.application.task_manager_execution import TaskManagerExecutionService
+from jobslayer.application.task_manager_execution import (
+    StaleTaskManagerRunRevisionError,
+    TaskManagerExecutionService,
+)
+from jobslayer.application.task_manager_coordinator import TaskManagerSerialCoordinator
+from jobslayer.application.task_manager_guidance import project_human_actions
 from jobslayer.domain.models import ActorType, TaskState
 from jobslayer.orchestration import (
     DiscussionRole,
@@ -29,6 +34,8 @@ from jobslayer.task_manager import (
     TaskManagerRunRevisionRecord,
     TaskManagerRunSnapshot,
     TaskManagerRunStage,
+    TaskManagerCoordinatorSnapshot,
+    TaskManagerHumanActionGuidance,
 )
 from jobslayer.task_manager.binding import (
     TaskManagerExecutionTarget,
@@ -62,9 +69,13 @@ class TaskManagerService:
         self,
         planning: TaskOrchestrationService,
         execution: TaskManagerExecutionService | None = None,
+        coordinator: TaskManagerSerialCoordinator | None = None,
     ):
+        if coordinator is not None and execution is None:
+            raise ValueError("TaskManager coordinator requires execution service")
         self.planning = planning
         self.execution = execution
+        self.coordinator = coordinator
 
     def list_tasks(self) -> tuple[ManagedTaskSummary, ...]:
         summaries = tuple(
@@ -397,6 +408,109 @@ class TaskManagerService:
         )
         return self.get(task_id)
 
+    def record_human_action_feedback(
+        self,
+        task_id: str,
+        run_id: str,
+        guidance_id: str,
+        *,
+        decision_id: str,
+        content: str,
+        expected_plan_revision: int,
+        expected_run_revision: int,
+    ) -> ManagedTaskDetail:
+        execution = self._require_execution_run(task_id, run_id)
+        guidance = self._current_human_guidance(
+            task_id,
+            run_id,
+            guidance_id,
+            expected_plan_revision=expected_plan_revision,
+            expected_run_revision=expected_run_revision,
+        )
+        assert guidance.node_id is not None
+        execution.record_human_feedback(
+            run_id,
+            guidance.node_id,
+            guidance=guidance,
+            decision_id=decision_id,
+            content=content,
+            expected_run_revision=expected_run_revision,
+        )
+        return self.get(task_id)
+
+    def request_human_action_assistance(
+        self,
+        task_id: str,
+        run_id: str,
+        guidance_id: str,
+        *,
+        content: str,
+        expected_plan_revision: int,
+        expected_run_revision: int,
+    ) -> ManagedTaskDetail:
+        execution = self._require_execution_run(task_id, run_id)
+        guidance = self._current_human_guidance(
+            task_id,
+            run_id,
+            guidance_id,
+            expected_plan_revision=expected_plan_revision,
+            expected_run_revision=expected_run_revision,
+        )
+        assert guidance.node_id is not None
+        execution.request_human_action_assistance(
+            run_id,
+            guidance.node_id,
+            guidance=guidance,
+            content=content,
+            expected_run_revision=expected_run_revision,
+        )
+        return self.get(task_id)
+
+    def advance_run(
+        self,
+        task_id: str,
+        run_id: str,
+        *,
+        expected_run_revision: int,
+    ) -> ManagedTaskDetail:
+        self._require_execution_run(task_id, run_id)
+        if self.coordinator is None:
+            raise TaskManagerCapabilityUnavailableError(
+                "TaskManager serial coordinator is not configured"
+            )
+        self.coordinator.tick(
+            run_id,
+            expected_run_revision=expected_run_revision,
+        )
+        return self.get(task_id)
+
+    def _current_human_guidance(
+        self,
+        task_id: str,
+        run_id: str,
+        guidance_id: str,
+        *,
+        expected_plan_revision: int,
+        expected_run_revision: int,
+    ) -> TaskManagerHumanActionGuidance:
+        detail = self.get(task_id)
+        guidance = next(
+            (item for item in detail.human_actions if item.guidance_id == guidance_id),
+            None,
+        )
+        if (
+            detail.execution_run is None
+            or detail.execution_run.run_id != run_id
+            or guidance is None
+            or guidance.node_id is None
+            or guidance.expected_plan_revision != expected_plan_revision
+            or guidance.expected_run_revision != expected_run_revision
+        ):
+            raise StaleTaskManagerRunRevisionError(
+                "human-action guidance is stale, unavailable, or belongs to another run"
+            )
+        return guidance
+
     def _detail(
         self,
         record: TaskPlanRevisionRecord,
@@ -439,6 +553,12 @@ class TaskManagerService:
             execution_target=target,
             execution_target_assessment=target_assessment,
             execution_run=run.snapshot if run is not None else None,
+            coordinator=(
+                self.coordinator.snapshot(run.run_id)
+                if self.coordinator is not None and run is not None
+                else None
+            ),
+            human_actions=project_human_actions(record, assessment, run),
             run_assembly_available=(
                 self.execution is not None
                 and run is None
@@ -815,7 +935,13 @@ class TaskManagerService:
                     log_id=f"log-{record.record_id}",
                     category=(
                         TaskManagerLogCategory.FEEDBACK
-                        if record.operation.startswith("node.feedback_")
+                        if record.operation.startswith(
+                            (
+                                "node.feedback_",
+                                "node.human_feedback_",
+                                "node.human_assistance_",
+                            )
+                        )
                         else TaskManagerLogCategory.EXECUTION
                     ),
                     event_type=f"execution.{record.operation}",
@@ -899,7 +1025,12 @@ class TaskManagerService:
             "node.verification_failed": "确定性验证失败；节点进入修复路径。",
             "node.verified_deliverable_accepted": "Reviewer 已接受无源码差异的阶段性交付物。",
             "node.completion_gate_approved": "独立 Approver 已依据最终验证与接受证据批准完成门禁。",
+            "node.human_assistance_requested": "人类已向绑定当前验收指导的只读 Agent 请求辅助。",
+            "node.human_assistance_responded": "只读 Agent 已给出解释或反馈草稿；没有执行正式决定。",
+            "node.human_assistance_failed": "只读 Agent 辅助失败并保留错误证据；节点状态保持不变。",
         }
+        if operation.startswith("node.human_feedback_recorded:"):
+            return "人类验收反馈已绑定当前指导和 revision，节点状态保持不变。"
         return summaries.get(operation, operation)
 
     @staticmethod

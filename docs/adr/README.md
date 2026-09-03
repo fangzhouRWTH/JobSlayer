@@ -51,5 +51,13 @@
 | [ADR-0047](0047-single-screen-task-graph-preview.md) | Accepted | 当前 Web App 只装配单屏任务图预览，以左 2/3 DAG 和右 1/3 节点详情/Agent 对话验证规划交互 |
 | [ADR-0048](0048-cross-platform-local-target-deployment.md) | Accepted | 用平台稳定 Git 树摘要、run-pinned 生成依赖和显式平台 argv 闭合本地目标的 Windows/Linux 部署 |
 | [ADR-0049](0049-single-command-cross-platform-desktop-launch.md) | Accepted | 用一个 Python 入口完成初始化、最小权限身份、API/UI 健康编排、原生 WebView 与进程树回收 |
+| [ADR-0050](0050-semantic-elastic-ui-design-contract.md) | Accepted | 用内容寻址的语义 UI revision、逐单元状态、弹性差异处置和后端唯一活动绑定建立人机设计交换层 |
+| [ADR-0051](0051-pinned-read-only-ui-advice-adapter.md) | Accepted | 以固定 core 快照、只读白名单执行和 SUID 绑定证据接入外部 UI/UX 候选知识，不建立第二设计真相 |
+| [ADR-0052](0052-left-view-rail-and-focused-task-surfaces.md) | Accepted | 用左缘垂直栏拆分首页、Agent、总控、编排和执行五个互斥版面，同时保留聚焦 DAG 与单一控制面 |
+| [ADR-0053](0053-calm-ops-readable-task-manager.md) | Accepted | 用深炭灰三级表面、较大分层字号和首屏摘要收敛形成适合长时阅读的 Calm Ops TaskManager |
+| [ADR-0054](0054-task-independent-codex-quick-agent.md) | Accepted | 用 Codex App Server 提供真实限额窗口和受权限约束的独立 Quick Agent，并与任务 DAG/Run/完成判定隔离 |
+| [ADR-0055](0055-persistent-single-step-task-manager-coordinator.md) | Accepted | 用持久 intent/cursor、单 run lease 和单步 tick 串行调用既有命令，并在审查、人工门禁与故障态停止 |
+| [ADR-0056](0056-revision-bound-human-action-guidance.md) | Accepted | 用绑定精确 plan/run revision 的结构化指导，在任务图和反馈中明确人工要求、步骤、证据、决定与禁止动作 |
+| [ADR-0057](0057-governed-human-decision-controls-and-assistance.md) | Accepted | 在执行页以既有治理命令提交正式人工决定，并用 run 哈希链保留非转换反馈和只读 Agent 辅助对话 |
 
 新增或取代 ADR 时，同时更新本索引和 `docs/DEVELOPMENT_LOG.md`。Accepted ADR 不通过静默编辑改变原决定；需要改变方向时新增 superseding ADR。

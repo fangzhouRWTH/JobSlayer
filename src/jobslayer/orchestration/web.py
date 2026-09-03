@@ -9,7 +9,7 @@ import ipaddress
 import json
 import secrets
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from pydantic import ValidationError
 
@@ -21,6 +21,9 @@ from jobslayer.adapters.local_identity import RoleBasedAuthorizer
 from jobslayer.adapters.local_task_manager_runs import (
     TaskManagerRunJournalError,
     TaskManagerRunRevisionConflictError,
+)
+from jobslayer.adapters.local_task_manager_coordinator import (
+    TaskManagerCoordinatorJournalError,
 )
 from jobslayer.application.planning_artifacts import (
     PlanningArtifactNotFoundError,
@@ -54,6 +57,11 @@ from jobslayer.application.task_manager_execution import (
     TaskManagerRunAlreadyExistsError,
     TaskManagerRunNotFoundError,
 )
+from jobslayer.application.task_manager_coordinator import (
+    TaskManagerCoordinatorBusyError,
+    TaskManagerCoordinatorError,
+    TaskManagerSerialCoordinator,
+)
 from jobslayer.identity import (
     AuthenticatedPrincipal,
     AuthorizationAction,
@@ -66,6 +74,14 @@ from jobslayer.orchestration import (
     TaskPlanEdgeRelation,
     TaskPlanNodeKind,
 )
+from jobslayer.quick_agent import (
+    QuickAgent,
+    QuickAgentBusyError,
+    QuickAgentError,
+    QuickAgentMode,
+    QuickAgentUnavailableError,
+)
+from jobslayer.ui_design import UIDesignQuery
 
 
 class TaskOrchestrationServerError(RuntimeError):
@@ -82,16 +98,27 @@ class TaskOrchestrationHttpServer(ThreadingHTTPServer):
         principal: AuthenticatedPrincipal,
         planning_artifacts: PlanningArtifactQuery | None,
         task_manager_execution: TaskManagerExecutionService | None,
+        task_manager_coordinator: TaskManagerSerialCoordinator | None,
+        ui_designs: UIDesignQuery | None,
+        quick_agent: QuickAgent | None,
     ):
         self.orchestration_service = service
         self.task_manager_service = TaskManagerService(
             service,
             task_manager_execution,
+            task_manager_coordinator,
         )
         self.planning_artifacts = planning_artifacts
+        self.ui_designs = ui_designs
+        self.quick_agent = quick_agent
         self.principal = principal
         self.session_token = secrets.token_urlsafe(32)
         super().__init__(server_address, TaskOrchestrationRequestHandler)
+
+    def server_close(self) -> None:
+        if self.quick_agent is not None:
+            self.quick_agent.close()
+        super().server_close()
 
 
 class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
@@ -127,10 +154,32 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                             "planning_artifact_viewer": (
                                 self.server.planning_artifacts is not None
                             ),
+                            "semantic_ui_design": self.server.ui_designs is not None,
+                            "quick_agent_discussion": (
+                                self.server.quick_agent is not None
+                                and authorizer.authorize(
+                                    AuthorizationRequest(
+                                        principal=self.server.principal,
+                                        action=AuthorizationAction.USE_QUICK_AGENT,
+                                    )
+                                ).permitted
+                            ),
+                            "quick_agent_execution": (
+                                self.server.quick_agent is not None
+                                and authorizer.authorize(
+                                    AuthorizationRequest(
+                                        principal=self.server.principal,
+                                        action=AuthorizationAction.EXECUTE_QUICK_AGENT,
+                                    )
+                                ).permitted
+                            ),
                             "run_assembly": (
                                 planning_permitted
                                 and
                                 self.server.task_manager_service.execution is not None
+                            ),
+                            "serial_coordinator": (
+                                self.server.task_manager_service.coordinator is not None
                             ),
                             "execution_target_binding": (
                                 planning_permitted
@@ -196,6 +245,25 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                                     )
                                 ).permitted
                             ),
+                            "human_action_feedback": (
+                                self.server.task_manager_service.execution is not None
+                                and authorizer.authorize(
+                                    AuthorizationRequest(
+                                        principal=self.server.principal,
+                                        action=AuthorizationAction.RECORD_DECISION,
+                                    )
+                                ).permitted
+                            ),
+                            "human_action_agent": (
+                                self.server.task_manager_service.execution is not None
+                                and self.server.task_manager_service.execution.human_action_assistant_available
+                                and authorizer.authorize(
+                                    AuthorizationRequest(
+                                        principal=self.server.principal,
+                                        action=AuthorizationAction.ASSIST_HUMAN_DECISION,
+                                    )
+                                ).permitted
+                            ),
                         },
                         "agent_adapter": (
                             self.server.orchestration_service.planning_agent.adapter_id
@@ -206,6 +274,71 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                 return
             if segments[:2] == self.task_manager_prefix:
                 if not self._authorized():
+                    return
+                if segments == (*self.task_manager_prefix, "ui-design"):
+                    if self.server.ui_designs is None:
+                        self._send_error_json(
+                            HTTPStatus.NOT_FOUND,
+                            "semantic UI design registry is not configured",
+                        )
+                        return
+                    active_design = self.server.ui_designs.get_active("task-manager")
+                    self._send_json(
+                        HTTPStatus.OK,
+                        active_design.model_dump(mode="json"),
+                    )
+                    return
+                if segments == (*self.task_manager_prefix, "quick-agent", "capacity"):
+                    quick_agent = self.server.quick_agent
+                    if quick_agent is None:
+                        self._send_error_json(
+                            HTTPStatus.NOT_FOUND,
+                            "Quick Agent adapter is not configured",
+                        )
+                        return
+                    self._require_action(AuthorizationAction.USE_QUICK_AGENT)
+                    self._send_json(
+                        HTTPStatus.OK,
+                        quick_agent.capacity(
+                            force_refresh=(
+                                parse_qs(urlsplit(self.path).query).get("refresh")
+                                == ["1"]
+                            )
+                        ).model_dump(mode="json"),
+                    )
+                    return
+                if segments == (*self.task_manager_prefix, "quick-agent", "models"):
+                    quick_agent = self.server.quick_agent
+                    if quick_agent is None:
+                        self._send_error_json(
+                            HTTPStatus.NOT_FOUND,
+                            "Quick Agent adapter is not configured",
+                        )
+                        return
+                    self._require_action(AuthorizationAction.USE_QUICK_AGENT)
+                    self._send_json(
+                        HTTPStatus.OK,
+                        quick_agent.models(
+                            force_refresh=(
+                                parse_qs(urlsplit(self.path).query).get("refresh")
+                                == ["1"]
+                            )
+                        ).model_dump(mode="json"),
+                    )
+                    return
+                if segments == (*self.task_manager_prefix, "quick-agent", "session"):
+                    quick_agent = self.server.quick_agent
+                    if quick_agent is None:
+                        self._send_error_json(
+                            HTTPStatus.NOT_FOUND,
+                            "Quick Agent adapter is not configured",
+                        )
+                        return
+                    self._require_action(AuthorizationAction.USE_QUICK_AGENT)
+                    self._send_json(
+                        HTTPStatus.OK,
+                        quick_agent.snapshot().model_dump(mode="json"),
+                    )
                     return
                 if segments == (*self.task_manager_prefix, "tasks"):
                     tasks = self.server.task_manager_service.list_tasks()
@@ -403,8 +536,20 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
         except TaskManagerRunJournalError as exc:
             self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return
+        except TaskManagerCoordinatorJournalError as exc:
+            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
         except TaskManagerExecutionError as exc:
             self._send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+            return
+        except AuthorizationDeniedError as exc:
+            self._send_error_json(HTTPStatus.FORBIDDEN, str(exc))
+            return
+        except QuickAgentUnavailableError as exc:
+            self._send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+            return
+        except QuickAgentError as exc:
+            self._send_error_json(HTTPStatus.BAD_GATEWAY, str(exc))
             return
         self._send_error_json(HTTPStatus.NOT_FOUND, "resource not found")
 
@@ -740,6 +885,7 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
             StaleTaskManagerRunRevisionError,
             TaskManagerExecutionNodeNotReadyError,
             TaskManagerRunRevisionConflictError,
+            TaskManagerCoordinatorBusyError,
         ) as exc:
             self._send_error_json(HTTPStatus.CONFLICT, str(exc))
             return
@@ -749,8 +895,12 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
         except (
             TaskManagerCapabilityUnavailableError,
             TaskManagerExecutionAdapterUnavailableError,
+            QuickAgentUnavailableError,
         ) as exc:
             self._send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+            return
+        except QuickAgentBusyError as exc:
+            self._send_error_json(HTTPStatus.CONFLICT, str(exc))
             return
         except (
             TaskManagerExecutionEvidenceError,
@@ -760,6 +910,9 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
             return
         except TaskManagerExecutionError as exc:
             self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
+            return
+        except TaskManagerCoordinatorError as exc:
+            self._send_error_json(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
             return
         except TaskOrchestrationError as exc:
             self._send_error_json(HTTPStatus.BAD_REQUEST, str(exc))
@@ -773,6 +926,9 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
         except TaskManagerRunJournalError as exc:
             self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
             return
+        except TaskManagerCoordinatorJournalError as exc:
+            self._send_error_json(HTTPStatus.INTERNAL_SERVER_ERROR, str(exc))
+            return
         self._send_json(status, record.model_dump(mode="json"))
 
     def _mutate_task_manager(
@@ -782,6 +938,83 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
         payload: dict[str, Any],
     ) -> tuple[HTTPStatus, dict[str, Any]]:
         service = self.server.task_manager_service
+        if (
+            method == "POST"
+            and len(segments) == 8
+            and segments[:3] == (*self.task_manager_prefix, "tasks")
+            and segments[4] == "runs"
+            and segments[6:] == ("coordinator", "tick")
+        ):
+            self._keys(payload, required={"expected_run_revision"})
+            task_id, run_id = segments[3], segments[5]
+            self._require_execution_authority(task_id, run_id)
+            detail = service.advance_run(
+                task_id,
+                run_id,
+                expected_run_revision=self._integer(
+                    payload, "expected_run_revision"
+                ),
+            )
+            return HTTPStatus.OK, detail.model_dump(mode="json")
+        if (
+            method == "POST"
+            and segments == (*self.task_manager_prefix, "quick-agent", "messages")
+        ):
+            self._keys(
+                payload,
+                required={"content", "mode"},
+                optional={"model", "reasoning_effort", "service_tier"},
+            )
+            quick_agent = self.server.quick_agent
+            if quick_agent is None:
+                raise QuickAgentUnavailableError("Quick Agent adapter is not configured")
+            mode = QuickAgentMode(self._string(payload, "mode"))
+            self._require_action(
+                AuthorizationAction.EXECUTE_QUICK_AGENT
+                if mode is QuickAgentMode.EXECUTE
+                else AuthorizationAction.USE_QUICK_AGENT
+            )
+            current = quick_agent.snapshot()
+            snapshot = quick_agent.start_turn(
+                self._string(payload, "content"),
+                mode=mode,
+                model=(
+                    self._optional_string(payload, "model")
+                    if "model" in payload
+                    else current.model
+                ),
+                reasoning_effort=(
+                    self._optional_string(payload, "reasoning_effort")
+                    if "reasoning_effort" in payload
+                    else current.reasoning_effort
+                ),
+                service_tier=(
+                    self._optional_string(payload, "service_tier")
+                    if "service_tier" in payload
+                    else current.service_tier
+                ),
+            )
+            return HTTPStatus.ACCEPTED, snapshot.model_dump(mode="json")
+        if (
+            method == "POST"
+            and segments == (*self.task_manager_prefix, "quick-agent", "cancel")
+        ):
+            self._keys(payload, required=set())
+            quick_agent = self.server.quick_agent
+            if quick_agent is None:
+                raise QuickAgentUnavailableError("Quick Agent adapter is not configured")
+            self._require_action(AuthorizationAction.USE_QUICK_AGENT)
+            return HTTPStatus.OK, quick_agent.cancel().model_dump(mode="json")
+        if (
+            method == "POST"
+            and segments == (*self.task_manager_prefix, "quick-agent", "new-session")
+        ):
+            self._keys(payload, required=set())
+            quick_agent = self.server.quick_agent
+            if quick_agent is None:
+                raise QuickAgentUnavailableError("Quick Agent adapter is not configured")
+            self._require_action(AuthorizationAction.USE_QUICK_AGENT)
+            return HTTPStatus.OK, quick_agent.new_session().model_dump(mode="json")
         is_node_command = (
             method == "POST"
             and len(segments) == 9
@@ -887,6 +1120,75 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
                 run_id=self._optional_string(payload, "run_id"),
             )
             return HTTPStatus.CREATED, detail.model_dump(mode="json")
+        if (
+            method == "POST"
+            and len(segments) == 9
+            and segments[:3] == (*self.task_manager_prefix, "tasks")
+            and segments[4] == "runs"
+            and segments[6] == "human-actions"
+            and segments[8] in {"feedback", "assistant"}
+        ):
+            task_id, run_id, guidance_id, command = (
+                segments[3],
+                segments[5],
+                segments[7],
+                segments[8],
+            )
+            if command == "feedback":
+                self._keys(
+                    payload,
+                    required={
+                        "expected_plan_revision",
+                        "expected_run_revision",
+                        "decision_id",
+                        "content",
+                    },
+                )
+                self._require_action(
+                    AuthorizationAction.RECORD_DECISION,
+                    task_id=task_id,
+                    run_id=run_id,
+                )
+                detail = service.record_human_action_feedback(
+                    task_id,
+                    run_id,
+                    guidance_id,
+                    decision_id=self._string(payload, "decision_id"),
+                    content=self._string(payload, "content"),
+                    expected_plan_revision=self._integer(
+                        payload, "expected_plan_revision"
+                    ),
+                    expected_run_revision=self._integer(
+                        payload, "expected_run_revision"
+                    ),
+                )
+            else:
+                self._keys(
+                    payload,
+                    required={
+                        "expected_plan_revision",
+                        "expected_run_revision",
+                        "content",
+                    },
+                )
+                self._require_action(
+                    AuthorizationAction.ASSIST_HUMAN_DECISION,
+                    task_id=task_id,
+                    run_id=run_id,
+                )
+                detail = service.request_human_action_assistance(
+                    task_id,
+                    run_id,
+                    guidance_id,
+                    content=self._string(payload, "content"),
+                    expected_plan_revision=self._integer(
+                        payload, "expected_plan_revision"
+                    ),
+                    expected_run_revision=self._integer(
+                        payload, "expected_run_revision"
+                    ),
+                )
+            return HTTPStatus.OK, detail.model_dump(mode="json")
         if (
             method == "POST"
             and len(segments) == 9
@@ -1221,6 +1523,9 @@ def create_task_orchestration_server(
     *,
     planning_artifacts: PlanningArtifactQuery | None = None,
     task_manager_execution: TaskManagerExecutionService | None = None,
+    task_manager_coordinator: TaskManagerSerialCoordinator | None = None,
+    ui_designs: UIDesignQuery | None = None,
+    quick_agent: QuickAgent | None = None,
     host: str = "127.0.0.1",
     port: int = 8780,
 ) -> TaskOrchestrationHttpServer:
@@ -1243,6 +1548,9 @@ def create_task_orchestration_server(
             principal,
             planning_artifacts,
             task_manager_execution,
+            task_manager_coordinator,
+            ui_designs,
+            quick_agent,
         )
     except OSError as exc:
         raise TaskOrchestrationServerError(

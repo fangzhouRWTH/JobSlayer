@@ -3,8 +3,10 @@
 这是 JobSlayer Web-first 工作台。主入口现在收紧为 TaskManager；旧页面保留为 Stage 0
 实验室：
 
-- TaskManager 多任务切换、revision-bound DAG、Backlog、总日志、完整 Agent 对话、候选图决定、
-  固化和 plan-bound run 装配/反馈；
+- TaskManager 左缘垂直版面栏：首页、Codex Quick Agent、任务 Backlog/总控、任务编排和具体执行；
+  五个版面复用同一 session、任务 read model 和当前选择；
+- 任务编排继续提供 revision-bound DAG、节点详情、完整 Agent 对话和候选图决定；总控页只读投影
+  backlog/log，执行页除真实 run/feedback 外提供受治理人工决定与追加式反馈，不伪造控制面状态；
 - 多计划搜索/切换/归档、任务讨论、Agent 候选差异与应用/拒绝、结构化节点、语义边 CRUD、
   完整度评估、历史比较/派生、定稿记录，以及哈希验证的只读 Codex 规划制品查看器；
 - Workflow Studio、React Flow 图和 canonical mock IR；
@@ -56,8 +58,19 @@ TaskManager 需要先启动默认 `127.0.0.1:8780` 的认证 API：
 
 ## 页面边界
 
-- 默认路由 `#/task-manager` 调用真实本地 read/application API；左侧主面板是 DAG/Backlog/总 Log，
-  右侧是任务/节点信息和 Agent；
+TaskManager 顶部的 SUID 摘要来自认证的 `/api/task-manager/ui-design` read model。活动方案由 Python
+后端按 source-controlled catalog 精确选择；React 不直接导入描述 JSON，也不把语义描述解释成动态
+组件树。格式、状态和版本流程见 [`docs/SEMANTIC_UI_DESIGN.md`](../docs/SEMANTIC_UI_DESIGN.md)。
+
+- 默认路由 `#/home` 调用真实本地 read/application API；`#/agent`、`#/control`、
+  `#/orchestration`、`#/execution` 分别对应其余版面，旧 `#/task-manager` 映射到任务编排；
+- 左栏入口是带 `aria-label`/`aria-current` 的原生 button，活动状态不只依赖颜色；宽屏显示短标签，
+  窄屏保持左缘图标栏；
+- 当前活动视觉为 Calm Ops：深炭灰三级表面、低饱和绿色、较大分层字号和克制阴影；Agent 页只显示
+  Codex 原始额度窗口、由本机目录驱动的模型/effort/速度能力选单、运行边界和独立流式控制台，不复制
+  任务链状态；
+- Quick Agent 需要后端 `--allow-quick-agent` 与独立 RBAC role。讨论只读；快速执行只写当前仓库且
+  默认禁网、无自动审批。其消息与终态不进入任务 DAG、Run、验证或完成判定；
 - Workflow Studio、Run Inspector、Artifact Review 和 Observability 仍从 `src/mockData.ts`
   读取固定样例；
 - Task Orchestration 通过 Vite same-origin proxy 调用认证 loopback API，计划 revision 由
@@ -67,6 +80,11 @@ TaskManager 需要先启动默认 `127.0.0.1:8780` 的认证 API：
 - Planning Artifact Viewer 只读取当前 plan 的 prompt/raw JSONL/stderr/final JSON 有界预览，
   不接收存储 URI，也不能修改或删除制品；顶级 Artifact Review 页面目前仍是固定样例；
 - 讨论中的 Agent 图是待应用 proposal，只有用户显式应用/CRUD/定稿才产生新 revision；
+- Task detail 的 `human_actions` 是后端从精确 plan/run revision 派生的只读指导；任务图显示人工处理
+  标记，节点详情与执行页展示处理要求、编号步骤、证据、决定和禁止动作；执行页可在证据/边界核对后
+  调用既有正式治理命令，或只追加不改变节点状态的反馈；
+- run 级人工指导包含任务绑定 Agent 辅助线程。该入口只读解释/起草反馈，request/response/error 都
+  进入 run 哈希链，不能批准、执行或取得 Quick Agent 的仓库写入模式；
 - React Flow JSON 不是 Workflow IR；
 - React Flow 拖动坐标只按 plan 保存为浏览器 presentation metadata，不写入权威 revision；
 - finalized plan 只是用户确认的设计制品；只有显式 run assembly 才为每个节点经 Kernel 创建
@@ -84,6 +102,16 @@ TaskManager 需要先启动默认 `127.0.0.1:8780` 的认证 API：
 TaskManager 聚焦决定见 [`ADR-0036`](../docs/adr/0036-focused-task-manager-product-surface.md)。
 运行装配与反馈决定见
 [`ADR-0037`](../docs/adr/0037-plan-bound-task-manager-run-assembly.md)。
+五版面导航决定见
+[`ADR-0052`](../docs/adr/0052-left-view-rail-and-focused-task-surfaces.md)。
+Calm Ops 可读性决定见
+[`ADR-0053`](../docs/adr/0053-calm-ops-readable-task-manager.md)。
+独立 Quick Agent 决定见
+[`ADR-0054`](../docs/adr/0054-task-independent-codex-quick-agent.md)。
+人工交互指导决定见
+[`ADR-0056`](../docs/adr/0056-revision-bound-human-action-guidance.md)。
+人工确认、反馈与只读辅助决定见
+[`ADR-0057`](../docs/adr/0057-governed-human-decision-controls-and-assistance.md)。
 
 ## 依赖口径
 

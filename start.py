@@ -82,6 +82,17 @@ def _supported_host() -> bool:
     return os.name == "nt" or platform.system() == "Linux"
 
 
+def _running_in_initialized_python(python: Path) -> bool:
+    """Return whether this process belongs to the bootstrap-managed venv.
+
+    Comparing resolved executable paths is insufficient on POSIX because a
+    virtual-environment interpreter is commonly a symlink to the system
+    interpreter.  ``sys.prefix`` retains the active environment boundary.
+    """
+
+    return Path(sys.prefix).resolve() == python.parent.parent.resolve()
+
+
 def _run_initialized(arguments: argparse.Namespace, npm: Path) -> int:
     sys.path.insert(0, str(SOURCE_ROOT))
     from jobslayer.desktop.app import DesktopAppConfig, run_desktop_app
@@ -159,7 +170,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         environment["PATH"] = os.pathsep.join(
             (str(runtime.path_entry), environment.get("PATH", ""))
         )
-        if Path(sys.executable).resolve() != python.resolve():
+        if not _running_in_initialized_python(python):
             command = (str(python), str(Path(__file__).resolve()), *(argv or sys.argv[1:]))
             if os.name == "nt":
                 return subprocess.call(

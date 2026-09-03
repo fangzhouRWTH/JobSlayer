@@ -54,16 +54,18 @@ class DevelopmentCheckRunnerTests(unittest.TestCase):
                 "tests",
                 "compile",
                 "dependencies",
+                "semantic-ui-design",
+                "external-ui-advisor",
                 "ui",
                 "testbed",
                 "anygine-app-runbook",
                 "diff",
             ),
         )
-        self.assertEqual(len(invocations), 7)
+        self.assertEqual(len(invocations), 9)
         self.assertTrue(all(cwd == self.root.resolve() for _, cwd in invocations))
         self.assertFalse(report.passed)
-        self.assertIn("6/7 passed", stdout.getvalue())
+        self.assertIn("8/9 passed", stdout.getvalue())
         self.assertEqual(
             report.results[0].step.argv,
             (
@@ -77,7 +79,7 @@ class DevelopmentCheckRunnerTests(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            report.results[3].step.argv,
+            report.results[5].step.argv,
             (
                 "fixture-python",
                 "scripts/bootstrap.py",
@@ -88,6 +90,26 @@ class DevelopmentCheckRunnerTests(unittest.TestCase):
                 "ui-framework",
                 "run",
                 "check",
+            ),
+        )
+        self.assertEqual(
+            report.results[3].step.argv,
+            (
+                "fixture-python",
+                "-m",
+                "jobslayer",
+                "validate-ui-design",
+                "ui-designs/catalog.json",
+            ),
+        )
+        self.assertEqual(
+            report.results[4].step.argv,
+            (
+                "fixture-python",
+                "-m",
+                "jobslayer",
+                "validate-ui-advisor",
+                "integrations/ui-ux-pro-max/lock.json",
             ),
         )
         self.assertEqual(

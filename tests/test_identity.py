@@ -163,6 +163,64 @@ class LocalIdentityTests(unittest.TestCase):
         self.assertTrue(allowed.permitted)
         self.assertFalse(rejected.permitted)
 
+    def test_quick_agent_role_can_execute_but_planner_is_denied(self) -> None:
+        quick_agent = self.provider.verify(
+            self._session(roles=("quick-agent",)), now=self.now
+        )
+        planner = self.provider.verify(
+            self._session(roles=("planner",)), now=self.now
+        )
+        authorizer = RoleBasedAuthorizer()
+
+        allowed = authorizer.authorize(
+            AuthorizationRequest(
+                principal=quick_agent,
+                action=AuthorizationAction.EXECUTE_QUICK_AGENT,
+            ),
+            now=self.now,
+        )
+        rejected = authorizer.authorize(
+            AuthorizationRequest(
+                principal=planner,
+                action=AuthorizationAction.EXECUTE_QUICK_AGENT,
+            ),
+            now=self.now,
+        )
+
+        self.assertTrue(allowed.permitted)
+        self.assertFalse(rejected.permitted)
+
+    def test_quick_agent_can_assist_human_decision_but_planner_cannot(self) -> None:
+        quick_agent = self.provider.verify(
+            self._session(roles=("quick-agent",)), now=self.now
+        )
+        planner = self.provider.verify(
+            self._session(roles=("planner",)), now=self.now
+        )
+        authorizer = RoleBasedAuthorizer()
+
+        allowed = authorizer.authorize(
+            AuthorizationRequest(
+                principal=quick_agent,
+                action=AuthorizationAction.ASSIST_HUMAN_DECISION,
+                task_id="task-1",
+                run_id="run-1",
+            ),
+            now=self.now,
+        )
+        rejected = authorizer.authorize(
+            AuthorizationRequest(
+                principal=planner,
+                action=AuthorizationAction.ASSIST_HUMAN_DECISION,
+                task_id="task-1",
+                run_id="run-1",
+            ),
+            now=self.now,
+        )
+
+        self.assertTrue(allowed.permitted)
+        self.assertFalse(rejected.permitted)
+
     def test_issues_and_verifies_short_lived_approval_authority(self) -> None:
         authority = self.provider.issue_approval_authority(
             self._session(),

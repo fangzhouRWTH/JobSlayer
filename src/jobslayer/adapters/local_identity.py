@@ -481,6 +481,14 @@ class RoleBasedAuthorizer:
                 AuthorizationAction.MANAGE_TASK_PLAN,
             }
         ),
+        "quick-agent": frozenset(
+            {
+                AuthorizationAction.VIEW_CONTROL_PLANE,
+                AuthorizationAction.USE_QUICK_AGENT,
+                AuthorizationAction.EXECUTE_QUICK_AGENT,
+                AuthorizationAction.ASSIST_HUMAN_DECISION,
+            }
+        ),
     }
     _ALL_ACTIONS = frozenset(AuthorizationAction)
 

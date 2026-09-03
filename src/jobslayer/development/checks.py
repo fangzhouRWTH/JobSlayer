@@ -111,6 +111,28 @@ class DevelopmentCheckRunner:
                 argv=(python, "-m", "pip", "check"),
             ),
             DevelopmentCheckStep(
+                step_id="semantic-ui-design",
+                description="semantic UI revisions and exact active binding",
+                argv=(
+                    python,
+                    "-m",
+                    "jobslayer",
+                    "validate-ui-design",
+                    "ui-designs/catalog.json",
+                ),
+            ),
+            DevelopmentCheckStep(
+                step_id="external-ui-advisor",
+                description="pinned core-only UI/UX advice snapshot and data",
+                argv=(
+                    python,
+                    "-m",
+                    "jobslayer",
+                    "validate-ui-advisor",
+                    "integrations/ui-ux-pro-max/lock.json",
+                ),
+            ),
+            DevelopmentCheckStep(
                 step_id="ui",
                 description="locked external UI dependencies and production build",
                 argv=(

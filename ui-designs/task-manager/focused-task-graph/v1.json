@@ -1,0 +1,296 @@
+{
+  "schema_version": "1.0",
+  "page_id": "task-manager",
+  "scheme_id": "focused-task-graph",
+  "revision": 1,
+  "parent_revision_sha256": null,
+  "title": "TaskManager 单屏任务图",
+  "language": "zh-CN",
+  "design_intent": "把任务规划的主要注意力集中在任务 DAG、当前节点信息和 Agent 对话三者之间。描述规定信息结构、空间关系、交互反馈和不可突破的产品边界，但不规定像素、CSS 类名或具体组件实现。",
+  "non_goals": [
+    "不把语义描述解释成运行时组件树或 CSS 生成语言",
+    "不在当前页面恢复全局工作台导航、Backlog 或常驻执行治理控件",
+    "不允许浏览器或 Agent 通过描述文件改变工作流、权限或完成状态"
+  ],
+  "authorship": {
+    "actor_type": "human",
+    "actor_id": "product-owner",
+    "agent_adapter": null,
+    "created_at": "2026-09-03T11:00:00+08:00"
+  },
+  "regions": [
+    {
+      "unit_id": "region.task-graph",
+      "state": "stable",
+      "intent": "任务图是页面的主要工作区，首先表达任务节点、依赖关系、候选/已应用边界和执行反馈。",
+      "stability_evidence_ids": [
+        "adr-0047",
+        "ui-task-manager-production-build"
+      ],
+      "label": "任务 DAG",
+      "role": "主要空间与任务拓扑导航",
+      "responsibilities": [
+        "显示当前任务的节点和语义边",
+        "同时表达候选、规划、执行、验证和终态，但不自行推导权威状态",
+        "允许用户选择节点并把上下文传给右侧面板"
+      ],
+      "content": [
+        "任务节点名称、类型、状态和问题摘要",
+        "带关系标签的有向边",
+        "缩放、平移和适配视口控件"
+      ],
+      "interactions": [
+        "选择节点后右侧节点详情立即切换",
+        "图布局可由前端计算，但不写入领域任务 DAG"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/TaskManager.tsx",
+        "ui-framework/src/styles.css"
+      ]
+    },
+    {
+      "unit_id": "region.context-column",
+      "state": "stable",
+      "intent": "右侧上下文列在同一视野内承载当前节点详情和 Agent 对话，避免切换页面或隐藏任务图。",
+      "stability_evidence_ids": [
+        "adr-0047",
+        "ui-task-manager-production-build"
+      ],
+      "label": "上下文列",
+      "role": "所选节点与讨论的持续上下文容器",
+      "responsibilities": [
+        "纵向组织节点详情和 Agent 对话",
+        "在窄屏时允许按阅读顺序移动到任务图之后"
+      ],
+      "content": [
+        "节点详情区域",
+        "Agent 对话区域"
+      ],
+      "interactions": [
+        "保持当前节点选择对详情和对话输入同时可见"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/TaskManager.tsx",
+        "ui-framework/src/styles.css"
+      ]
+    },
+    {
+      "unit_id": "region.node-detail",
+      "state": "stable",
+      "intent": "节点详情只解释当前所选节点的结构化计划和权威执行投影，不提供绕过后端的直接状态编辑。",
+      "stability_evidence_ids": [
+        "task-manager-node-view-contract",
+        "ui-task-manager-production-build"
+      ],
+      "label": "节点详情",
+      "role": "当前节点检查器",
+      "responsibilities": [
+        "显示节点描述、类型、依赖、验收和验证要求",
+        "存在执行运行时显示 Kernel 投影和最新反馈"
+      ],
+      "content": [
+        "结构化节点字段",
+        "当前执行状态与最近反馈"
+      ],
+      "interactions": [
+        "没有选择时给出明确的选择提示"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/TaskManager.tsx"
+      ]
+    },
+    {
+      "unit_id": "region.agent-dialog",
+      "state": "stable",
+      "intent": "Agent 对话围绕当前任务和可选节点逐轮具体化计划；Agent 输出始终是待用户决定的候选内容。",
+      "stability_evidence_ids": [
+        "adr-0031",
+        "adr-0033",
+        "task-manager-api-tests"
+      ],
+      "label": "Agent 对话",
+      "role": "任务描述、讨论历史与候选 DAG 调整入口",
+      "responsibilities": [
+        "完整显示用户与 Agent 的讨论记录",
+        "把当前节点作为可见而可撤销的讨论上下文",
+        "提交消息后等待后端 revision 和候选提案"
+      ],
+      "content": [
+        "带角色和时间的消息",
+        "当前节点上下文",
+        "自然语言输入与发送反馈"
+      ],
+      "interactions": [
+        "发送期间禁用重复提交",
+        "失败时保留可见错误，不伪造新的任务图"
+      ],
+      "implementation_anchors": [
+        "ui-framework/src/components/TaskManager.tsx"
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "unit_id": "relation.graph-context",
+      "state": "stable",
+      "intent": "宽屏中任务图位于上下文列左侧并拥有约两倍可用宽度；比例是结构意图而不是固定像素。",
+      "stability_evidence_ids": [
+        "adr-0047",
+        "ui-task-manager-production-build"
+      ],
+      "source_region_id": "region.task-graph",
+      "target_region_id": "region.context-column",
+      "relation": "left_of",
+      "preferred_ratio": "2:1",
+      "constraints": [
+        "任务图始终是宽屏主区域",
+        "窄屏可改为任务图在前、上下文列在后的单列阅读顺序"
+      ]
+    },
+    {
+      "unit_id": "relation.context-node",
+      "state": "stable",
+      "intent": "节点详情是右侧上下文列的组成部分。",
+      "stability_evidence_ids": [
+        "adr-0047"
+      ],
+      "source_region_id": "region.context-column",
+      "target_region_id": "region.node-detail",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": []
+    },
+    {
+      "unit_id": "relation.context-agent",
+      "state": "stable",
+      "intent": "Agent 对话是右侧上下文列的组成部分。",
+      "stability_evidence_ids": [
+        "adr-0047"
+      ],
+      "source_region_id": "region.context-column",
+      "target_region_id": "region.agent-dialog",
+      "relation": "contains",
+      "preferred_ratio": null,
+      "constraints": []
+    },
+    {
+      "unit_id": "relation.node-agent",
+      "state": "stable",
+      "intent": "节点详情位于 Agent 对话之上，使用户先确认对象再输入调整意见。",
+      "stability_evidence_ids": [
+        "ui-task-manager-production-build"
+      ],
+      "source_region_id": "region.node-detail",
+      "target_region_id": "region.agent-dialog",
+      "relation": "above",
+      "preferred_ratio": "1:1",
+      "constraints": [
+        "两部分都应在正常桌面视口内保持可操作"
+      ]
+    }
+  ],
+  "journeys": [
+    {
+      "unit_id": "journey.inspect-node",
+      "state": "stable",
+      "intent": "用户从拓扑选择一个节点并检查其完整上下文。",
+      "stability_evidence_ids": [
+        "ui-task-manager-production-build"
+      ],
+      "label": "选择并检查节点",
+      "trigger": "用户在任务图中选择一个节点",
+      "steps": [
+        {
+          "step_id": "select",
+          "actor": "user",
+          "action": "选择任务图节点",
+          "region_id": "region.task-graph",
+          "expected_feedback": "所选节点具有明确的选中反馈"
+        },
+        {
+          "step_id": "inspect",
+          "actor": "system",
+          "action": "投影对应节点的计划与执行详情",
+          "region_id": "region.node-detail",
+          "expected_feedback": "详情标题、状态和结构化信息与节点一致"
+        }
+      ],
+      "completion_signal": "用户能够确认当前讨论和检查针对同一个节点"
+    },
+    {
+      "unit_id": "journey.refine-task",
+      "state": "stable",
+      "intent": "用户以自然语言调整任务，系统记录讨论并只预览 Agent 候选 DAG。",
+      "stability_evidence_ids": [
+        "task-manager-api-tests",
+        "adr-0031"
+      ],
+      "label": "讨论并调整候选 DAG",
+      "trigger": "用户输入对任务或当前节点的调整意见",
+      "steps": [
+        {
+          "step_id": "compose",
+          "actor": "user",
+          "action": "输入并发送自然语言调整意见",
+          "region_id": "region.agent-dialog",
+          "expected_feedback": "输入进入忙碌状态且不会重复提交"
+        },
+        {
+          "step_id": "preview",
+          "actor": "system",
+          "action": "记录讨论 revision 并投影 Agent 候选 DAG",
+          "region_id": "region.task-graph",
+          "expected_feedback": "候选图明确标为尚未应用，并提供独立应用或拒绝决定"
+        }
+      ],
+      "completion_signal": "用户决定候选图后，后端返回新的权威 plan revision"
+    }
+  ],
+  "requirements": [
+    {
+      "unit_id": "requirement.single-screen",
+      "state": "stable",
+      "intent": "保持当前聚焦产品面的信息范围。",
+      "stability_evidence_ids": [
+        "adr-0047"
+      ],
+      "strength": "must",
+      "statement": "默认 TaskManager 只能装配任务图、当前节点详情和 Agent 对话这一单屏主结构。",
+      "verification_hint": "检查 App 路由与 TaskManager DOM，确认没有恢复 legacy 工作台页面或常驻治理面板。"
+    },
+    {
+      "unit_id": "requirement.control-plane-truth",
+      "state": "stable",
+      "intent": "语义 UI 描述只能记录设计意图，不能成为工作流真相。",
+      "stability_evidence_ids": [
+        "product-invariant",
+        "adr-0001"
+      ],
+      "strength": "must_not",
+      "statement": "前端、描述文件和 Agent 均不得直接改变任务状态、权限、重试、验证或完成判定。",
+      "verification_hint": "所有任务状态改变仍经应用服务和 WorkflowKernel，UI design API 仅提供 read model。"
+    },
+    {
+      "unit_id": "requirement.design-status-projection",
+      "state": "planned",
+      "intent": "在页面中低干扰地显示后端当前激活的语义 UI 方案、revision 和 dirty/planned/stable 统计，以便追踪设计状态。",
+      "stability_evidence_ids": [],
+      "strength": "should",
+      "statement": "TaskManager 应从后端 read API 获取活动设计摘要，不能直接导入源控 JSON 或在浏览器决定活动方案。",
+      "verification_hint": "API 测试证明活动绑定唯一且前端 production build 通过；视觉上摘要不挤占主任务图。"
+    },
+    {
+      "unit_id": "requirement.no-runtime-renderer",
+      "state": "stable",
+      "intent": "保留 AI 实现弹性，避免描述框架演化为低质量动态页面生成器。",
+      "stability_evidence_ids": [
+        "adr-0050"
+      ],
+      "strength": "must_not",
+      "statement": "运行时不得把语义描述自动解释为 React 组件树、CSS 或可执行命令。",
+      "verification_hint": "前端只消费活动方案摘要；具体组件仍由受测试和评审的源码实现。"
+    }
+  ],
+  "stable_change_authorizations": [],
+  "change_summary": "建立 TaskManager 当前单屏方案的首个完整语义 UI 基线，并把活动方案状态投影列为 planned 工作。"
+}

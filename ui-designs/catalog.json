@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0",
+  "descriptors": [
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 1,
+      "path": "task-manager/focused-task-graph/v1.json",
+      "descriptor_sha256": "7940b5e6f43655162e40f403bd0608027a45ce0f878890ad4395f06cbcded49e"
+    },
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 2,
+      "path": "task-manager/focused-task-graph/v2.json",
+      "descriptor_sha256": "cdb4e3bed81557248ae11bcda1a41cbcc8eb2f940abe193ea10c4818c1b0126e"
+    },
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 3,
+      "path": "task-manager/focused-task-graph/v3.json",
+      "descriptor_sha256": "260aeb61e0f1ef48e1ae5df905b527c95bc3d9c65e27e6a8387a52ae88c7f215"
+    },
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 4,
+      "path": "task-manager/focused-task-graph/v4.json",
+      "descriptor_sha256": "4fbd7ea7d31c7fed8c00fdd36d202fc689758cc8203b79f89270219ada740521"
+    },
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 5,
+      "path": "task-manager/focused-task-graph/v5.json",
+      "descriptor_sha256": "22262370aca04df05677630cd127f7e3fe678d1c568af1f49b8a9eb27b63cb13"
+    },
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 6,
+      "path": "task-manager/focused-task-graph/v6.json",
+      "descriptor_sha256": "47f1891fc52406e679514cfce760a595b0200830f4d0f973d59630e4d7181057"
+    },
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 7,
+      "path": "task-manager/focused-task-graph/v7.json",
+      "descriptor_sha256": "3f9c39068a17081511cc5b88e9b6f60d37333db38660ab86189c7f00e239ec79"
+    },
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 8,
+      "path": "task-manager/focused-task-graph/v8.json",
+      "descriptor_sha256": "d10e3be4b56de0813521d197fa656bb1ac22d9ffce2a5fa8548a7acbd90e8ed2"
+    }
+  ],
+  "active_bindings": [
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 8,
+      "descriptor_sha256": "d10e3be4b56de0813521d197fa656bb1ac22d9ffce2a5fa8548a7acbd90e8ed2",
+      "activated_by_actor_type": "human",
+      "activated_by": "product-owner",
+      "activated_at": "2026-09-03T18:27:36+08:00",
+      "decision": "按产品负责人要求，在执行页补齐人工核对后的确认、否决/修改反馈和任务绑定 Agent 交互入口；正式决定仍走既有治理命令，反馈与只读 Agent 只追加审计事实，不改变权限或工作流所有权。",
+      "evidence_ids": [
+        "adr-0057",
+        "task-manager-human-interaction-tests",
+        "ui-task-manager-production-build-v8",
+        "user-direction-2026-09-03-human-confirmation-entry"
+      ]
+    }
+  ]
+}

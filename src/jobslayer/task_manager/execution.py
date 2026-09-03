@@ -21,6 +21,7 @@ from jobslayer.domain.models import (
     WorkspaceInspection,
 )
 from jobslayer.orchestration import IDENTIFIER_PATTERN, TaskPlanNode
+from jobslayer.task_manager.guidance import TaskManagerHumanInteraction
 from jobslayer.task_manager.binding import (
     TaskManagerDependencyAttachment,
     TaskManagerExecutionBinding,
@@ -290,6 +291,7 @@ class TaskManagerNodeExecution(DomainModel):
     )
     integration_result: SourceIntegrationResult | None = None
     integration_artifact_id: str | None = None
+    human_interactions: tuple[TaskManagerHumanInteraction, ...] = ()
 
     @model_validator(mode="after")
     def validate_node_execution(self) -> TaskManagerNodeExecution:
@@ -305,6 +307,11 @@ class TaskManagerNodeExecution(DomainModel):
             raise ValueError("node workflow state does not match its transition history")
         if self.node.node_id in self.dependency_node_ids:
             raise ValueError("managed node cannot depend on itself")
+        if any(item.node_id != self.node.node_id for item in self.human_interactions):
+            raise ValueError("human interaction belongs to another node")
+        interaction_ids = tuple(item.interaction_id for item in self.human_interactions)
+        if len(interaction_ids) != len(set(interaction_ids)):
+            raise ValueError("human interaction ids must be unique")
         if self.provider_reference is not None:
             if self.provider_start_key != self.provider_reference.provider_start_key:
                 raise ValueError("provider reference does not match the persisted start key")

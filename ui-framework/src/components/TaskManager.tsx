@@ -30,14 +30,30 @@ import {
   X,
 } from "lucide-react";
 import type {
+  ActiveSemanticUIDesign,
   ManagedNodeState,
   ManagedNodeView,
   ManagedTaskDetail,
   ManagedTaskStage,
   ManagedTaskSummary,
   TaskManagerSession,
+  TaskManagerHumanActionGuidance,
+  TaskManagerHumanDecisionOption,
   TaskPlanEdge,
 } from "../types";
+import {
+  readTaskManagerView,
+  TaskManagerRail,
+  type TaskManagerViewId,
+} from "./task-manager/TaskManagerRail";
+import {
+  TaskManagerAgentStatus,
+  TaskManagerControl,
+  TaskManagerExecution,
+  TaskManagerHome,
+} from "./task-manager/TaskManagerViews";
+import { HumanActionGuidanceCard } from "./task-manager/HumanActionGuidanceCard";
+import "./task-manager/taskManagerShell.css";
 
 const API_ROOT = "/api/task-manager";
 
@@ -47,6 +63,7 @@ type TaskNodeData = Record<string, unknown> & {
   state: ManagedNodeState;
   dependencyCount: number;
   issueCount: number;
+  humanAction: string | null;
 };
 
 type TaskGraphNode = Node<TaskNodeData, "managed-task">;
@@ -125,6 +142,7 @@ function ManagedTaskNode({ data, selected }: NodeProps<TaskGraphNode>) {
         {data.dependencyCount} dependencies
         {data.issueCount > 0 ? ` · ${data.issueCount} issues` : ""}
       </small>
+      {data.humanAction && <em className="task-node-human-action"><UserRound size={11} /> 需要人工处理</em>}
       <Handle type="source" position={Position.Right} />
     </div>
   );
@@ -135,7 +153,13 @@ const nodeTypes = { "managed-task": ManagedTaskNode };
 function layoutGraph(
   nodes: ManagedNodeView[],
   edges: TaskPlanEdge[],
+  humanActions: TaskManagerHumanActionGuidance[],
 ): { nodes: TaskGraphNode[]; edges: Edge[] } {
+  const guidanceByNode = new Map(
+    humanActions
+      .filter((item) => item.node_id !== null)
+      .map((item) => [item.node_id as string, item]),
+  );
   const depth = new Map(nodes.map((item) => [item.node.node_id, 0]));
   for (let pass = 0; pass < nodes.length; pass += 1) {
     for (const edge of edges) {
@@ -160,6 +184,7 @@ function layoutGraph(
           state: item.state,
           dependencyCount: item.dependency_node_ids.length,
           issueCount: item.issue_codes.length,
+          humanAction: guidanceByNode.get(item.node.node_id)?.title ?? null,
         },
       };
     }),
@@ -187,7 +212,11 @@ interface TaskManagerProps {
 }
 
 export function TaskManager({ onNotice }: TaskManagerProps) {
+  const [activeView, setActiveView] = useState<TaskManagerViewId>(() => (
+    readTaskManagerView(window.location.hash)
+  ));
   const [session, setSession] = useState<TaskManagerSession | null>(null);
+  const [uiDesign, setUiDesign] = useState<ActiveSemanticUIDesign | null>(null);
   const [tasks, setTasks] = useState<ManagedTaskSummary[]>([]);
   const [detail, setDetail] = useState<ManagedTaskDetail | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -196,6 +225,31 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const navigate = (view: TaskManagerViewId) => {
+    setActiveView(view);
+    const nextHash = `#/${view}`;
+    if (window.location.hash !== nextHash) {
+      window.history.pushState(null, "", nextHash);
+    }
+  };
+
+  useEffect(() => {
+    const syncView = () => setActiveView(readTaskManagerView(window.location.hash));
+    window.addEventListener("hashchange", syncView);
+    window.addEventListener("popstate", syncView);
+    const initialView = readTaskManagerView(window.location.hash);
+    if (
+      !window.location.hash
+      || (initialView === "home" && window.location.hash !== "#/home")
+    ) {
+      window.history.replaceState(null, "", "#/home");
+    }
+    return () => {
+      window.removeEventListener("hashchange", syncView);
+      window.removeEventListener("popstate", syncView);
+    };
+  }, []);
 
   const refreshTasks = async (activeSession: TaskManagerSession) => {
     const listing = await api<{ tasks: ManagedTaskSummary[] }>("/tasks", {
@@ -225,6 +279,13 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
         const activeSession = await api<TaskManagerSession>("/session");
         if (cancelled) return;
         setSession(activeSession);
+        if (activeSession.capabilities.semantic_ui_design) {
+          const activeDesign = await api<ActiveSemanticUIDesign>("/ui-design", {
+            token: activeSession.submission_token,
+          });
+          if (cancelled) return;
+          setUiDesign(activeDesign);
+        }
         const listing = await refreshTasks(activeSession);
         if (!cancelled && listing.length > 0) await loadTask(listing[0].task_id, activeSession);
       } catch (cause) {
@@ -237,13 +298,17 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
 
   const effectiveEdges = detail?.plan.pending_proposal?.edges ?? detail?.plan.edges ?? [];
   const graph = useMemo(
-    () => layoutGraph(detail?.nodes ?? [], effectiveEdges),
+    () => layoutGraph(detail?.nodes ?? [], effectiveEdges, detail?.human_actions ?? []),
     [detail, effectiveEdges],
   );
   const selectedNode = detail?.nodes.find((item) => item.node.node_id === selectedNodeId) ?? null;
   const selectedRunNode = detail?.execution_run?.nodes.find(
     (item) => item.node.node_id === selectedNodeId,
   ) ?? null;
+  const selectedGuidance = detail?.human_actions.find(
+    (item) => item.node_id === selectedNodeId,
+  ) ?? null;
+  const planGuidance = detail?.human_actions.find((item) => item.node_id === null) ?? null;
 
   const commit = async (
     path: string,
@@ -311,13 +376,175 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
 
   const proposal = detail?.plan.pending_proposal ?? null;
 
+  const refreshCurrent = () => {
+    if (!session) return;
+    void refreshTasks(session).then((listing) => {
+      if (detail) return loadTask(detail.task.task_id, session);
+      if (listing[0]) return loadTask(listing[0].task_id, session);
+      return undefined;
+    }).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
+  };
+
+  const advanceRun = () => {
+    if (!detail?.execution_run) return;
+    void commit(
+      `/tasks/${encodeURIComponent(detail.task.task_id)}/runs/${encodeURIComponent(detail.execution_run.run_id)}/coordinator/tick`,
+      { expected_run_revision: detail.execution_run.revision },
+      "串行协调器已推进一个受治理动作。",
+    );
+  };
+
+  const formalHumanActionCommands: Record<string, string> = {
+    confirm_scope: "confirm-scope",
+    accept_review: "accept-review",
+    review_source: "review-source",
+    approve_checkpoint: "approve-checkpoint",
+    approve_completion: "approve-completion",
+  };
+
+  const isFormalHumanDecision = (decision: TaskManagerHumanDecisionOption) => (
+    decision.command !== null && decision.command in formalHumanActionCommands
+  );
+
+  const canSubmitHumanDecision = (
+    guidance: TaskManagerHumanActionGuidance,
+    decision: TaskManagerHumanDecisionOption,
+  ) => {
+    if (!session || !isFormalHumanDecision(decision)) return false;
+    if (guidance.kind === "scope_confirmation") return session.capabilities.task_planning;
+    if (guidance.kind === "verified_deliverable_review") return session.capabilities.node_review;
+    if (guidance.kind === "source_review") return session.capabilities.source_review;
+    if (guidance.kind === "source_checkpoint_approval") {
+      return session.capabilities.source_checkpoint_approval;
+    }
+    if (guidance.kind === "completion_approval") return session.capabilities.completion_approval;
+    return false;
+  };
+
+  const submitHumanDecision = (
+    guidance: TaskManagerHumanActionGuidance,
+    decision: TaskManagerHumanDecisionOption,
+    rationale: string,
+  ) => {
+    if (
+      !detail?.execution_run
+      || guidance.node_id === null
+      || guidance.expected_run_revision === null
+      || decision.command === null
+    ) return;
+    const command = formalHumanActionCommands[decision.command];
+    if (!command) return;
+    const body: Record<string, unknown> = {
+      expected_run_revision: guidance.expected_run_revision,
+      rationale,
+    };
+    if (command === "review-source") body.findings = [];
+    void commit(
+      `/tasks/${encodeURIComponent(detail.task.task_id)}/runs/${encodeURIComponent(detail.execution_run.run_id)}/nodes/${encodeURIComponent(guidance.node_id)}/${command}`,
+      body,
+      `${decision.label}已提交；请核对新的 Run revision 与审计记录。`,
+    );
+  };
+
+  const recordHumanFeedback = (
+    guidance: TaskManagerHumanActionGuidance,
+    decision: TaskManagerHumanDecisionOption,
+    content: string,
+  ) => {
+    if (!detail?.execution_run || guidance.expected_run_revision === null) return;
+    void commit(
+      `/tasks/${encodeURIComponent(detail.task.task_id)}/runs/${encodeURIComponent(detail.execution_run.run_id)}/human-actions/${encodeURIComponent(guidance.guidance_id)}/feedback`,
+      {
+        expected_plan_revision: guidance.expected_plan_revision,
+        expected_run_revision: guidance.expected_run_revision,
+        decision_id: decision.decision_id,
+        content,
+      },
+      "验收反馈已写入追加式 Run 记录；节点状态保持等待。",
+    );
+  };
+
+  const askHumanActionAgent = (
+    guidance: TaskManagerHumanActionGuidance,
+    content: string,
+  ) => {
+    if (!detail?.execution_run || guidance.expected_run_revision === null) return;
+    void commit(
+      `/tasks/${encodeURIComponent(detail.task.task_id)}/runs/${encodeURIComponent(detail.execution_run.run_id)}/human-actions/${encodeURIComponent(guidance.guidance_id)}/assistant`,
+      {
+        expected_plan_revision: guidance.expected_plan_revision,
+        expected_run_revision: guidance.expected_run_revision,
+        content,
+      },
+      "任务绑定 Agent 已回复；回复只用于解释或起草反馈。",
+    );
+  };
+
+  const selectTask = (taskId: string) => {
+    if (session && taskId) {
+      void loadTask(taskId, session).catch((cause) => (
+        setError(cause instanceof Error ? cause.message : String(cause))
+      ));
+    }
+  };
+
+  const openCreate = () => {
+    navigate("orchestration");
+    setShowCreate(true);
+  };
+
+  const sharedViewProps = {
+    session,
+    uiDesign,
+    tasks,
+    detail,
+    busy,
+    error,
+    onNavigate: navigate,
+    onSelectTask: selectTask,
+    onRefresh: refreshCurrent,
+    onNewTask: openCreate,
+    onAdvanceRun: advanceRun,
+    onSubmitHumanDecision: submitHumanDecision,
+    onRecordHumanFeedback: recordHumanFeedback,
+    onAskHumanActionAgent: askHumanActionAgent,
+    canSubmitHumanDecision,
+    isFormalHumanDecision,
+  };
+
   return (
-    <div className="task-manager-page page-enter">
+    <div className="task-manager-workspace">
+      <TaskManagerRail
+        activeView={activeView}
+        connected={session !== null}
+        attentionCount={tasks.filter((task) => (
+          task.blocker_count > 0 || task.stage === "needs_attention"
+        )).length}
+        onSelect={navigate}
+      />
+      <main className="task-manager-view-host">
+        {activeView === "home" && <TaskManagerHome {...sharedViewProps} />}
+        {activeView === "agent" && <TaskManagerAgentStatus {...sharedViewProps} />}
+        {activeView === "control" && <TaskManagerControl {...sharedViewProps} />}
+        {activeView === "execution" && <TaskManagerExecution {...sharedViewProps} />}
+        {activeView === "orchestration" && (
+        <div className="task-manager-page page-enter">
       <header className="task-manager-header">
         <div className="task-manager-heading">
           <h1>Task Graph</h1>
           <p>预览节点、检查细节、与 Agent 调整任务。</p>
         </div>
+        {uiDesign && (
+          <div
+            className="task-manager-design-state"
+            title={uiDesign.description.design_intent}
+          >
+            <span><ShieldCheck size={12} /> {uiDesign.binding.scheme_id} · V{uiDesign.binding.revision}</span>
+            <small>
+              {uiDesign.state_counts.dirty} DIRTY · {uiDesign.state_counts.planned} PLANNED · {uiDesign.state_counts.stable} STABLE
+            </small>
+          </div>
+        )}
         <div className="task-manager-task-picker">
           <label htmlFor="task-manager-picker">当前任务</label>
           <div>
@@ -345,14 +572,7 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
         <button
           className="button button-quiet"
           disabled={!session || busy}
-          onClick={() => {
-            if (!session) return;
-            void refreshTasks(session).then((listing) => {
-              if (detail) return loadTask(detail.task.task_id, session);
-              if (listing[0]) return loadTask(listing[0].task_id, session);
-              return undefined;
-            }).catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)));
-          }}
+          onClick={refreshCurrent}
         >
           <RefreshCw size={14} /> 刷新
         </button>
@@ -443,6 +663,7 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
                   <small>{selectedNode ? nodeStateLabels[selectedNode.state] : "NO SELECTION"}</small>
                 </header>
                 <div className="task-manager-detail">
+                  {planGuidance && <HumanActionGuidanceCard guidance={planGuidance} compact />}
                   {selectedNode ? (
                     <>
                       <div className="detail-eyebrow">{selectedNode.node.kind}</div>
@@ -458,6 +679,7 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
                       <section><span>ACCEPTANCE CRITERIA</span>{selectedNode.node.acceptance_criteria.length ? selectedNode.node.acceptance_criteria.map((item) => <p key={item}><CheckCircle2 size={13} /> {item}</p>) : <p>尚未定义</p>}</section>
                       <section><span>VERIFICATION</span>{selectedNode.node.verification_requirements.length ? selectedNode.node.verification_requirements.map((item) => <p key={item}><ShieldCheck size={13} /> {item}</p>) : <p>尚未定义</p>}</section>
                       {selectedRunNode?.latest_observation && <section><span>LATEST FEEDBACK</span><p><Clock3 size={13} /> {selectedRunNode.latest_observation.summary}</p></section>}
+                      {selectedGuidance && <HumanActionGuidanceCard guidance={selectedGuidance} compact />}
                     </>
                   ) : (
                     <div className="task-manager-detail-empty"><GitBranch size={24} /><p>在左侧任务图中选择一个节点。</p></div>
@@ -490,6 +712,9 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
           </div>
         </>
       )}
+        </div>
+        )}
+      </main>
     </div>
   );
 }

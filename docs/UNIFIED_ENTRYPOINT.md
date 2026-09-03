@@ -12,14 +12,24 @@ py -3 start.py
 python3 start.py
 ```
 
-`start.py` 先复用 manifest 初始化器检测并准备 `.venv`、Node/npm、UI 和 desktop extra，再以仅含
-`planner` 角色的临时本地身份启动 TaskManager API 与 Vite UI。只有 API 本身和 Vite same-origin
+`start.py` 先复用 manifest 初始化器检测并准备 `.venv`、Node/npm、UI 和 desktop extra，再以
+`planner + quick-agent + reviewer + approver` 角色的临时本地身份启动 TaskManager API 与 Vite UI。
+这些角色让用户在执行页提交受治理的人工 review/approval、追加反馈并调用只读辅助；源码
+Reviewer/Approver 同主体禁止仍由后端执行，durable execution/validation/integration adapter 也不会
+因角色存在而自动启用。Quick Agent adapter
+随桌面入口连接本机 Codex，并从 `model/list` 获取当前账户可用的模型、effort 与速度层，但只有用户发送
+消息才产生模型 turn。只有 API 本身和 Vite same-origin
 proxy 都健康后，才打开独立 WebView2/Qt 窗口。关闭窗口会回收本次拥有的两个进程树和临时 session；
-它不会自动启用外部模型、执行、验证、审批或集成能力。
+它不会自动启用任务 planning、durable execution、验证、审批或集成能力；Quick Agent 的仓库写入仍需
+用户在 Agent 页显式选择“快速执行”，且不具备任务链完成语义。
 
 只读环境检查、服务烟测和显式无窗口模式分别为 `python start.py --check`、
 `python start.py --smoke-test` 和 `python start.py --headless`。高级治理操作仍使用下述 `jobslayer`
 CLI，不把便利启动器当成权限旁路。
+
+Linux 只有真正创建 Qt 窗口时才要求 `DISPLAY` 或 `WAYLAND_DISPLAY`；检查、smoke 与 headless 可在
+无图形会话主机运行。启动器对其固定的 `127.0.0.1` 健康检查禁用外部代理，并允许已关闭连接处于
+`TIME_WAIT` 时立即安全重启；真实 listener 仍由端口前检拒绝。
 
 ## 环境初始化与正式入口分层
 
@@ -86,8 +96,9 @@ CLI 业务逻辑。
   --role approver --output .jobslayer/identity/approver.json
 ```
 
-`observer` 只读 Dashboard，`executor` 启动任务，`reviewer` 提交实现审查，`approver`
-记录/应用决定并执行集成和清理，`worker-admin` 管理 worker；`operator-admin` 仅用于确需
+`observer` 只读 Dashboard，`planner` 管理任务计划，`quick-agent` 使用独立 Codex 讨论/仓库写入，
+`executor` 启动任务，`reviewer` 提交实现审查，`approver` 记录/应用决定并执行集成和清理，
+`worker-admin` 管理 worker；`operator-admin` 仅用于确需
 全部本地权限的受控运维。key/session 不得提交、交给 Agent 或写入日志/制品。
 
 ### 可视化交互
@@ -138,9 +149,10 @@ Dashboard 仅绑定 loopback、只读且要求 `view_control_plane` 权限；不
 ```
 
 该历史 API 仍支持讨论、待应用 Agent proposal、节点 CRUD/支线/子任务和用户定稿 revision；
-不会把计划变成 `TaskState`、启动执行、调用 Git 或标记完成。当前 Web App 不再装配独立的
-`#/orchestration` route；可通过根入口 TaskManager 的 Agent 对话观察聚焦投影，或直接使用受认证
-API。契约见[协作式任务编排](TASK_ORCHESTRATION.md)。
+不会把计划变成 `TaskState`、启动执行、调用 Git 或标记完成。当前 Web App 的
+`#/orchestration` 是 TaskManager 内部任务编排版面，不是旧独立 Workbench；它与首页、Agent、总控、
+执行版面共享同一认证 read model。也可直接使用受认证 API，契约见
+[协作式任务编排](TASK_ORCHESTRATION.md)。
 
 ### 完整开发验证
 
@@ -153,10 +165,12 @@ API。契约见[协作式任务编排](TASK_ORCHESTRATION.md)。
 1. `python -m unittest discover -s tests -v`；
 2. `python -m compileall -q src tests`；
 3. `python -m pip check`；
-4. 通过初始化所解析的项目 npm，离线执行 `ui-framework` 的 TypeScript 与 Vite production build；
-5. 通过统一模块入口校验 BraveNewWorld 测试床登记；
-6. 校验 BraveNewWorld Anygine 小 App task/profile/Codex runbook 的交叉绑定与预算；
-7. `git -c core.autocrlf=true diff --check`，先按跨平台 checkout 规则规范化文本再检查空白与冲突标记。
+4. 校验 source-controlled 语义 UI revision、内容 hash、stable 保护和唯一活动 binding；
+5. 验证固定 UI/UX Pro Max core 快照的来源、整树 hash、路径白名单和上游数据一致性；
+6. 通过初始化所解析的项目 npm，离线执行 `ui-framework` 的 TypeScript 与 Vite production build；
+7. 通过统一模块入口校验 BraveNewWorld 测试床登记；
+8. 校验 BraveNewWorld Anygine 小 App task/profile/Codex runbook 的交叉绑定与预算；
+9. `git -c core.autocrlf=true diff --check`，先按跨平台 checkout 规则规范化文本再检查空白与冲突标记。
 
 `check` 只能在已经运行 `init.cmd`/`init.sh` 的 JobSlayer 源码 checkout 中使用；UI 步骤
 不会联网补装或升级依赖。通常会自动查找根目录；从其他工作目录运行时可以传
@@ -172,6 +186,13 @@ API。契约见[协作式任务编排](TASK_ORCHESTRATION.md)。
 ./jobslayer validate-testbed testbeds/brave-new-world.json
 ./jobslayer inspect-testbed testbeds/brave-new-world.json
 ./jobslayer validate-runbook runbooks/bnw-anygine-small-app-001-codex.json
+./jobslayer validate-ui-design ui-designs/catalog.json
+./jobslayer inspect-ui-design ui-designs/catalog.json --page-id task-manager
+./jobslayer validate-ui-advisor
+./jobslayer collect-ui-advice \
+  --page-id task-manager --task-id ui-task-manager \
+  --request-id task-manager-react-a11y-001 \
+  --query "live updates accessibility" --mode stack --stack react
 ./jobslayer inspect-task-manager-target \
   runbooks/bnw-anygine-small-app-001-codex.json \
   --target-id brave-new-world-anygine-app-v1 \

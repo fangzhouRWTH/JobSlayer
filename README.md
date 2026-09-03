@@ -19,6 +19,10 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
 - manifest 驱动的跨平台开发初始化、固定校验的项目 Node LTS 和 lockfile 前端依赖；
 - 单命令 Windows/Linux 桌面入口：自动检测/初始化依赖、启动 API/UI、验证代理健康状态，并在独立
   WebView2/Qt 窗口关闭时回收后台进程；
+- 版本化语义弹性 UI 描述：以区域/关系/旅程/要求和 dirty/planned/stable 状态记录设计意图，后端
+  精确选择唯一活动方案，Agent 草稿不能绕过 stable 保护或前端边界；
+- 固定版本、离线只读的 UI/UX Pro Max 核心建议器：整树 hash 与白名单执行约束第三方输入，原始输出
+  和规范化建议作为绑定活动 SUID 的不可变证据；不会自动调用 Agent、修改页面或成为设计真相；
 - 由版本化 task/profile/runbook 驱动的本地真实运行协调器；
 - 必须由外部显式授权、且仍服从相同工作树/验证/审查门禁的真实 Codex runbook；
 - append-only 运行记录链、确定性补丁重放 adapter 和 run 级监督入口；
@@ -36,8 +40,11 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
   显式 opt-in、结构化输出和原始交互制品绑定的 Codex planning adapter，以及认证、去存储 URI、
   哈希验证的有界规划证据查看器；本地 fixture 仍为默认；
 - 聚焦的 TaskManager 主应用：后台统一任务摘要、revision-bound DAG/Backlog/总日志、完整 Agent
-  对话、proposal 决定与任务流固化；当前 Web UI 只装配左 2/3 DAG、右 1/3 节点详情与 Agent
-  对话的单屏预览。后台以源包哈希锁定 BraveNewWorld target，并把 finalized revision
+  对话、proposal 决定与任务流固化；当前 Web UI 以左缘垂直栏切换首页、Quick Agent、总控、编排和
+  执行五个版面，并以较大分层字号和精简首屏摘要形成 Calm Ops；编排页继续保持左 2/3 DAG、右 1/3
+  节点详情与 Agent 对话。Quick Agent 通过本机 Codex App Server 显示真实额度窗口及动态模型、
+  effort、速度和能力选单，并提供与任务链隔离的只读讨论/受限仓库写入。后台以源包哈希锁定
+  BraveNewWorld target，并把 finalized revision
   装配为 hash-chained、Kernel-owned 的节点运行；显式启用的 durable 本机 Codex worker 支持 API
   重启后 start-or-locate、运行级隔离 worktree 和原始证据，默认仍禁用 dispatch，且不伪造完成；
 - 内容绑定的本地 dependency attachment：将 operator 提供的 Anygine Git checkout/Conan toolchain
@@ -61,8 +68,13 @@ python3 start.py
 
 关闭桌面窗口会同时停止本次入口拥有的 API/Vite 进程。只读检查使用
 `python start.py --check`，无窗口服务模式使用 `python start.py --headless`；Windows 强制 WebView2，
-Linux 使用 Qt 且需要 `DISPLAY` 或 `WAYLAND_DISPLAY`。入口自动签发的临时身份只有 `planner` 权限，
-不会启用外部模型、任务执行、验证、审批或集成。
+Linux 使用 Qt 且需要 `DISPLAY` 或 `WAYLAND_DISPLAY`。入口自动签发的临时身份包含
+`planner + quick-agent + reviewer + approver`，使本机执行页可显示人工 review/approval、反馈与只读
+辅助入口；它仍不启用 durable task execution、validation 或 source integration。Quick Agent 和任务
+绑定辅助只有用户发送消息才调用本机 Codex，源码 Reviewer/Approver 独立性仍由后端强制。
+
+`python start.py --smoke-test` 只启动并健康检查 API/Vite 后立即清理，不创建窗口，因此 Linux 无图形
+会话也可使用。固定的 loopback 健康检查不经过用户配置的 HTTP 代理。
 
 开发、CI 或需要手工高级参数时仍可单独运行 `init.cmd`/`init.sh`。初始化不会安装系统软件或修改
 持久 `PATH`；没有全局 npm 时可通过
@@ -90,6 +102,8 @@ POSIX（Linux/macOS/WSL）公共命令示例：
 ./jobslayer validate-testbed testbeds/brave-new-world.json
 ./jobslayer inspect-testbed testbeds/brave-new-world.json
 ./jobslayer validate-runbook runbooks/bnw-anygine-small-app-001-codex.json
+./jobslayer validate-ui-design ui-designs/catalog.json
+./jobslayer inspect-ui-design ui-designs/catalog.json --page-id task-manager
 ./jobslayer inspect-readiness --state-root .jobslayer --required-reviewed-tasks 20
 ./jobslayer build-phase0-corpus
 ./jobslayer inspect-readiness --state-root .jobslayer/phase0-corpus/state --required-reviewed-tasks 20
@@ -111,14 +125,14 @@ POSIX（Linux/macOS/WSL）公共命令示例：
   --open-browser
 ```
 
-TaskManager 单屏任务图应用的推荐入口是：
+TaskManager 桌面应用的推荐入口是：
 
 ```bash
 python3 start.py
 ```
 
-Windows 使用 `py -3 start.py`。入口在独立原生窗口加载 `http://127.0.0.1:4173/`；页面左侧 2/3
-为任务图，右侧 1/3 同时显示节点详情与 Agent 对话。手工身份、Codex opt-in 和高级接口说明见
+Windows 使用 `py -3 start.py`。入口在独立原生窗口加载首页；左侧垂直栏切换五个版面，任务编排页
+仍以左 2/3 任务图、右 1/3 节点详情与 Agent 对话为核心。手工身份、Codex opt-in 和高级接口说明见
 [TaskManager 聚焦应用](docs/TASK_MANAGER.md)。
 
 Windows PowerShell 使用原生 Python，不要求 WSL：
@@ -152,6 +166,8 @@ Draft -> Planned -> Implementing -> Verifying -> Reviewing
 
 - [项目开发指导](docs/PROJECT_GUIDE.md)
 - [交互设计与前后端协作指南](docs/INTERACTION_DESIGN_GUIDE.md)
+- [语义弹性 UI 描述框架](docs/SEMANTIC_UI_DESIGN.md)
+- [外部 UI/UX 建议接入](docs/UI_ADVICE.md)
 - [协作式任务编排](docs/TASK_ORCHESTRATION.md)
 - [TaskManager 聚焦应用](docs/TASK_MANAGER.md)
 - [长任务执行与恢复](docs/LONG_RUNNING_EXECUTION.md)
@@ -178,6 +194,10 @@ Draft -> Planned -> Implementing -> Verifying -> Reviewing
 中期主线进一步收紧为 TaskManager 单产品闭环：精简图状任务 UI、将当前逐按钮推进收束为一次只运行
 一个节点的可恢复串行协调器，并把 Agent、命令、验证、审查和人工门禁反馈统一投影回 DAG。工作台其余
 能力保留为历史/高级入口，不进入当前退出条件。
+
+当计划或 run 到达 proposal、固化、装配、review、checkpoint、最终门、失败或阻塞等交互点时，
+TaskManager 会在任务图/详情/执行反馈中给出绑定当前 revision 的角色要求、详细步骤、待审证据、允许
+决定及禁止动作。它只解释现有治理路径，不替代 RBAC、`WorkflowKernel` 或人工批准。
 
 BraveNewWorld 已重置为基于 Anygine 公共 build-tree contract 的小 App 测试床。固定基线为
 `e7bff4aceca5dee998d0db1dc1c50e4b935fabda` / `bnw-anygine-0`，已发布到远端；旧网页端机电模拟内容

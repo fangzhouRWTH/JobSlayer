@@ -9,17 +9,20 @@ import types
 import unittest
 from unittest.mock import Mock, call, patch
 
+import start as desktop_launcher
 from jobslayer.adapters.local_identity import LocalIdentityProvider
 from jobslayer.desktop.app import (
     DesktopAppConfig,
     DesktopAppError,
     OwnedProcess,
+    _DIRECT_PROXY_HANDLER,
     _backend_argv,
     _frontend_argv,
     _open_desktop_window,
     _prepare_identity,
     _require_available_port,
     _stop_processes,
+    _validate_checkout,
     _wait_for_http,
 )
 
@@ -70,7 +73,7 @@ class DesktopAppTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "between 1 and 300"):
             DesktopAppConfig(Path("."), Path("npm"), startup_timeout_seconds=0)
 
-    def test_identity_is_create_only_short_lived_and_planner_only(self) -> None:
+    def test_identity_is_create_only_short_lived_and_scoped_for_desktop(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             identity = _prepare_identity(root)
@@ -79,7 +82,10 @@ class DesktopAppTests(unittest.TestCase):
             )
 
             self.assertEqual(principal.subject_id, "desktop-planner")
-            self.assertEqual(principal.roles, ("planner",))
+            self.assertEqual(
+                principal.roles,
+                ("planner", "quick-agent", "reviewer", "approver"),
+            )
             self.assertLessEqual(
                 (principal.valid_until - principal.authenticated_at).total_seconds(),
                 24 * 60 * 60,
@@ -100,6 +106,7 @@ class DesktopAppTests(unittest.TestCase):
             self.assertEqual(backend[:4], (sys.executable, "-m", "jobslayer", "task-manager-api"))
             self.assertIn(str(config.api_port), backend)
             self.assertIn(str(identity.key_path), backend)
+            self.assertIn("--allow-quick-agent", backend)
             self.assertEqual(frontend[0], str(config.npm_executable))
             self.assertEqual(frontend[-5:], ("--host", "127.0.0.1", "--port", "14173", "--strictPort"))
 
@@ -127,6 +134,9 @@ class DesktopAppTests(unittest.TestCase):
                     timeout_seconds=1,
                 )
 
+    def test_desktop_health_checks_ignore_external_proxy_configuration(self) -> None:
+        self.assertEqual(_DIRECT_PROXY_HANDLER.proxies, {})
+
     def test_port_preflight_fails_closed_when_another_process_owns_the_port(self) -> None:
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(("127.0.0.1", 0))
@@ -136,6 +146,45 @@ class DesktopAppTests(unittest.TestCase):
                 _require_available_port(port)
         finally:
             listener.close()
+
+    def test_port_preflight_uses_the_native_safe_reuse_option(self) -> None:
+        probe = Mock()
+        with patch("jobslayer.desktop.app.socket.socket", return_value=probe):
+            _require_available_port(18780)
+
+        option = socket.SO_EXCLUSIVEADDRUSE if os.name == "nt" else socket.SO_REUSEADDR
+        probe.setsockopt.assert_called_once_with(socket.SOL_SOCKET, option, 1)
+        probe.bind.assert_called_once_with(("127.0.0.1", 18780))
+        probe.close.assert_called_once_with()
+
+    def test_linux_service_modes_do_not_require_a_display_but_window_mode_does(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "pyproject.toml").write_text("[project]\n", encoding="utf-8")
+            (root / "ui-framework").mkdir()
+            (root / "ui-framework" / "package.json").write_text(
+                "{}\n", encoding="utf-8"
+            )
+            (root / "jobslayer").write_text("launcher\n", encoding="utf-8")
+            npm = root / "npm"
+            npm.write_text("launcher\n", encoding="utf-8")
+
+            with patch("jobslayer.desktop.app.platform.system", return_value="Linux"), patch.dict(
+                os.environ,
+                {},
+                clear=True,
+            ):
+                _validate_checkout(
+                    DesktopAppConfig(root, npm, smoke_test=True)
+                )
+                _validate_checkout(
+                    DesktopAppConfig(root, npm, headless=True)
+                )
+                with self.assertRaisesRegex(
+                    DesktopAppError,
+                    "requires DISPLAY or WAYLAND_DISPLAY",
+                ):
+                    _validate_checkout(DesktopAppConfig(root, npm))
 
     def test_cleanup_stops_owned_processes_in_reverse_order(self) -> None:
         first = OwnedProcess("API", _FakeProcess(), Path("api.log"))  # type: ignore[arg-type]
@@ -193,6 +242,20 @@ class DesktopAppTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("native desktop window", result.stdout)
         self.assertIn("--headless", result.stdout)
+
+    def test_desktop_launcher_detects_the_venv_by_prefix_not_symlink_target(self) -> None:
+        with TemporaryDirectory() as directory:
+            venv = Path(directory) / ".venv"
+            python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+            with patch.object(desktop_launcher.sys, "prefix", str(venv)):
+                self.assertTrue(
+                    desktop_launcher._running_in_initialized_python(python)
+                )
+            with patch.object(desktop_launcher.sys, "prefix", str(Path(directory) / "system")):
+                self.assertFalse(
+                    desktop_launcher._running_in_initialized_python(python)
+                )
 
 
 if __name__ == "__main__":

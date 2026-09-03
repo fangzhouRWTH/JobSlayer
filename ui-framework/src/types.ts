@@ -394,6 +394,28 @@ export interface TaskManagerSourceIntegrationResult {
   integrated_at: string;
 }
 
+export type TaskManagerHumanInteractionKind =
+  | "feedback"
+  | "assistant_request"
+  | "assistant_response"
+  | "assistant_error";
+
+export interface TaskManagerHumanInteraction {
+  schema_version: "1.0";
+  interaction_id: string;
+  guidance_id: string;
+  kind: TaskManagerHumanInteractionKind;
+  node_id: string;
+  actor_type: "human" | "agent" | "policy" | "system";
+  actor_id: string;
+  content: string;
+  decision_id: string | null;
+  based_on_plan_revision: number;
+  based_on_run_revision: number;
+  evidence_artifact_ids: string[];
+  created_at: string;
+}
+
 export interface TaskManagerNodeExecution {
   schema_version: "1.0";
   node: TaskPlanNode;
@@ -428,6 +450,7 @@ export interface TaskManagerNodeExecution {
   integration_key: string | null;
   integration_result: TaskManagerSourceIntegrationResult | null;
   integration_artifact_id: string | null;
+  human_interactions: TaskManagerHumanInteraction[];
 }
 
 export interface TaskManagerRunSnapshot {
@@ -445,6 +468,87 @@ export interface TaskManagerRunSnapshot {
   updated_at: string;
 }
 
+export type TaskManagerCoordinatorStage =
+  | "ready"
+  | "advancing"
+  | "waiting_human"
+  | "waiting_review"
+  | "needs_attention"
+  | "completed";
+
+export type TaskManagerCoordinatorAction =
+  | "start_node"
+  | "run_validation"
+  | "observe_node"
+  | "verify_node"
+  | "integrate_checkpoint"
+  | "wait_human"
+  | "wait_review"
+  | "needs_attention"
+  | "complete";
+
+export interface TaskManagerCoordinatorSnapshot {
+  schema_version: "1.0";
+  run_id: string;
+  revision: number;
+  run_revision: number;
+  stage: TaskManagerCoordinatorStage;
+  cursor_node_id: string | null;
+  next_action: TaskManagerCoordinatorAction;
+  pending_intent: {
+    schema_version: "1.0";
+    intent_id: string;
+    run_id: string;
+    node_id: string;
+    action: TaskManagerCoordinatorAction;
+    expected_run_revision: number;
+    created_at: string;
+  } | null;
+  last_completed_intent_id: string | null;
+  reason: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TaskManagerHumanActionKind =
+  | "proposal_decision"
+  | "plan_refinement"
+  | "plan_finalization"
+  | "run_assembly"
+  | "scope_confirmation"
+  | "verified_deliverable_review"
+  | "source_review"
+  | "source_checkpoint_approval"
+  | "completion_approval"
+  | "failure_recovery"
+  | "blocker_resolution";
+
+export interface TaskManagerHumanDecisionOption {
+  schema_version: "1.0";
+  decision_id: string;
+  label: string;
+  effect: string;
+  command: string | null;
+}
+
+export interface TaskManagerHumanActionGuidance {
+  schema_version: "1.0";
+  guidance_id: string;
+  kind: TaskManagerHumanActionKind;
+  node_id: string | null;
+  title: string;
+  summary: string;
+  permitted_actor_types: Array<"human" | "agent" | "policy" | "system">;
+  required_capability: string;
+  requirements: string[];
+  steps: string[];
+  decisions: TaskManagerHumanDecisionOption[];
+  evidence_to_review: string[];
+  prohibited_actions: string[];
+  expected_plan_revision: number;
+  expected_run_revision: number | null;
+}
+
 export interface ManagedTaskDetail {
   schema_version: "1.0";
   task: ManagedTaskSummary;
@@ -457,9 +561,39 @@ export interface ManagedTaskDetail {
   execution_target: TaskManagerExecutionTarget | null;
   execution_target_assessment: TaskManagerExecutionTargetAssessment | null;
   execution_run: TaskManagerRunSnapshot | null;
+  coordinator: TaskManagerCoordinatorSnapshot | null;
+  human_actions: TaskManagerHumanActionGuidance[];
   run_assembly_available: boolean;
   execution_available: boolean;
   execution_blockers: string[];
+}
+
+export interface ActiveSemanticUIDesign {
+  schema_version: "1.0";
+  binding: {
+    page_id: string;
+    scheme_id: string;
+    revision: number;
+    descriptor_sha256: string;
+    activated_by_actor_type: "human" | "policy";
+    activated_by: string;
+    activated_at: string;
+    decision: string;
+    evidence_ids: string[];
+  };
+  description: {
+    schema_version: "1.0";
+    page_id: string;
+    scheme_id: string;
+    revision: number;
+    title: string;
+    design_intent: string;
+  };
+  state_counts: {
+    dirty: number;
+    planned: number;
+    stable: number;
+  };
 }
 
 export interface TaskManagerSession {
@@ -475,7 +609,11 @@ export interface TaskManagerSession {
     finalization: boolean;
     multi_task_history: boolean;
     planning_artifact_viewer: boolean;
+    semantic_ui_design: boolean;
+    quick_agent_discussion: boolean;
+    quick_agent_execution: boolean;
     run_assembly: boolean;
+    serial_coordinator: boolean;
     execution_target_binding: boolean;
     task_execution: boolean;
     execution_feedback: boolean;
@@ -486,5 +624,114 @@ export interface TaskManagerSession {
     source_review: boolean;
     source_checkpoint_approval: boolean;
     source_checkpoint_integration: boolean;
+    human_action_feedback: boolean;
+    human_action_agent: boolean;
   };
+}
+
+export type QuickAgentMode = "discuss" | "execute";
+export type QuickAgentState =
+  | "idle"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "timed_out";
+
+export interface QuickAgentEvent {
+  schema_version: "1.0";
+  sequence: number;
+  event_type: string;
+  role: "user" | "agent" | "tool" | "system";
+  content: string;
+  created_at: string;
+  mode: QuickAgentMode | null;
+  status: string | null;
+}
+
+export interface QuickAgentRateLimitWindow {
+  schema_version: "1.0";
+  used_percent: number;
+  remaining_percent: number;
+  window_duration_minutes: number | null;
+  resets_at: string | null;
+}
+
+export interface QuickAgentRateLimitBucket {
+  schema_version: "1.0";
+  limit_id: string;
+  limit_name: string | null;
+  plan_type: string | null;
+  primary: QuickAgentRateLimitWindow | null;
+  secondary: QuickAgentRateLimitWindow | null;
+  rate_limit_reached_type: string | null;
+}
+
+export interface QuickAgentCapacitySnapshot {
+  schema_version: "1.0";
+  available: boolean;
+  source: string;
+  observed_at: string;
+  refresh_after_seconds: number;
+  buckets: QuickAgentRateLimitBucket[];
+  reset_credit_count: number | null;
+  error: string | null;
+}
+
+export interface QuickAgentReasoningEffortOption {
+  schema_version: "1.0";
+  effort: string;
+  description: string;
+}
+
+export interface QuickAgentServiceTierOption {
+  schema_version: "1.0";
+  tier_id: string;
+  name: string;
+  description: string;
+}
+
+export interface QuickAgentModelOption {
+  schema_version: "1.0";
+  model_id: string;
+  display_name: string;
+  description: string;
+  default_reasoning_effort: string;
+  reasoning_efforts: QuickAgentReasoningEffortOption[];
+  input_modalities: string[];
+  supports_personality: boolean;
+  multi_agent_version: string | null;
+  service_tiers: QuickAgentServiceTierOption[];
+  default_service_tier: string | null;
+  is_default: boolean;
+  upgrade_model: string | null;
+  retirement_at: string | null;
+}
+
+export interface QuickAgentModelCatalogSnapshot {
+  schema_version: "1.0";
+  available: boolean;
+  source: string;
+  observed_at: string;
+  refresh_after_seconds: number;
+  models: QuickAgentModelOption[];
+  error: string | null;
+}
+
+export interface QuickAgentSessionSnapshot {
+  schema_version: "1.0";
+  adapter_id: string;
+  conversation_id: string;
+  thread_id: string | null;
+  active_turn_id: string | null;
+  state: QuickAgentState;
+  model: string;
+  reasoning_effort: string;
+  service_tier: string | null;
+  workspace_root: string;
+  maximum_turn_seconds: number;
+  events: QuickAgentEvent[];
+  usage: Record<string, number>;
+  last_error: string | null;
+  updated_at: string;
 }

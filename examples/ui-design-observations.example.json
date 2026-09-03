@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "page_id": "task-manager",
+  "scheme_id": "focused-task-graph",
+  "revision": 8,
+  "descriptor_sha256": "d10e3be4b56de0813521d197fa656bb1ac22d9ffce2a5fa8548a7acbd90e8ed2",
+  "observations": [
+    {
+      "unit_id": "requirement.design-status-projection",
+      "difference": "none",
+      "summary": "认证 API 返回活动 binding 与状态计数，TaskManager 顶部只消费 read model 摘要。",
+      "evidence_ids": [
+        "tests.test_orchestration_web",
+        "ui-framework-production-build"
+      ]
+    },
+    {
+      "unit_id": "requirement.human-action-guidance",
+      "difference": "none",
+      "summary": "TaskManager read model 为当前人工停顿返回 revision-bound actor、capability、要求、编号步骤、证据、决定与禁止项；任务图、节点详情和执行反馈消费同一结构。",
+      "evidence_ids": [
+        "tests.test_task_manager",
+        "tests.test_task_manager_coordinator",
+        "tests.test_orchestration_web",
+        "ui-framework-production-build"
+      ]
+    },
+    {
+      "unit_id": "requirement.formal-human-decision-gate",
+      "difference": "none",
+      "summary": "执行页正式按钮要求证据核对、理由、边界确认和 capability，后端仍调用现有 revision-bound governance command。",
+      "evidence_ids": [
+        "tests.test_task_manager_execution",
+        "tests.test_orchestration_web",
+        "ui-framework-production-build-v8"
+      ]
+    },
+    {
+      "unit_id": "requirement.human-feedback-append-only",
+      "difference": "none",
+      "summary": "修改反馈形成 immutable artifact 和 run interaction；测试证明旧 guidance 被拒绝且节点状态不变。",
+      "evidence_ids": [
+        "tests.test_task_manager_coordinator",
+        "tests.test_orchestration_web"
+      ]
+    },
+    {
+      "unit_id": "requirement.human-assistant-non-authority",
+      "difference": "none",
+      "summary": "任务绑定 Agent 使用 read-only Codex、独立 RBAC 和结构化输出，只追加 request/response 或 error，不携带决定。",
+      "evidence_ids": [
+        "tests.test_human_action_assistant",
+        "tests.test_identity",
+        "tests.test_orchestration_web"
+      ]
+    }
+  ]
+}

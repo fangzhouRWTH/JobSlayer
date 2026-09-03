@@ -14,7 +14,7 @@ import sys
 import time
 from typing import BinaryIO, Callable, Sequence
 from urllib.error import HTTPError, URLError
-from urllib.request import urlopen
+from urllib.request import ProxyHandler, build_opener
 from uuid import uuid4
 
 from jobslayer.adapters.local_identity import LocalIdentityError, LocalIdentityProvider
@@ -26,6 +26,8 @@ from jobslayer.execution.processes import (
 
 
 LOOPBACK_HOST = "127.0.0.1"
+_DIRECT_PROXY_HANDLER = ProxyHandler({})
+_DIRECT_HTTP_OPENER = build_opener(_DIRECT_PROXY_HANDLER)
 
 
 class DesktopAppError(RuntimeError):
@@ -100,7 +102,7 @@ def _validate_checkout(config: DesktopAppConfig) -> None:
         raise DesktopAppError(f"initialized npm executable is missing: {config.npm_executable}")
     if os.name != "nt" and platform.system() != "Linux":
         raise DesktopAppError("desktop app supports native Windows and Linux hosts")
-    if not config.headless and platform.system() == "Linux" and not (
+    if not (config.headless or config.smoke_test) and platform.system() == "Linux" and not (
         os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
     ):
         raise DesktopAppError(
@@ -113,6 +115,10 @@ def _require_available_port(port: int) -> None:
     try:
         if os.name == "nt":
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            # Match socketserver.TCPServer so a just-stopped local API can be
+            # restarted while its closed health-check connections are in TIME_WAIT.
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         probe.bind((LOOPBACK_HOST, port))
     except OSError as exc:
         raise DesktopAppError(f"loopback port {port} is already in use") from exc
@@ -130,7 +136,7 @@ def _prepare_identity(root: Path) -> DesktopIdentity:
     session = provider.issue(
         subject_id="desktop-planner",
         display_name="JobSlayer desktop planner",
-        roles=("planner",),
+        roles=("planner", "quick-agent", "reviewer", "approver"),
         lifetime=timedelta(hours=24),
     )
     provider.create_session_file(session_path, session)
@@ -151,6 +157,7 @@ def _backend_argv(config: DesktopAppConfig, identity: DesktopIdentity) -> tuple[
         str(identity.session_path),
         "--identity-key",
         str(identity.key_path),
+        "--allow-quick-agent",
         "--port",
         str(config.api_port),
     )
@@ -212,7 +219,7 @@ def _wait_for_http(
     *,
     processes: Sequence[OwnedProcess],
     timeout_seconds: float,
-    opener: Callable[..., HTTPResponse] = urlopen,
+    opener: Callable[..., HTTPResponse] = _DIRECT_HTTP_OPENER.open,
 ) -> dict[str, object] | None:
     deadline = time.monotonic() + timeout_seconds
     last_error = "service did not respond"
@@ -361,7 +368,11 @@ def run_desktop_app(config: DesktopAppConfig) -> int:
             principal = session.get("principal") if session else None
             subject = principal.get("subject_id") if isinstance(principal, dict) else "unknown"
             print(f"[ready] {config.ui_url}", flush=True)
-            print(f"[ready] least-privilege identity: {subject} (planner)", flush=True)
+            print(
+                f"[ready] least-privilege identity: {subject} "
+                "(planner + quick-agent + reviewer + approver)",
+                flush=True,
+            )
             print(f"[logs] {log_root}", flush=True)
 
             print("[4/4] opening JobSlayer desktop app", flush=True)

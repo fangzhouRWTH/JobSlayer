@@ -3591,3 +3591,807 @@ ADR-0035 的 lease/checkpoint/recovery 控制面。随后接 verifier/reviewer/h
    `OK (skipped=7)`；compile、包含 pywebview/pythonnet 的 Python dependency consistency、UI、
    BraveNewWorld testbed、Anygine App runbook 与 Git diff 门禁均通过。UI 转换 1951 modules，用时
    276 ms；diff 仅有既有 working-tree 行尾转换提示，无 whitespace/conflict error。
+
+## DEV-2026-09-03-06 — Linux 单入口部署闭环与启动边界修正
+
+- 状态：完成（Linux 服务、真实 Qt 窗口与完整统一门禁均已通过）
+- 类型：desktop launcher、Linux validation、proxy isolation、restart safety
+- 关联决策：[ADR-0049](adr/0049-single-command-cross-platform-desktop-launch.md)
+
+### 需求、诊断与决定
+
+1. 在 Linux checkout 跟进 Windows 新增的 `start.py`，确认它本来就是 Windows/Linux 共用入口，
+   而非只能在 Windows 运行的脚本。首次只读 `python3 start.py --check --json` 正确报告 desktop
+   extra 尚未初始化；基础 Python、固定 Node/npm 与 lockfile UI 已就绪。
+2. 首次 Linux 完整 `./jobslayer check` 通过 310 项 unittest（28.283 秒，`skipped=5`）等 6/7
+   子门禁，但 UI 子门禁因旧 `.venv` manifest 触发 offline editable reinstall、环境缺少
+   setuptools 而失败。正常联网初始化随后按既有协议刷新基础环境；这不是新增系统依赖。
+3. Linux smoke 原先被和真实窗口同样要求 `DISPLAY`，与 ADR-0049 的无窗口服务烟测约定冲突；仅
+   将 `smoke_test` 加入无窗口校验分支，真实 Qt 桌面仍在没有 X11/Wayland 会话时失败关闭。
+4. 实际从系统 Python 首次安装 desktop extra 后，POSIX `.venv/bin/python` 是指向系统解释器的
+   symlink；对两个 executable 做 `resolve()` 会错误认为仍在同一运行环境。启动器现改用
+   `sys.prefix` 判断 venv 边界，确保初始化后重新进入仓库解释器。
+5. 本机代理的 `NO_PROXY=127.*` 不被 Python `urllib` 识别，导致固定 loopback 健康检查被外部代理
+   返回 502。启动器现为这组受控 `127.0.0.1` URL 使用无代理 opener，不修改用户代理环境。
+6. 停止 smoke 后的 API 连接会短暂处于 `TIME_WAIT`。POSIX 端口探针现与
+   `socketserver.TCPServer` 一致使用 `SO_REUSEADDR`，允许安全立即重启；Windows 继续使用
+   `SO_EXCLUSIVEADDRUSE`，真实 listener 占用仍被拒绝。
+7. 以上均为 ADR-0049 已决定跨平台行为的缺陷修正，没有形成新的持久架构决策，因此不新增 ADR。
+
+### 变更文件
+
+- 入口与 Linux 桌面运行：`start.py`、`src/jobslayer/desktop/app.py`；
+- 回归测试：`tests/test_desktop_app.py`；
+- 使用说明：`README.md`、`docs/TASK_MANAGER.md`、`docs/UNIFIED_ENTRYPOINT.md`；
+- 追加式记录：`docs/DEVELOPMENT_LOG.md`。
+
+### 当前验证、限制与下一步
+
+1. `sh ./init.sh -- python -m unittest tests.test_desktop_app tests.test_bootstrap
+   tests.test_unified_entrypoint tests.test_orchestration_web -v`：在首轮两项修正后 36 项通过，
+   用时 1.471 秒；最终 desktop 聚焦回归 13 项通过，用时 0.049 秒。
+2. `sh ./init.sh -- python -m compileall -q start.py scripts src tests` 与 `git diff --check` 通过。
+3. `python3 start.py --smoke-test --startup-timeout 45` 在代理隔离修正后通过默认 8780/4173 的
+   API、Vite same-origin proxy、planner session 健康闭环；窗口 smoke 后立即再次运行同一命令也
+   通过，证明可安全重启。
+4. `python3 start.py --window-smoke-seconds 2 --startup-timeout 45` 在本机 X11 会话真实打开强制 Qt
+   的窗口并自动关闭，退出码 0。Chromium 报告当前环境不支持 GBM 后回退 Vulkan，没有造成失败。
+5. `.venv/bin/python -m pip check` 返回 `No broken requirements found`；
+   `python3 start.py --check --json` 返回总体 `ready=true`，Python desktop extra、Node/npm 与 UI
+   均 ready。每轮退出后 4173/8780 无 listener、临时 planner session 已删除，只保留受保护 key。
+6. 最终 `./jobslayer check` 退出码 0，7/7 全部通过：314 项 unittest 用时 28.044 秒，
+   `OK (skipped=5)`；compile、包含 Linux Qt desktop extra 的 Python dependency consistency、UI、
+   BraveNewWorld testbed、Anygine App runbook 与 Git diff 门禁均通过。UI 转换 1951 modules，用时
+   88 ms。
+7. 普通 `python3 start.py` 会持续打开窗口，需由用户关闭，因此自动验证只使用有界 window smoke。
+   下一步建议在 Windows 与 Linux CI 分别保留服务 smoke，并在具备图形会话的发布机保留原生窗口
+   smoke。
+
+## DEV-2026-09-03-07 — 语义弹性 UI 描述、活动方案与 Agent 交换框架
+
+- 状态：完成（框架、首个活动方案、后端/前端投影和完整统一门禁均已通过）
+- 类型：semantic UI contract、design versioning、Agent proposal、backend read model、UI tracking
+- 关联决策：[ADR-0050](adr/0050-semantic-elastic-ui-design-contract.md)
+
+### 需求与决定
+
+1. 新增 Semantic UI Design（SUID）作为设计中间交换数据。description 使用结构化区域、空间/包含
+   关系、用户旅程和 `must/should/may/must_not` 要求表达精确架构，职责、内容、反馈和验证提示仍
+   使用可模糊的中英文自然语言；不把它解释为 React tree、CSS 或运行时低代码 schema。
+2. `dirty/planned/stable` 属于每个语义单元：dirty 先修描述、planned 先比对后按需落实、stable
+   只作有证据的静态参考。绑定活动 revision 的 observation 将差异显式分类为
+   none/minor/material/unknown，确定性映射为 reference/refine/inspect/verify/implement/clarify；
+   planned 的 none/minor 只验证不重复改代码，stable 的 material/unknown 必须先澄清与解锁。
+3. 每个 revision 是自包含、连续且绑定前一 canonical SHA-256 的完整文档。catalog 登记多 page/
+   scheme/revision，但每个已登记 page 恰好一个活动 binding；活动精确绑定 scheme、revision、hash
+   和 human/policy 决定。增加候选方案或 revision 不自动激活。
+4. stable 单元必须有 evidence。修改/删除前一 stable 单元需要逐 unit 的 human/policy 授权；Agent
+   不能授权 stable 变化、把 dirty/planned 自行提升为 stable 或成为活动 binding actor。
+   `UIDesignAgentRequest`/`UIDesignAgentDraft` 还绑定活动 hash 和具体 adapter，防止陈旧草稿被误用。
+5. 首个 `task-manager/focused-task-graph@v1` 记录当前左 2/3 DAG、右 1/3 节点详情/Agent 对话及控制
+   平面边界，共 14 个单元：13 stable、1 planned。planned 项是后端活动方案摘要投影；本轮虽已实现，
+   但在新的人工接受 revision 形成前不冒充 stable。
+6. TaskManager 启动时校验 source-controlled catalog；认证 `GET /api/task-manager/ui-design` 只返回
+   后端选定的活动 read model。React 只显示 scheme/revision 与状态计数，不读取描述路径、不选择
+   活动方案，也不按描述动态生成组件。
+7. 新增 `validate-ui-design`、`inspect-ui-design`，并把 catalog 校验加入统一完成门禁。在线编辑器、
+   runtime activation command 和具体 Codex UI-design adapter 当前没有真实退出需求，继续后置；若
+   引入必须新增认证 command、expected revision、幂等与追加审计。
+
+### 变更文件
+
+- 契约/adapter：`src/jobslayer/ui_design/__init__.py`、
+  `src/jobslayer/adapters/source_ui_designs.py`；
+- source-controlled 设计：`ui-designs/catalog.json`、
+  `ui-designs/task-manager/focused-task-graph/v1.json`、observation 示例；
+- CLI/API/门禁：`src/jobslayer/cli.py`、`src/jobslayer/orchestration/web.py`、
+  `src/jobslayer/development/checks.py`；
+- 前端：`ui-framework/src/types.ts`、`components/TaskManager.tsx`、`styles.css` 与 UI README；
+- 测试：`tests/test_ui_design.py`、`tests/test_orchestration_web.py`、
+  `tests/test_development_checks.py`、`tests/test_unified_entrypoint.py`；
+- 文档：`docs/SEMANTIC_UI_DESIGN.md`、ADR-0050/索引、README、交互设计指南、TaskManager、统一入口、
+  路线图和本追加记录。
+
+### 当前验证、限制与下一步
+
+1. `./jobslayer validate-ui-design ui-designs/catalog.json` 返回 `valid=true`，唯一活动项为
+   `task-manager/focused-task-graph@1`，canonical hash 为 `7940b5e6...d49e`，状态计数为
+   dirty 0 / planned 1 / stable 13。
+2. `./jobslayer inspect-ui-design ui-designs/catalog.json --page-id task-manager
+   --observations examples/ui-design-observations.example.json` 对已落实的 planned 摘要返回
+   `verify_only`，总体 `implementation_required=false`、`clarification_required=false`。
+3. 38 项 SUID/API/check-runner/entrypoint/desktop 聚焦回归通过，用时 1.485 秒；最终 SUID/API/
+   check-runner/entrypoint 25 项回归通过，用时 1.329 秒。覆盖 hash 漂移、多重/缺失活动绑定、Agent
+   激活拒绝、stable 改动拒绝与显式授权、Agent stale base、Agent stable 提升拒绝，以及弹性落实的
+   verify/implement/clarify/refine 分支。
+4. `sh ./init.sh -- python -m compileall -q start.py scripts src tests`、`git diff --check` 通过；
+   `sh ./init.sh -- npm --prefix ui-framework run check` 通过，Vite 转换 1951 modules，用时 88 ms。
+   `python3 start.py --smoke-test --startup-timeout 45` 在新增 catalog 启动校验和 API 后仍通过双服务、
+   same-origin proxy、planner 身份与清理闭环。
+5. 尚未进行本轮自动截图或人工视觉接受，因此 `requirement.design-status-projection` 诚实保持 planned；
+   顶部摘要的类型检查/build/API 行为已验证，不以 window 打开或代码存在冒充视觉 stable。
+6. 最终 `./jobslayer check` 退出码 0，8/8 全部通过；新增 semantic-ui-design 门禁重新确认唯一活动
+   binding、精确 hash 与 dirty 0 / planned 1 / stable 13，UI 生产构建转换 1951 modules、用时 90 ms，
+   Python 完整测试、compile、dependency consistency、BraveNewWorld testbed、Anygine App runbook 与
+   Git diff 门禁同时通过。diff 仅提示两份前端工作区文件未来会由 Git 将 LF 转为 CRLF，没有
+   whitespace/conflict error。
+7. 本轮继续叠加在 DEV-2026-09-03-06 尚未提交的 7 个本地文件上，没有 commit、push、运行外部
+   Agent 或修改 BraveNewWorld/Anygine checkout。下一步建议先由人通过真实 TaskManager 窗口接受
+   状态摘要，再发布 v2 将该 planned 单元晋升 stable；之后接入首个受约束 Agent adapter，验证
+   request → draft → 人工评审 → 新 revision → 显式 activation 的完整闭环。
+
+## DEV-2026-09-03-08 — UI/UX Pro Max 固定快照、只读建议与 SUID 证据接入
+
+- 状态：完成（模块隔离、来源锁定、证据接入、公共命令和完整统一门禁均已通过）
+- 类型：external knowledge adapter、supply-chain pinning、SUID evidence、read-only execution
+- 关联决策：[ADR-0051](adr/0051-pinned-read-only-ui-advice-adapter.md)
+
+### 需求与决定
+
+1. UI/UX Pro Max 只作为 `UIAdvisor` 后面的离线知识检索器，不是 Agent、页面生成器或第二设计真相。
+   provider-neutral request 精确绑定活动 SUID 的 page/scheme/revision/hash；第三方输出不能激活方案、
+   解锁 stable 单元、改变工作流状态或证明实现完成。
+2. 固定上游 release `v2.15.0`、commit
+   `a38d04c3d5c298c851dbe5e6ee1965ee3de42cb5`，只引入未修改的 core `data/`、五个 Python 脚本和
+   MIT `LICENSE`。45 个文件、3,265,845 字节的 canonical tree SHA-256 为
+   `a36d882d95a2213cd066d6054d7660b5e6072c40c290682f134f603edd8e43cd`；npm installer、templates、
+   图片生成器和六个兄弟 Skill 均不进入本仓执行面。
+3. adapter 每次运行先验证仓库边界、锁文件/快照 symlink、路径白名单、文件数、字节数、整树 hash 和
+   上游数据一致性。它只构造 `search.py --json` 的 design-system/domain/stack 参数，在临时 cwd 用
+   Python isolated/no-bytecode 模式、最小环境、20 秒 timeout 和 2 MiB 输出上限运行；自然语言 query
+   位于 option terminator 之后，不能注入 `--persist` 等 provider flag。provider 无项目写入参数，也
+   不调用模型或网络。
+4. application service 分别登记精确 `ui_advice.provider_raw` 和
+   `ui_advice.normalized_evidence` 内容寻址制品。后者记录来源、query、SUID binding、规范化建议和 raw
+   artifact ID；`UIDesignAgentRequest.advisory_evidence_artifact_ids` 要求 draft 原样携带已请求证据。
+5. 新增 `validate-ui-advisor` 和 `collect-ui-advice` 公共命令，并把固定快照/上游数据校验加入
+   `./jobslayer check`。升级只能导入新的版本目录、重新计算 lock、补齐代表性回归并经评审后切换；
+   不跟随浮动 `main/@latest`，不原位改写历史快照。
+
+### 变更文件
+
+- provider-neutral 契约与应用服务：`src/jobslayer/ui_advice/__init__.py`、
+  `src/jobslayer/application/ui_advice.py`；
+- provider adapter 与版本锁：`src/jobslayer/adapters/ui_ux_pro_max.py`、
+  `integrations/ui-ux-pro-max/lock.json`；
+- 固定上游资产：`third_party/ui-ux-pro-max/2.15.0/` 与 `third_party/ui-ux-pro-max/README.md`；
+- SUID/CLI/门禁：`src/jobslayer/ui_design/__init__.py`、`src/jobslayer/cli.py`、
+  `src/jobslayer/development/checks.py`；
+- 测试：`tests/test_ui_advice.py`、`tests/test_ui_design.py`、`tests/test_development_checks.py`、
+  `tests/test_unified_entrypoint.py`；
+- 文档：`docs/UI_ADVICE.md`、ADR-0051/索引、`docs/SEMANTIC_UI_DESIGN.md`、README、交互设计指南、
+  TaskManager、统一入口、路线图和本追加记录。
+
+### 当前验证、限制与下一步
+
+1. `./jobslayer validate-ui-advisor` 返回 `valid=true`、provider `ui-ux-pro-max@2.15.0`、固定 commit/
+   tree hash、45 个文件和 3,265,845 字节，并显式报告 `core_only=true`、
+   `project_writes_allowed=false`、`agent_invocation=false`；上游离线 `validate_data.py` 同时通过。
+2. 实际 `collect-ui-advice` stack/React 查询返回 3 条规范化建议并保留完整 raw JSON；design-system 查询
+   返回 7 类候选。两者均绑定活动 `task-manager/focused-task-graph@1` 的精确
+   `7940b5e6...d49e` hash，并分别登记 raw/normalized manifest。
+3. `.venv/bin/python -m unittest tests.test_ui_advice tests.test_ui_design
+   tests.test_development_checks tests.test_unified_entrypoint -v` 为 26/26 通过，用时 1.153 秒；覆盖合法
+   查询、mode/selector 拒绝、未知 provider selector、query flag 注入、快照内容漂移、symlink lock、
+   raw/normalized 制品完整性、Agent advice evidence 遗失拒绝和统一门禁 argv。
+4. `git -c core.autocrlf=true diff --check` 通过；只提示两份既有前端工作区文件未来会由 Git 将 LF
+   转换为 CRLF，没有 whitespace/conflict error。固定快照没有 symlink、特殊文件或 `__pycache__`。
+5. 最终 `./jobslayer check` 退出码 0，9/9 全部通过：330 项 unittest 用时 30.005 秒，
+   `OK (skipped=5)`；compile、dependency consistency、SUID、UI advisor、前端 production build、
+   BraveNewWorld testbed、Anygine App runbook 与 Git diff 门禁均通过。Vite 转换 1951 modules，用时
+   88 ms。
+6. 当前只提供本地 CLI/application adapter，没有浏览器 API、TaskManager 自动查询节点或负责生成
+   SUID revision 的 Codex adapter；这是刻意保持的阶段边界。知识检索证据只能证明 provider 返回过
+   什么，不能证明建议正确或视觉实现已接受。
+7. 本轮继续建立在 DEV-2026-09-03-06/07 的未提交工作区上，没有 commit、push 或修改
+   BraveNewWorld/Anygine checkout。下一步建议用 DAG 信息密度、节点反馈可访问性、右栏窄屏重排三组
+   真实任务验证建议的命中率与弹性落实；取得人工接受证据后，再决定是否接入受约束 Agent 或自动查询
+   节点。
+
+## DEV-2026-09-03-09 — 左侧垂直版面栏、五个真实数据版面与 SUID v2
+
+- 状态：完成（实现、SUID 激活、浏览器观察与完整统一门禁均已通过；新增 planned 单元待人工接受）
+- 类型：TaskManager navigation、focused projections、semantic UI revision、advisor experiment、visual verification
+- 关联决策：[ADR-0052](adr/0052-left-view-rail-and-focused-task-surfaces.md)
+
+### 需求与决定
+
+1. TaskManager 在窗口左缘新增持久垂直版面栏，按固定顺序提供首页、Codex/Agent 状态、任务 Backlog/
+   总控、任务编排和具体任务执行五个版面。桌面栏宽 72px，窄屏为 54px；原生按钮同时提供图标、短
+   标签、`aria-label`、`title`、`aria-current`、可见 focus 和非颜色单一活动线索。
+2. 五个版面共享同一认证 session、任务列表、当前任务和 detail/run read model，一次只渲染一个主
+   版面。稳定 hash 为 `#/home`、`#/agent`、`#/control`、`#/orchestration`、`#/execution`；浏览器
+   前进/后退可恢复版面，旧 `#/task-manager` 映射到任务编排，未知或空 hash 安全归一到首页。
+3. 首页投影产品边界、真实任务统计和活动 SUID；Agent 状态页区分 session、已配置规划 adapter、受
+   门禁执行能力、UI advisor 与真实 provider run 引用；总控页投影全部任务、当前 backlog 和最近
+   append-only log；执行页投影 run/stage/revision、Kernel 节点状态、最新 observation、证据和
+   transition。没有 run 时明确显示空状态，不根据配置猜测 Agent 正在运行。
+4. 任务编排页完整保留 v1 的左 2/3 DAG、右 1/3 节点详情与 Agent 对话及已有候选应用/拒绝流程。
+   版面切换没有新增工作流状态或写操作；所有领域真相仍来自后端，UI/UX Pro Max 仍是 CLI-only 的
+   只读建议源。
+5. 先针对垂直导航运行固定 UI/UX Pro Max adapter。UX 建议采用可见 active state、原生 control
+   语义、键盘/focus 和 deep link；design-system 建议采用克制、高密度及非颜色单一状态。React stack
+   查询返回 0 项，如实保留；营销 landing pattern 和自动配色未采用。
+6. 新增 `focused-task-graph@2`，parent 精确绑定 v1 hash；13 个既有 stable 单元保持稳定，并由产品
+   负责人对 `requirement.single-screen` 的 material 变化提供逐单元 human authorization。26 个新增
+   单元保持 planned；catalog 以 human activation 绑定 revision 2 的 canonical SHA-256
+   `cdb4e3bed81557248ae11bcda1a41cbcc8eb2f940abe193ea10c4818c1b0126e`，状态为 dirty 0 / planned 26 /
+   stable 13。
+
+### 变更文件
+
+- 应用壳与版面：`ui-framework/src/components/TaskManager.tsx`、
+  `ui-framework/src/components/task-manager/TaskManagerRail.tsx`、
+  `ui-framework/src/components/task-manager/TaskManagerViews.tsx`、
+  `ui-framework/src/components/task-manager/taskManagerShell.css`；
+- 设计契约与观察：`ui-designs/task-manager/focused-task-graph/v2.json`、`ui-designs/catalog.json`、
+  `examples/ui-design-navigation-observations.example.json`、`examples/ui-design-observations.example.json`；
+- 回归测试：`tests/test_ui_design.py`、`tests/test_orchestration_web.py`；
+- 决策与使用说明：ADR-0052/索引、`README.md`、`ui-framework/README.md`、
+  `docs/TASK_MANAGER.md`、`docs/SEMANTIC_UI_DESIGN.md`、`docs/UI_ADVICE.md`、
+  `docs/INTERACTION_DESIGN_GUIDE.md`、`docs/ROADMAP.md`、`docs/UNIFIED_ENTRYPOINT.md` 与本追加记录。
+
+### 当前验证、限制与下一步
+
+1. 三组真实建议查询分别使用：
+   `./jobslayer collect-ui-advice --page-id task-manager --task-id ui-task-manager-navigation-v2
+   --request-id task-manager-navigation-react-001 --query "vertical icon navigation active view keyboard
+   accessibility" --mode stack --stack react --max-results 5`，以及同一活动 v1 binding 下的 UX/domain 与
+   design-system 查询。它们生成 normalized artifact `artifact-0378ca2f954a4beebea42645d948d3d8`、
+   `artifact-dd6cb3139969440ea2e4825cf61493c9`、`artifact-98b43b053cc6482ba2a8ec623a0d4f75`；只有后
+   两者经人工筛选进入 v2 activation evidence。
+2. `./jobslayer validate-ui-design ui-designs/catalog.json` 通过，确认两个连续 revision、唯一活动 v2、
+   精确 hash 和 dirty 0 / planned 26 / stable 13。对
+   `examples/ui-design-navigation-observations.example.json` 的 reconciliation 得到 26 个
+   `verify_only`，`implementation_required=false`、`clarification_required=false`；删除 v2 的 human
+   stable-change authorization 会被新增拒绝测试失败关闭，原始授权路径通过。
+3. `sh ./init.sh -- npm --prefix ui-framework run check && .venv/bin/python -m unittest
+   tests.test_ui_design tests.test_orchestration_web tests.test_ui_advice tests.test_development_checks
+   tests.test_unified_entrypoint -v && git -c core.autocrlf=true diff --check` 通过：34 项聚焦测试用时
+   1.682 秒，Vite 转换 1954 modules、用时 92 ms；diff 只有两份既有前端文件未来 LF→CRLF 的提示，
+   无 whitespace/conflict error。
+4. `python3 start.py --headless --startup-timeout 45` 启动真实 API/Vite/planner 后，使用 headless Chrome 在
+   1440×900 分别检查五个 hash，并在 700×900 检查总控窄屏。首页、Agent、总控、编排和执行页均成功
+   渲染；DAG 保持 2:1 结构，窄屏 rail 缩窄且内容重排，无 run/CLI-only/gated 等边界如实显示。临时
+   截图位于 `/tmp/jobslayer-*-v2.png`，未加入源码或冒充永久视觉回归。
+5. 最终 `./jobslayer check` 退出码 0，9/9 全部通过：331 项 unittest 用时 29.088 秒，
+   `OK (skipped=5)`；compile、dependency consistency、SUID v2、固定 UI advisor、UI production
+   build、BraveNewWorld testbed、Anygine App runbook 与 Git diff 门禁均通过。最终 UI build 转换
+   1954 modules、用时 91 ms。
+6. 当前总控/Agent/执行页主要是已有 read model 的只读投影，没有新增启动/停止 Agent、调整 backlog
+   或 run 控制；执行页无 run 分支已做真实视觉检查，有 run 分支由类型/build/API 测试覆盖但尚无真实
+   浏览器运行样本。hash deep-link 的直接加载已验证，浏览器历史回退尚未加入自动化交互测试。
+7. 26 个新增 SUID 单元因尚未取得产品负责人的视觉接受证据而继续保持 planned；代码存在和截图通过
+   不自动晋升 stable。本轮没有 commit、push、调用外部 Agent 或修改 BraveNewWorld/Anygine checkout。
+   下一步建议由产品负责人实际运行五个版面并反馈；接受后发布 v3 把确认单元晋升 stable，再优先补充
+   hash 历史、键盘遍历和真实 run 投影的自动化浏览器回归。
+
+## DEV-2026-09-03-10 — Calm Ops 可读性、信息收敛与 SUID v3
+
+- 状态：完成（实现、语义核对、桌面/窄屏视觉检查及完整统一门禁均已通过；planned 单元待人工接受）
+- 类型：TaskManager visual language、readability、information restraint、semantic UI revision、advisor experiment
+- 关联决策：[ADR-0053](adr/0053-calm-ops-readable-task-manager.md)
+
+### 需求与决定
+
+1. 针对“信息过密、文字偏小、长时间阅读费力”的产品反馈，在不改变五版面信息架构、任务 DAG、工作流
+   权威边界和后端 read model 的前提下，将 TaskManager 收敛为 Calm Ops。视觉采用深炭灰而非纯黑、
+   至少三级可辨表面、单一低饱和绿色强调、轻量阴影与稳定边框；不增加霓虹、扫描线、故障动画、装饰性
+   渐变或大面积发光。
+2. 持续阅读正文提升到 13–17px，任务/节点标题至少 13px，机器元数据至少 10px，窄屏普通说明达到
+   14–16px；等宽字体只保留给 ID、时间、revision 和状态。桌面 rail 从 72px 放宽至 84px，以容纳
+   更清楚的图标和短标签，窄屏仍保持 54px 图标栏。
+3. 首页删除与 rail 重复的连接指标，将主要指标减为三个、入口卡片收敛为 2×2；Agent 页把 UI advisor
+   从独立能力卡移入边界说明并保留三个核心状态；执行页把四块摘要合并为三块；总控首屏只显示最近六条
+   append-only 事件。后端历史没有被删除，当前 UI 的“总 log”仍是最近事件摘要而非完整日志浏览器。
+4. 针对活动 v2 运行三组固定 UI/UX Pro Max 查询。采纳 Accessible & Ethical、Dark OLED、Fluent 2、
+   Minimalism/Swiss 中关于字号、对比、非颜色单一状态、克制层级和中等密度的建议；拒绝 FAQ landing、
+   自动配色、远程 IBM Plex/JetBrains 字体、移动 Material 方案和 editorial/杂志式布局。额外的
+   progressive-disclosure 查询没有命中该主题，如实保留为未采用证据，不用无关结果证明信息收敛。
+5. 发布并由产品负责人身份激活 `focused-task-graph@3`，parent 精确绑定 v2 hash。v2 的 13 个 stable
+   单元逐字段保持不变，因此不需要 stable-change authorization；新增 Calm Ops、可读字号和信息克制
+   三项 planned 要求，活动 canonical SHA-256 为
+   `260aeb61e0f1ef48e1ae5df905b527c95bc3d9c65e27e6a8387a52ae88c7f215`，状态为 dirty 0 /
+   planned 29 / stable 13。
+
+### 变更文件
+
+- 页面与样式：`ui-framework/src/components/task-manager/TaskManagerViews.tsx`、
+  `ui-framework/src/components/task-manager/taskManagerShell.css`；
+- 设计契约与观察：`ui-designs/task-manager/focused-task-graph/v3.json`、`ui-designs/catalog.json`、
+  `examples/ui-design-navigation-observations.example.json`、`examples/ui-design-observations.example.json`；
+- 回归测试：`tests/test_ui_design.py`、`tests/test_orchestration_web.py`；
+- 决策与使用说明：ADR-0053/索引、`README.md`、`ui-framework/README.md`、
+  `docs/TASK_MANAGER.md`、`docs/SEMANTIC_UI_DESIGN.md`、`docs/UI_ADVICE.md`、
+  `docs/INTERACTION_DESIGN_GUIDE.md`、`docs/ROADMAP.md` 与本追加记录；
+- 本轮 `collect-ui-advice` 还在本地 append-only artifact registry 登记了 raw/normalized 查询制品，
+  没有修改外部 provider、调用 Agent 或写入项目业务状态。
+
+### 当前验证、限制与下一步
+
+1. 风格、UX 与 design-system 查询分别生成 normalized artifact
+   `artifact-579492d815934dd1a7a7c4405bd9ca39`、
+   `artifact-18e161b85cf74982aea57858f959707c`、
+   `artifact-dbc2eebf09594ffb80f201cebeb81b46`；未命中 progressive disclosure 的补充查询生成
+   `artifact-f5f3bfa95b184ebca5c57b83a05c2bee`。全部绑定当时活动 v2 的精确
+   `cdb4e3be...126e` hash，raw 输出也分别保留为内容寻址制品。
+2. `./jobslayer validate-ui-design ui-designs/catalog.json` 通过，确认三个连续 revision、唯一活动 v3、
+   精确 hash 和 dirty 0 / planned 29 / stable 13。`./jobslayer inspect-ui-design
+   ui-designs/catalog.json --page-id task-manager --observations
+   examples/ui-design-navigation-observations.example.json` 的精简汇总为 42 个 decision：13 个
+   `reference_only`、29 个 `verify_only`，`implementation_required=false`、
+   `clarification_required=false`。
+3. 聚焦命令 `sh ./init.sh -- npm --prefix ui-framework run check && .venv/bin/python -m unittest
+   tests.test_ui_design tests.test_orchestration_web tests.test_ui_advice -v && git -c core.autocrlf=true
+   diff --check` 通过：25 项测试用时 0.787 秒，Vite 转换 1954 modules、用时 91 ms；diff 只有两份
+   既有前端文件未来 LF→CRLF 的提示，没有 whitespace/conflict error。
+4. `python3 start.py --headless --startup-timeout 45` 启动真实 API、Vite 和 planner 后，使用 headless Chrome
+   以 1440×900 检查 `#/home`、`#/agent`、`#/control`、`#/orchestration`、`#/execution`，并以
+   700×900 检查首页、总控和编排页。最终截图位于 `/tmp/jobslayer-calm-v3-*.png`：活动 v3 和
+   0/29/13 计数正确，桌面 DAG 保持约 2:1 主从结构，右栏详情/对话可读，窄屏顺序重排和文字放大正常。
+   首轮未等待入场动画的截图没有作为结论证据。
+5. 最终 `./jobslayer check` 退出码 0，9/9 全部通过：332 项 unittest 用时 28.942 秒，
+   `OK (skipped=5)`；compile、dependency consistency、SUID v3、固定 UI advisor、UI production
+   build、BraveNewWorld testbed、Anygine App runbook 与 Git diff 门禁全部通过。最终 UI build 转换
+   1954 modules、用时 88 ms。
+6. 当前没有正式的 WCAG 对比度计算、屏幕阅读器审计或自动浏览器交互回归；真实 provider run 的执行页
+   样本仍缺失，移动编排页右栏需要向下滚动，总控页完整历史日志浏览/展开和用户可选密度档位均未实现。
+   这些限制没有被视觉截图或自然语言信心掩盖。
+7. 29 个 v3 planned 单元在产品负责人真实使用接受前不晋升 stable。本轮没有 commit、push 或修改
+   BraveNewWorld/Anygine checkout。下一步建议先实际运行五个版面，重点判断阅读舒适度、信息是否删得
+   过多以及 84px rail 是否合适；接受后发布后续 revision 固化视觉单元，再补自动化可访问性与完整日志
+   渐进展开。
+
+## DEV-2026-09-03-11 — 独立 Codex Quick Agent、真实额度窗口与 SUID v4
+
+- 状态：完成（实现、协议/RBAC 回归、真实只读容量探针、桌面/窄屏视觉检查和完整统一门禁均通过；
+  Quick Agent 的 planned 设计单元待产品负责人实际使用接受）
+- 类型：task-independent Agent console、Codex App Server adapter、rate-limit truth、authorization、
+  streaming UI、semantic UI revision
+- 关联决策：[ADR-0054](adr/0054-task-independent-codex-quick-agent.md)
+
+### 需求与决定
+
+1. 将 Agent 版面从任务 provider 状态摘要改为独立 Codex Quick Agent。它无需 task ID、plan revision 或
+   run revision，可直接讨论或快速处理当前仓库；其消息、工具事件与终态不写任务 plan/run journal，
+   不调用 `WorkflowKernel.transition`，不产生验证报告，也不判定任务完成。
+2. 采用 Codex 官方 App Server core JSON-RPC 接口，不抓取 TUI 文本：
+   `account/rateLimits/read` 提供 provider 原始 `usedPercent` / `resetsAt`，thread/turn 和 item delta 提供
+   多轮流式会话。只做 `remaining = 100 - used` 的确定性换算；30 秒缓存、provider 更新失效和人工强制
+   刷新并存。读取失败或字段非法明确返回 unavailable，不从 $200 订阅、token 或历史速度估算容量。
+3. 新增独立 `quick-agent` RBAC role 与 `use_quick_agent` / `execute_quick_agent` actions；API 只有显式
+   `--allow-quick-agent` 才装配 adapter。讨论 turn 使用 readOnly，执行 turn 只允许当前仓库
+   workspaceWrite；两者默认 `networkAccess=false`、`approvalPolicy=never`，任何 server-initiated request
+   均失败关闭，并且不使用 App Server 的无沙箱 `process/*`。
+4. 按既定模型方向默认 `gpt-5.6-sol + xhigh`，单轮本地上限 1800 秒且可配置为 30–7200 秒；同一进程
+   仅允许一个活动 turn，提供中断、新会话、16000 字符输入上限、1000 事件/单事件 24000 字符内存边界。
+   App Server stdout/stderr 保留在 `.jobslayer/orchestration/quick-agent/` 私有诊断目录，页面只投影规范化
+   user/agent/tool/system 事件，不显示隐藏 reasoning。
+5. 默认 `python3 start.py` 临时身份调整为 `planner + quick-agent` 并自动传入 opt-in flag；启动本身和
+   额度读取不产生模型 turn，只有用户发送消息才调用 Codex。手工 API 入口仍需显式 role、flag、模型、
+   推理等级和超时参数。
+6. Agent 页沿用 Calm Ops：宽屏以约 1:3 的容量/运行侧栏和主控制台组织，正文/流输出使用可持续阅读的
+   13–15px 字号；窄屏转换为单列滚动。讨论/只读、执行/仓库可写、禁网、无自动审批、任务链隔离与
+   中断状态始终可见。UI/UX Pro Max 只贡献“流式反馈持续可见、关键安全标签不隐藏”的候选知识，命中的
+   stacking context 结果因无关而未采用。
+7. 发布并人工激活 `focused-task-graph@4`，canonical SHA-256 为
+   `4fbd7ea7d31c7fed8c00fdd36d202fc689758cc8203b79f89270219ada740521`。v3 的 13 个 stable 单元逐字段
+   保留；Agent/额度/控制台/权限/旅程与真实性安全要求使 planned 增至 41，dirty 仍为 0。绑定当前
+   observation 后 54 个决定为 13 个 `reference_only`、41 个 `verify_only`，无需重复实现或澄清。
+
+### 变更文件
+
+- provider-neutral 端口与 adapter：`src/jobslayer/quick_agent/__init__.py`、
+  `src/jobslayer/adapters/codex_quick_agent.py`；
+- 认证、API、启动装配：`src/jobslayer/identity/__init__.py`、
+  `src/jobslayer/adapters/local_identity.py`、`src/jobslayer/orchestration/web.py`、
+  `src/jobslayer/cli.py`、`src/jobslayer/desktop/app.py`；
+- 前端契约、页面与样式：`ui-framework/src/types.ts`、
+  `ui-framework/src/components/task-manager/TaskManagerViews.tsx`、
+  `ui-framework/src/components/task-manager/taskManagerShell.css`；
+- SUID 与观察：`ui-designs/task-manager/focused-task-graph/v4.json`、`ui-designs/catalog.json`、
+  `examples/ui-design-navigation-observations.example.json`、`examples/ui-design-observations.example.json`；
+- 回归测试：`tests/test_quick_agent.py`、`tests/test_identity.py`、`tests/test_desktop_app.py`、
+  `tests/test_orchestration_web.py`、`tests/test_ui_design.py`；
+- 决策和使用说明：ADR-0054/索引、`README.md`、`ui-framework/README.md`、`docs/TASK_MANAGER.md`、
+  `docs/UNIFIED_ENTRYPOINT.md`、`docs/SEMANTIC_UI_DESIGN.md`、`docs/UI_ADVICE.md`、
+  `docs/INTERACTION_DESIGN_GUIDE.md`、`docs/ROADMAP.md` 与本追加记录。
+
+### 当前验证、限制与下一步
+
+1. 固定 advisor 查询为：`./jobslayer collect-ui-advice --page-id task-manager --task-id
+   ui-task-manager-quick-agent-v4 --request-id task-manager-quick-agent-ux-001 --query "streaming agent chat
+   quota remaining reset time execution mode safety" --mode domain --domain ux --max-results 8`；生成 normalized
+   `artifact-98595c026e0c4a93865427be27a292bc` 与 raw
+   `artifact-7d88df5d8e6b496aa248e6bc87a4b432`，绑定当时活动 v3，没有调用 Agent 或直接修改设计。
+2. `./jobslayer validate-ui-design ui-designs/catalog.json` 和 `./jobslayer inspect-ui-design
+   ui-designs/catalog.json --page-id task-manager --observations
+   examples/ui-design-navigation-observations.example.json` 通过：四个连续 revision、唯一活动 v4、
+   dirty 0 / planned 41 / stable 13，当前 implementation/clarification 均为 false。
+3. `sh ./init.sh -- python -m unittest tests.test_quick_agent tests.test_identity tests.test_desktop_app
+   tests.test_orchestration_web tests.test_ui_design` 通过 50 项；fake App Server 覆盖容量归一化/缓存、
+   streaming delta/token usage、readOnly/workspaceWrite、禁网、never approval、单活 turn、busy 拒绝和
+   interrupt，HTTP/RBAC 覆盖允许与拒绝路径。`sh ./init.sh -- npm --prefix ui-framework run build` 通过，
+   Vite 转换 1954 modules、用时 92 ms。
+4. 真实只读探针实例化新 adapter 并调用一次 `capacity(force_refresh=True)`：返回 available、`codex` 与
+   额外 bucket，至少一个 primary reset timestamp 有效，error 为 null；随后正常回收 App Server。
+   该步骤没有调用 `turn/start`，因此没有消耗一次真实讨论/执行 turn 来冒充协议测试。
+5. `python3 start.py --headless --startup-timeout 45` 启动真实 API/Vite/Quick Agent 后，认证 session 的
+   两项 Quick Agent capability 均为 true，same-origin capacity API 返回本机真实 plan/bucket 窗口。
+   headless Chrome 以 1440×900 和 700×900 检查 `#/agent`，截图位于
+   `/tmp/jobslayer-quick-agent-v4-1440.png` 与 `/tmp/jobslayer-quick-agent-v4-700.png`：桌面 1:3 层级清楚，
+   额度/刷新/权限文字可读，窄屏变为可滚动单列；临时截图不加入源码或冒充永久视觉回归。
+6. 最终首次 `./jobslayer check` 退出码 0，9/9 全部通过：340 项 unittest 用时 31.024 秒，
+   `OK (skipped=5)`；compile、dependency consistency、SUID v4、固定 advisor、UI production build、
+   BraveNewWorld testbed、Anygine App runbook 与 Git diff 门禁均通过，最终 UI build 用时 91 ms。
+7. 当前 conversation/active thread 是 API 进程内投影，API 重启不会恢复 JobSlayer transcript；Codex 自身
+   虽可能保留 thread 历史，不能冒充 TaskManager durable evidence。快速执行直接修改当前工作树，没有
+   durable run 的隔离 worktree、lease、预算、retry、验证和审批，因此只适合短程明确工作。事件通过
+   750ms HTTP polling、额度通过 30s polling 投影，不是 push transport。本轮真实视觉样本为空会话；
+   有内容的 stream/中断由 fake protocol 测试覆盖，未主动消耗用户额度运行真实 turn。
+8. 本轮没有 commit、push 或修改 BraveNewWorld/Anygine checkout。下一步建议产品负责人运行
+   `python3 start.py`，进入 Agent 页先用“讨论/只读”完成一个真实多轮体验，再显式选择一个可丢弃的
+   小修改验证“快速执行”；接受后再发布后续 SUID revision 将相应 planned 单元晋升 stable，并决定
+   是否需要 durable transcript 或 SSE/WebSocket 推送。
+
+## DEV-2026-09-03-12 — 修复真实 App Server 会话并加入动态模型/性能选单
+
+- 状态：完成（真实只读 turn、动态模型目录、API/UI 联调、桌面/窄屏视觉复核和统一门禁通过）
+- 类型：provider compatibility、model catalog、per-turn configuration、real session smoke、semantic UI
+- 关联决策：[ADR-0054](adr/0054-task-independent-codex-quick-agent.md)
+
+### 问题、决定与实现
+
+1. 产品负责人在真实页面发现 `thread/start` 拒绝 `readOnly`：当前本机 App Server 的
+   `thread/start.sandbox` 使用 `read-only` / `workspace-write`，而 `turn/start.sandboxPolicy.type`
+   使用 `readOnly` / `workspaceWrite`。修正 adapter 的 thread start/resume 枚举，并让 fake server
+   主动拒绝旧写法，保留 turn policy 的正确驼峰结构。
+2. 首次真实修复 smoke 越过 thread start 后又发现 `turn/start.runtimeWorkspaceRoots requires
+   experimentalApi capability`。该字段不属于本集成所需的稳定 core 契约，且 `cwd`、read-only turn
+   和 execute 的精确 `writableRoots` 已建立边界，因此移除该实验字段而不启用 `experimentalApi`。
+3. 新增 provider-neutral model catalog 契约和 `GET /api/task-manager/quick-agent/models`。adapter 调用
+   `model/list`，以 300 秒缓存规范化可见模型、display name、description、default/supported effort、
+   input modalities、personality capability、multi-agent runtime version、service tier、upgrade 和退休时间；
+   失败返回明确 unavailable，不硬编码或猜测账户能力。
+4. `POST /quick-agent/messages` 可携带 `model`、`reasoning_effort` 与 `service_tier`。发送前后端用当前
+   provider catalog 拒绝不存在的模型、effort 或速度组合；通过后把选择同时传给 thread/turn。默认仍是
+   产品既定 `gpt-5.6-sol + xhigh + Standard`，CLI 的 Quick Agent 默认 effort 也允许 provider 当前公布
+   的 `ultra`。
+5. Agent 控制台输入区新增模型/版本、推理强度和响应速度三个选单。模型切换会过滤 effort 和速度；
+   能力说明显示 text/image、Agent runtime、provider default 和 Fast 增加用量提示。runtime version
+   只有 provider metadata，没有对应协议参数，因此只展示、不伪装为选择项。活动 turn 中全部配置锁定。
+6. 发布并人工激活 `focused-task-graph@5`，canonical SHA-256 为
+   `22262370aca04df05677630cd127f7e3fe678d1c568af1f49b8a9eb27b63cb13`。v4 的 13 个 stable 单元逐字段
+   保留；新增 model controls region、关系与 provider catalog truth requirement 后状态为 dirty 0 / planned
+   44 / stable 13。导航 observation 的 57 个决定为 13 个 `reference_only`、44 个 `verify_only`，没有
+   implementation 或 clarification 要求。
+
+### 变更文件
+
+- 契约与 adapter：`src/jobslayer/quick_agent/__init__.py`、
+  `src/jobslayer/adapters/codex_quick_agent.py`；
+- HTTP/CLI：`src/jobslayer/orchestration/web.py`、`src/jobslayer/cli.py`；
+- UI：`ui-framework/src/types.ts`、`ui-framework/src/components/task-manager/TaskManagerViews.tsx`、
+  `ui-framework/src/components/task-manager/taskManagerShell.css`；
+- SUID/观察：`ui-designs/task-manager/focused-task-graph/v5.json`、`ui-designs/catalog.json`、
+  `examples/ui-design-navigation-observations.example.json`、`examples/ui-design-observations.example.json`；
+- 测试：`tests/test_quick_agent.py`、`tests/test_orchestration_web.py`、`tests/test_ui_design.py`；
+- 决策/说明：ADR-0054、`README.md`、`ui-framework/README.md`、`docs/TASK_MANAGER.md`、
+  `docs/UNIFIED_ENTRYPOINT.md`、`docs/INTERACTION_DESIGN_GUIDE.md`、`docs/ROADMAP.md` 与本追加记录。
+
+### 验证、限制与下一步
+
+1. 本机 Codex `model/list` 真实探针返回 7 个可见模型：`gpt-5.6-sol`、`gpt-5.6-terra`、
+   `gpt-5.6-luna`、`gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini`、`gpt-5.3-codex-spark`。Sol 当前公布
+   `low/medium/high/xhigh/max/ultra` 和 `priority` Fast tier；这些是本次账户/CLI 观测，不固化成全局保证。
+2. 显式真实只读 smoke 使用 `gpt-5.6-luna + low + Standard` 和“不调用工具、精确回复”的最小 prompt：
+   thread 创建成功，turn 为 `completed`，回复 `QUICK_AGENT_SESSION_OK`，error 为 null；provider usage 为
+   input 13,337、cached input 9,984、output 9、reasoning output 0、total 13,346 tokens。本记录修正上一条
+   DEV-11“未运行真实 turn”的限制；它不证明 execute 写入或 Fast tier 的长期性能。
+3. `python3 start.py --headless --startup-timeout 45` 实际启动 API/Vite/Quick Agent；same-origin 页面读取
+   SUID v5，认证 models API 返回上述 7 个模型。Chrome 以 1440×900 与 700×900 检查 `#/agent`，截图为
+   `/tmp/jobslayer-quick-agent-v5-1440.png` 和 `/tmp/jobslayer-quick-agent-v5-700.png`：桌面选单为清楚的三列，
+   窄屏保持单列顺序与可滚动控制台；随后正常回收服务，4173/8780 不应残留监听。
+4. 聚焦命令 `sh ./init.sh -- python -m unittest tests.test_quick_agent tests.test_orchestration_web
+   tests.test_ui_design tests.test_desktop_app tests.test_identity` 通过 53 项；model catalog 缓存/归一化、
+   thread/turn 两套 sandbox 枚举、无实验字段、动态 `ultra`/Fast 组合、非法组合拒绝、HTTP 配置透传与
+   v5 stable 保护均有确定性测试。UI production build 转换 1954 modules、用时 95 ms。
+5. 首次最终 `./jobslayer check` 退出码 0，9/9 通过：343 项 unittest 用时 29.552 秒，
+   `OK (skipped=5)`；compile、dependency consistency、SUID v5、固定外部 advisor、UI production build、
+   BraveNewWorld testbed、Anygine runbook 与 Git diff 均通过。只有既有两份前端文件的未来 LF→CRLF 提示，
+   没有 whitespace/conflict error。
+6. conversation/transcript 仍是 API 进程内投影，事件仍通过 750ms HTTP polling；Quick Agent 也仍不是
+   durable TaskManager run。真实 smoke 只覆盖只读 Standard turn；Fast 会按 provider 描述增加用量，
+   execute 会直接写当前工作树，两者均应由用户在明确的小任务上选择。当前未 commit、push 或修改
+   BraveNewWorld/Anygine checkout。
+7. 写入本条完整变更与验证记录后再次执行统一入口 `./jobslayer check`，退出码 0、9/9 通过：343 项
+   unittest 用时 29.195 秒，`OK (skipped=5)`；最终 UI build 转换 1954 modules、用时 87 ms，其余
+   compile、dependency、SUID v5、固定 advisor、testbed、runbook 与 diff 门禁同样通过。
+8. 随后补齐 model catalog unavailable 的可见 UI 错误和非 Fast 自定义 tier 的精确标签，再运行聚焦
+   UI build/27 tests；最终第三次 `./jobslayer check` 仍为 9/9：343 项 unittest 用时 30.315 秒，
+   `OK (skipped=5)`，UI build 转换 1954 modules、用时 90 ms，其他门禁全部通过。
+
+## DEV-2026-09-03-13 — 持久单步 coordinator 与 Life Game 首次真实运行
+
+- 状态：进行中（控制面纵向切片和全库门禁已通过；真实目标补丁已生成并完成独立 Agent 技术审查，
+  当前停在精确源码检查点的人类批准门，尚未集成、构建、运行或最终归档）
+- 类型：persistent serial coordinator、recovery intent、TaskManager API/UI、real target run、human gate
+- 关联决策：[ADR-0055](adr/0055-persistent-single-step-task-manager-coordinator.md)
+
+### 需求、决定与实现
+
+1. 新增 provider-neutral coordinator cursor、intent、snapshot 和 store contract；本地实现以追加式 JSONL、
+   SHA-256 前向哈希链、前缀保持的原子发布和 `0600` 文件权限持久化每次推进。run revision 始终是任务
+   真相，cursor 不建立第二套节点状态机。
+2. `TaskManagerSerialCoordinator.tick` 使用既有 run 级 SQLite lease 保证单活，一个 tick 最多调用一条
+   `TaskManagerExecutionService` command。副作用前记录确定性 intent，副作用成功后记录 outcome；若进程
+   在两者之间终止，后续 tick 以已增长的 run revision 对账并清除 intent，不重复启动 provider。
+3. 稳定 DAG 顺序依次处理 dependency-ready 节点：task/milestone 执行 start/observe/verify/integrate，
+   validation 执行 finalized profile，human gate、review、merge review、failed、repairing、blocked 和
+   cancelled 均失败关闭并把原因投影给操作者。所有 task state mutation 仍只经 `WorkflowKernel.transition`。
+4. loopback API 新增 revision-bound `coordinator/tick` 并发布 `serial_coordinator` capability；具体任务执行页
+   显示持久 cursor、下一动作、原因和“推进一步”。外部 review/approval 改变 run revision 后，即使旧
+   cursor 仍显示等待，UI 也允许“同步并推进”，避免把历史停顿误当成当前真相。
+5. 审查角色收紧为：独立 Agent 或 human 可形成 exact-patch 技术 review；源码 checkpoint 必须由不同的
+   human 批准；无源码差异的确定性 validation 可由 human 或明确命名的 policy 接受，agent 不得接受；
+   最终 completion gate 仍只能由授权且独立的 human 决定。
+6. 发布并激活 SUID `focused-task-graph@6`，canonical SHA-256 为
+   `47f1891fc52406e679514cfce760a595b0200830f4d0f973d59630e4d7181057`。v5 的 13 个 stable 单元完整保留，
+   新增 coordinator region、关系、单步旅程和真实性要求；当前为 dirty 0 / planned 48 / stable 13。
+
+### 变更文件
+
+- coordinator 契约、存储和应用服务：`src/jobslayer/task_manager/coordinator.py`、
+  `src/jobslayer/adapters/local_task_manager_coordinator.py`、
+  `src/jobslayer/application/task_manager_coordinator.py`、`src/jobslayer/task_manager/__init__.py`、
+  `src/jobslayer/application/task_manager.py`；
+- 审查语义、API 和装配：`src/jobslayer/application/task_manager_execution.py`、
+  `src/jobslayer/orchestration/web.py`、`src/jobslayer/cli.py`；
+- UI：`ui-framework/src/types.ts`、`ui-framework/src/components/TaskManager.tsx`、
+  `ui-framework/src/components/task-manager/TaskManagerViews.tsx`、
+  `ui-framework/src/components/task-manager/taskManagerShell.css`；
+- SUID/观察：`ui-designs/task-manager/focused-task-graph/v6.json`、`ui-designs/catalog.json`、
+  `examples/ui-design-navigation-observations.example.json`、`examples/ui-design-observations.example.json`；
+- 测试：`tests/test_task_manager_coordinator.py`、`tests/test_task_manager_execution.py`、
+  `tests/test_orchestration_web.py`、`tests/test_ui_design.py`；
+- 决策与说明：ADR-0055/索引、`docs/TASK_MANAGER.md`、`docs/ROADMAP.md`、
+  `docs/SEMANTIC_UI_DESIGN.md` 与本追加记录。
+
+### 真实 Life Game 运行证据、限制与下一步
+
+1. 既有“生命游戏”草案只通过 TaskManager proposal/apply/finalize 命令调整为 finalized plan revision 17，
+   plan record hash 为 `10c8cba2c110a59f569ee773e923ec092dfdf64d8fd1d85392779e0924bd0ad4`；DAG 为
+   `实现可视化生命游戏 App -> 验证生命游戏真实构建与运行 -> 人工确认生命游戏闭环完成`。
+2. 创建 `tmrun-life-game-20260903`，绑定 BraveNewWorld 基线
+   `e7bff4aceca5dee998d0db1dc1c50e4b935fabda`、source bundle
+   `8564e29b7bf238ed35785b147658cf3f0efe57c9ca6b26c9d77f7d924eb902e0`、Anygine commit
+   `28b4934c24fdad6b8f45b945a89a6ada51703f5d` 及内容哈希校验通过的 source/toolchain attachments。
+3. coordinator 启动本机已登录 Codex `gpt-5.6-sol + xhigh`，在隔离 worktree
+   `.jobslayer/orchestration/task-manager-codex/workspaces/tmws-6fd92f572c815b55e8083483` 产生 12 个允许路径
+   的未提交变更。实现包含独立的 24x24 环面 Conway B3/S23 模型、blinker/glider/reset/wrap/pause 测试、
+   Anygine 公共 UI 网格与控制、默认 `./bnw run` 路由、manifest contract 和追加文档。
+4. provider terminal success、workspace binding、changed-path policy、immutable evidence integrity 四项源码
+   verification 均通过；report 为 `tmverify-4c0799b032ed42ed8d0a927c27b03702`，精确 patch SHA-256 为
+   `fc79c55b55931164bfd7c271f6ede2546a07fdf188da51031e7389b44b46f9c0`。独立 Agent 复核模型、测试、
+   public-target 边界、bounded smoke wiring 和完整 diff 后，将 run revision 7 推进到 `merge_review`。
+5. 本阶段只运行了实现节点允许的 `./bnw contract`、独立 `Tests/ManifestContract.py` 与 `git diff --check`；
+   C++ build、CTest 和 Vulkan/UI smoke 必须在用户批准精确 patch、coordinator 创建隔离 branch checkpoint
+   后，由内容绑定的 validation node 执行。当前没有 commit/checkpoint、main merge、push 或 deploy。
+6. provider 报告 input 810,198、cached input 742,784（cached 是 input 子集）、output 26,377、reasoning
+   output 9,637；这超过 runbook 声明的 500,000 input 观察预算。依据 ADR-0035，本地订阅 adapter 当前只
+   能在 terminal usage 可见后记录 input，不能中途硬中断；因此不得把该数值描述为已强制执行的 hard cap。
+   在当前 source-bound run 完成前不改 runbook，避免造成 bundle drift；后续应明确“观察预算/硬上限”语义，
+   并依据真实 C++ xhigh 样本重新设定预算或增加 provider 可中断能力。
+7. coordinator、TaskManager execution/web 聚焦回归共通过 67 项，UI production build 通过；首次完整
+   `./jobslayer check` 退出码 0、9/9 通过：350 项 unittest，`OK (skipped=5)`，compile、dependency、
+   SUID v6、固定 UI advisor、UI build、BraveNewWorld testbed、Anygine runbook 与 Git diff 门禁均通过。
+8. 下一步必须由产品负责人审阅上述 exact patch 并明确批准、拒绝或要求修改。只有批准后才允许写入隔离
+   run branch checkpoint，再执行真实 build/CTest/Vulkan smoke；passing validation 由命名 policy 接受后，
+   仍需一次独立的人类最终完成决定。main merge/push/deploy 始终不在本次授权范围内。
+
+## DEV-2026-09-03-14 — Life Game 人类 checkpoint 与真实原生验证
+
+- 状态：进行中（隔离 checkpoint 与全部真实 validation 已通过并由确定性 policy 接受；coordinator
+  已停在最终人类门，尚未将 run 标记为完成）
+- 类型：human source approval、isolated Git checkpoint、native C++/CTest/Vulkan validation、policy review
+- 关联决策：[ADR-0042](adr/0042-independent-source-review-and-isolated-run-checkpoint.md)、
+  [ADR-0043](adr/0043-source-bound-deterministic-validation-nodes.md)、
+  [ADR-0044](adr/0044-evidence-bound-final-completion-gate.md)、
+  [ADR-0055](adr/0055-persistent-single-step-task-manager-coordinator.md)
+
+### 授权、检查点与验证结果
+
+1. 产品负责人明确批准 patch
+   `fc79c55b55931164bfd7c271f6ede2546a07fdf188da51031e7389b44b46f9c0` 仅写入隔离 run branch 并继续
+   受治理 validation，不授权 main merge、push、deploy 或最终完成。短期 human approver
+   `product-owner-life-game-checkpoint` 与先前 Agent source reviewer 独立；批准 artifact 为
+   `artifact-26a8ceede49e41009d58bf7a0595c17d`。
+2. `integrate-checkpoint` 在副作用前重检 exact base、patch hash、允许路径与 clean target，随后只在
+   `jobslayer/tmws-6fd92f572c815b55e8083483` 创建 commit
+   `c60eb5eb6867d598c9393b5c4a043eb239b6e592`。12 个 changed paths 与 source review 完全一致，integration
+   artifact 为 `artifact-432c31157c7f45d28297a1afb9c74d21`；实现节点完成、validation 节点解锁，
+   BraveNewWorld `main` 仍为 `e7bff4aceca5dee998d0db1dc1c50e4b935fabda` 且 clean。
+3. coordinator 在 run revision 9 调用一次 source-controlled validation；runner 严格执行
+   `./bnw contract`、`./bnw test --jobs 4`、`./bnw run --jobs 4`，没有追加 argv。Anygine source commit/hash、
+   Conan toolchain hash、`DISPLAY=:1` 与 `XDG_RUNTIME_DIR=/run/user/1000` 均按 finalized binding 注入并在
+   validation 前后复核。
+4. `manifest-contract` 退出码 0；原生 Debug 构建完成 `BraveNewWorldLifeGameModelTests`、
+   `BraveNewWorldLifeGame`、`BraveNewWorldHelloTask` 与 `BraveNewWorldBuildAll`。CTest 为 2/2 passed：
+   `BraveNewWorldLifeGameModel` 与 `BraveNewWorldManifestContract`，0 failed。
+5. Vulkan/UI smoke 退出码 0、用时 1.466 秒；日志明确记录 validation mode `Required, enabled=yes`、
+   ImGui UI context initialized 和 Application stopped。应用成功 marker 为
+   `BraveNewWorld life-game: validation=requested/enabled errors=0 presented=12 generation=12 live=5 grid=24x24 ui=enabled`。
+6. coordinator 先以既有 provider run 采集 terminal observation，再由 TaskManager 编译 report
+   `tmverify-b14b8633e951493ab0056a1f9ce1a7d9`。三项 required command checks，以及 terminal、workspace、
+   changed-path、immutable evidence、dependency attachment 五项治理检查全部 passed；regression 为 false、
+   unresolved risks 为空，validation 后 workspace clean at commit `c60eb5e...e592`。
+7. 命名 policy `life-game-deterministic-validation-acceptance-policy-v1` 只依据上述完整 passing report 接受
+   无源码差异的验证交付物，artifact 为 `artifact-e4bdf5757b7d4c92807532714eb57c04`。run revision 14
+   的节点状态为 `scope=completed`、`verify=deliverable_accepted`、`finalize=plan_review`；coordinator cursor
+   revision 16 明确投影 `waiting_human / wait_human`，没有 pending intent。
+
+### 限制与下一步
+
+1. 本轮证明的是 target 隔离 run branch 上的真实源码 checkpoint、build、CTest 与 Vulkan/UI smoke；没有
+   main merge、push、release 或 deployment。生成目录属于可重建验证产物，未加入 checkpoint。
+2. 真实 runtime 是 12 帧有界 smoke，证明窗口/Vulkan/Renderer/UI 生命周期与模型统计，不替代长时间人工
+   操作、视觉质量或交互可用性评审；pause/resume/single-step/reset 的模型语义由确定性单测覆盖。
+3. 最终 completion gate 仍需要产品负责人审阅 report、runtime marker、节点终态和哈希链后明确批准或
+   拒绝。批准只会把本次 TaskManager run 归档为完成，不会扩大到 main merge、push 或 deploy。
+4. 写入本条 checkpoint/validation 记录后执行统一入口 `./jobslayer check`，退出码 0、9/9 通过：350 项
+   unittest 用时 34.885 秒，`OK (skipped=5)`；compile、dependency consistency、SUID v6、固定外部
+   UI advisor、UI production build（1954 modules，113 ms）、BraveNewWorld testbed、Anygine runbook 与
+   Git diff 门禁全部通过。既有两份前端文件仍只有未来 LF→CRLF 提示，没有 whitespace/conflict error。
+
+## DEV-2026-09-03-15 — 全任务循环的 revision-bound 人工行动指导
+
+- 状态：完成（结构化指导、真实 UI 检查与统一门禁均通过；Life Game 的业务完成门仍等待用户决定）
+- 类型：TaskManager read contract、human interaction、DAG feedback、Calm Ops UI、SUID、ADR
+- 关联决策：[ADR-0056](adr/0056-revision-bound-human-action-guidance.md)
+
+### 决定与落实
+
+1. 用户要求所有任务循环在需要人工验收或交互时，必须在 task graph 或反馈中给出明确指导和详细步骤。
+   本轮没有扩张 Kernel 状态机，而是新增 provider-neutral `TaskManagerHumanActionGuidance`：结构化表达
+   actor type、capability、前置要求、编号步骤、待审 evidence、允许决定、禁止动作和精确 plan/run
+   revision。指导是确定性只读投影，不持久化第二份任务状态，也不构成授权。
+2. `project_human_actions` 覆盖 proposal decision、计划补齐/固化、run assembly、根 scope confirmation、
+   无源码 deliverable review、源码技术 review、独立 checkpoint approval、最终 completion approval、
+   failure recovery 和 blocker resolution。计划/run revision 变化后调用者必须取得新指导；真正写入仍
+   经过既有 RBAC、expected revision、独立 actor、evidence gate 和 `WorkflowKernel.transition`。
+3. React 只消费后端 `human_actions`。任务图相关节点显示“需要人工处理”，右侧详情显示紧凑指导，具体
+   执行页在 coordinator 与节点序列之间显示完整卡片；卡片明确显示责任主体、处理要求、步骤、证据、
+   决定效果和禁止绕过事项。没有根据自由文本 reason 猜测状态，也没有增加未经治理的一键批准。
+4. 发布并由产品负责人激活 `focused-task-graph@7`，canonical SHA-256 为
+   `3f9c39068a17081511cc5b88e9b6f60d37333db38660ab86189c7f00e239ec79`；parent 精确绑定 v6
+   `47f1891fc52406e679514cfce760a595b0200830f4d0f973d59630e4d7181057`。v6 的 13 个 stable 单元全部
+   保留，新增 human guidance region、两条关系、处理 journey 和 must requirement；状态为 dirty 0、
+   planned 53、stable 13。
+5. 以真实 Life Game `tmrun-life-game-20260903` 检查最终人类门。API 在 plan R17/run R14 返回一个
+   `completion_approval`，仅允许 human + `apply_decision`，包含 4 项要求、6 个步骤、8 个 evidence、
+   2 个决定和 2 项禁止动作。1440×1000 headless Chrome 实际页面显示完整首屏指导结构，run 继续保持
+   `waiting_human / wait_human`，本轮没有替用户执行最终批准。
+
+### 变更文件
+
+- 契约与投影：`src/jobslayer/task_manager/guidance.py`、`src/jobslayer/task_manager/__init__.py`、
+  `src/jobslayer/application/task_manager_guidance.py`、`src/jobslayer/application/task_manager.py`；
+- UI：`ui-framework/src/types.ts`、`ui-framework/src/components/TaskManager.tsx`、
+  `ui-framework/src/components/task-manager/TaskManagerViews.tsx`、
+  `ui-framework/src/components/task-manager/HumanActionGuidanceCard.tsx`、
+  `ui-framework/src/components/task-manager/taskManagerShell.css`；
+- 设计与文档：`ui-designs/task-manager/focused-task-graph/v7.json`、`ui-designs/catalog.json`、
+  `examples/ui-design-observations.example.json`、`examples/ui-design-navigation-observations.example.json`、
+  `docs/adr/0056-revision-bound-human-action-guidance.md`、`docs/adr/README.md`、
+  `docs/SEMANTIC_UI_DESIGN.md`、`docs/TASK_MANAGER.md`、`docs/ROADMAP.md`、`README.md`、
+  `ui-framework/README.md`；
+- 验证：`tests/test_task_manager.py`、`tests/test_task_manager_coordinator.py`、
+  `tests/test_orchestration_web.py`、`tests/test_ui_design.py`。
+
+### 验证与修正
+
+1. `sh ./init.sh -- python -m unittest tests.test_task_manager tests.test_task_manager_coordinator`：8 项通过；
+   新测试包含源码 review → 独立 checkpoint 指导以及 failure/final gate 指导。
+2. 首次合并专项命令
+   `sh ./init.sh -- python -m unittest tests.test_task_manager tests.test_task_manager_coordinator tests.test_orchestration_web tests.test_ui_design`
+   暴露一个旧 API 断言仍期待活动 SUID v6/48 planned；修正为 v7/53 后重跑 31 项通过。首次手工
+   `inspect-ui-design` 还使用了错误参数顺序，CLI 按契约退出 2；随后按 help 使用正确位置参数，返回
+   `implementation_required=false`、`clarification_required=false`。
+3. `sh ./init.sh -- npm --prefix ui-framework run check`：退出码 0，TypeScript 与 production build 通过，
+   1955 modules transformed，91 ms。
+4. `./jobslayer validate-ui-design ui-designs/catalog.json`：退出码 0，v1–v7 hash chain 和活动 binding
+   有效。`./jobslayer inspect-ui-design ui-designs/catalog.json --page-id task-manager --observations
+   examples/ui-design-navigation-observations.example.json`：退出码 0。
+
+### 限制与下一步
+
+1. 当前 guidance card 是只读交接界面；固化、review、approval、retry 等写命令仍需相应身份通过既有
+   API/CLI。后续可逐项增加 revision-bound 按钮，但不能让 UI 自己拥有权限或完成决定。
+2. 当前没有浏览器 push 通知；长任务到达人工停顿后需要刷新，或由上层受控轮询 detail。
+3. 指导文案当前面向 TaskManager 的中文操作场景；结构契约可本地化，但不能仅靠 Agent 临时生成而失去
+   确定性、版本和禁止项。
+4. Life Game 仍等待产品负责人依据页面中的 6 步指导作最终完成决定；批准只归档本次 run，不包含 main
+   merge、push、deploy 或 release。
+5. 写入本条实现记录后执行统一入口 `./jobslayer check`，退出码 0、9/9 通过：352 项 unittest 用时
+   33.317 秒，`OK (skipped=5)`；compile、dependency consistency、SUID v7、固定外部 UI advisor、
+   UI production build（1955 modules，96 ms）、BraveNewWorld testbed、Anygine runbook 与 Git diff 门禁
+   全部通过。既有两份前端文件仍只有未来 LF→CRLF 提示，没有 whitespace/conflict error。随后再由用户
+   决定 Life Game 最终门。
+
+## DEV-2026-09-03-16 — 执行页人工决定闭环与 Life Game 正式发布
+
+- 状态：完成（人工控件、追加反馈、任务内 Agent 辅助、真实完成归档和两个仓库发布均完成）
+- 类型：governed human interaction、TaskManager API/UI、Codex assistance、real target acceptance、publication
+- 关联决策：[ADR-0057](adr/0057-governed-human-decision-controls-and-assistance.md)
+
+### 决定与落实
+
+1. 执行页不再只展示人工指导。完整指导卡提供逐项 evidence 核对、结构化决定、理由和动作边界确认；
+   `confirm-scope`、`accept-review`、`review-source`、`approve-checkpoint`、`approve-completion` 仍调用原有
+   application command。前端只负责防误触，后端继续执行 RBAC、精确 revision、证据、独立 actor 和
+   `WorkflowKernel.transition` 门禁。
+2. 新增 revision-bound append-only feedback。每条反馈绑定 task/run/node/guidance/decision/plan revision/
+   run revision，先登记不可变 artifact，再追加 run hash chain；旧指导、错误节点或未声明决定失败关闭，
+   反馈本身不改变节点状态。
+3. 新增 provider-neutral human-action assistant 和本地 Codex adapter。请求与回答分别形成 interaction、
+   artifact 和独立 run revision；Codex 使用本机登录、`gpt-5.6-sol`、`xhigh`、`read-only`、结构化输出与
+   有界时限，只能解释核对要求、风险或起草反馈，不能替人批准、执行或声称已阅读仅以 ID 给出的证据。
+4. 身份层新增 `ASSIST_HUMAN_DECISION`，只授予 `quick-agent`；feedback 使用既有 `RECORD_DECISION`。
+   默认桌面临时身份包含 planner、quick-agent、reviewer、approver 以显示本机入口，但没有自动启用执行、
+   validation 或 checkpoint adapter；源码 Reviewer/Approver 同主体限制仍由服务端强制。
+5. 发布并激活 SUID `focused-task-graph@8`，canonical SHA-256 为
+   `d10e3be4b56de0813521d197fa656bb1ac22d9ffce2a5fa8548a7acbd90e8ed2`；v7 的全部 stable 单元保持
+   不变，新版本加入正式决定、反馈、Agent assistance 的 regions、relations、journeys 和 requirements。
+
+### 真实 Life Game 验收与发布
+
+1. 在真实 `tmrun-life-game-20260903`（plan R17）通过执行页调用一次本机 Codex Sol/xhigh 只读辅助。
+   请求和回答使 run 从 R14 前进到 R16，节点仍为 `plan_review`；回答明确说明没有打开 artifact、不能代替
+   人工批准。其 prompt、JSONL event stream、stderr 和 final output 均登记为可校验 artifact。
+2. 复核 run R16 的 16 条前向哈希记录、24 个有效关联 artifacts，以及 verification report
+   `tmverify-b14b8633e951493ab0056a1f9ce1a7d9` 的 8/8 required checks、无 regression、无 unresolved
+   risk 后，根据用户明确的完成与发布授权提交最终批准。run 进入 R17、`stage=completed`，最终节点为
+   `gate_approved`；决定 artifact 为 `artifact-cef03995418543a09bd20ee93c12d906`。随后持久单步
+   coordinator 对账为 revision 17、`action=complete`，没有绕过 Kernel 或另建完成状态。
+3. BraveNewWorld `main` 以 `git merge --ff-only c60eb5eb6867d598c9393b5c4a043eb239b6e592`
+   接纳精确隔离 checkpoint，追加目标库验收记录后形成提交
+   `d4947e7fdca4f70970c04fcf61221b55afddfb25`。`git push origin main` 成功，`git ls-remote` 与本地
+   HEAD 精确一致，目标库工作区干净。
+4. 目标库再次运行 `./bnw check --engine-root /home/fangzhou/projects/Anygine/Anygine_JobSlayer
+   --toolchain /home/fangzhou/projects/Anygine/Anygine/build/conan/conan_toolchain.cmake`：manifest contract、
+   原生 Debug build 和 CTest 2/2 通过。再次运行同绑定的 `./bnw run --jobs 4`：Required Vulkan validation
+   enabled、Renderer/ImGui 初始化并正常停止，marker 为
+   `validation=requested/enabled errors=0 presented=12 generation=12 live=5 grid=24x24 ui=enabled`。
+
+### 变更文件
+
+- 契约、应用服务与适配器：`src/jobslayer/task_manager/guidance.py`、
+  `src/jobslayer/task_manager/execution.py`、`src/jobslayer/application/task_manager.py`、
+  `src/jobslayer/application/task_manager_execution.py`、`src/jobslayer/adapters/local_task_manager_runs.py`、
+  `src/jobslayer/adapters/local_human_action_assistant.py`、
+  `src/jobslayer/adapters/codex_human_action_assistant.py`；
+- 身份、装配与 API：`src/jobslayer/identity/__init__.py`、`src/jobslayer/adapters/local_identity.py`、
+  `src/jobslayer/orchestration/web.py`、`src/jobslayer/cli.py`、`src/jobslayer/desktop/app.py`；
+- UI：`ui-framework/src/types.ts`、`ui-framework/src/components/TaskManager.tsx`、
+  `ui-framework/src/components/task-manager/TaskManagerViews.tsx`、
+  `ui-framework/src/components/task-manager/HumanActionGuidanceCard.tsx`、
+  `ui-framework/src/components/task-manager/taskManagerShell.css`；
+- 设计、测试与文档：SUID v8/catalog/observations、`tests/test_human_action_assistant.py`、identity/execution/web/
+  SUID 回归、ADR-0057 与相关 README、TaskManager、entrypoint、semantic UI 和 roadmap 文档。
+
+### 验证、限制与下一步
+
+1. `sh ./init.sh -- npm --prefix ui-framework run check`：退出码 0，TypeScript 与 production build 通过，
+   Vite 8.2.1 转换 1955 modules，用时 97 ms。
+2. `./jobslayer validate-ui-design ui-designs/catalog.json`：退出码 0，v1–v8 hash chain 和活动 binding 有效；
+   navigation observations 的 `inspect-ui-design` 返回 `implementation_required=false`、
+   `clarification_required=false`。
+3. 真实 1440px headless Chrome 检查确认执行页可见 evidence checklist、正式决定、反馈输入和任务 Agent
+   对话；辅助请求/回答刷新后仍由后端 run 投影恢复。
+4. 当前 Agent turn 是同步、短时、有界调用，请求期间占用 command lock；适合人工门处的小问题，不代替
+   durable executor。artifact 仍未在卡片内直接打开，浏览器也没有人工停顿 push 通知，这是下一阶段优先项。
+5. 写入本条记录后运行仓库统一入口 `./jobslayer check`；最终精确结果在本条末尾继续追加。
+6. 最终 `./jobslayer check` 退出码 0、9/9 通过：358 项 unittest 用时 35.418 秒，
+   `OK (skipped=5)`；Python compile、dependency consistency、SUID v1–v8、固定 UI advisor、
+   UI production build（1955 modules，93 ms）、BraveNewWorld testbed、Anygine runbook 与 Git diff 门禁
+   全部通过。两份既有前端文件只有未来 LF→CRLF 提示，没有 whitespace/conflict error。

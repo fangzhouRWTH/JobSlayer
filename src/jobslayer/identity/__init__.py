@@ -28,6 +28,9 @@ class AuthorizationAction(str, Enum):
     RECOVER_RUN = "recover_run"
     MANAGE_WORKER = "manage_worker"
     MANAGE_TASK_PLAN = "manage_task_plan"
+    USE_QUICK_AGENT = "use_quick_agent"
+    EXECUTE_QUICK_AGENT = "execute_quick_agent"
+    ASSIST_HUMAN_DECISION = "assist_human_decision"
 
 
 class AuthenticatedPrincipal(DomainModel):

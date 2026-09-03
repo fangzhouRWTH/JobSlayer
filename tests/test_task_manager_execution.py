@@ -615,11 +615,21 @@ class TaskManagerExecutionServiceTests(unittest.TestCase):
             )
         )
 
+        with self.assertRaises(TaskManagerExecutionNodeNotReadyError):
+            self.execution.accept_node_review(
+                assembled.run_id,
+                "scope",
+                expected_run_revision=reviewed.sequence,
+                rationale="An agent cannot authorize artifact-only acceptance.",
+                reviewer_actor_type=ActorType.AGENT,
+            )
+
         accepted = self.execution.accept_node_review(
             assembled.run_id,
             "scope",
             expected_run_revision=reviewed.sequence,
-            rationale="Reviewed the evidence-backed artifact deliverables and criteria.",
+            rationale="The source-controlled deterministic acceptance policy passed.",
+            reviewer_actor_type=ActorType.POLICY,
         )
         accepted_node = next(
             item for item in accepted.snapshot.nodes if item.node.node_id == "scope"
@@ -630,7 +640,7 @@ class TaskManagerExecutionServiceTests(unittest.TestCase):
         )
         self.assertEqual(
             accepted_node.transition_history[-1].actor_type,
-            ActorType.HUMAN,
+            ActorType.POLICY,
         )
         assert accepted_node.review_artifact_id is not None
         self.assertTrue(
@@ -721,6 +731,7 @@ class TaskManagerExecutionServiceTests(unittest.TestCase):
             "scope",
             expected_run_revision=reviewed_facts.sequence,
             rationale="Reviewed the exact patch, target policy, and verification evidence.",
+            reviewer_actor_type=ActorType.AGENT,
         )
         source_node = next(
             item
@@ -729,6 +740,10 @@ class TaskManagerExecutionServiceTests(unittest.TestCase):
         )
         self.assertEqual(source_node.workflow_state, TaskState.MERGE_REVIEW)
         self.assertEqual(source_node.source_review.reviewer_id, "reviewer@example.invalid")
+        self.assertEqual(
+            source_node.source_review.reviewer_actor_type,
+            ActorType.AGENT,
+        )
 
         with self.assertRaises(TaskManagerExecutionNodeNotReadyError):
             reviewer.approve_source_checkpoint(

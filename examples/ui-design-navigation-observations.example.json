@@ -1,0 +1,363 @@
+{
+  "schema_version": "1.0",
+  "page_id": "task-manager",
+  "scheme_id": "focused-task-graph",
+  "revision": 8,
+  "descriptor_sha256": "d10e3be4b56de0813521d197fa656bb1ac22d9ffce2a5fa8548a7acbd90e8ed2",
+  "observations": [
+    {
+      "unit_id": "region.view-rail",
+      "difference": "none",
+      "summary": "1440x900 与 700x900 实际渲染均保持左缘垂直栏；桌面标签增大，窄屏隐藏标签但保留按钮语义。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-five-views", "chrome-headless-calm-700x900-three-views"]
+    },
+    {
+      "unit_id": "region.home-view",
+      "difference": "none",
+      "summary": "首页实际显示 JobSlayer 标记、一句产品边界、三个真实任务指标、四个入口；活动 SUID 摘要由同一后端 read model 返回。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-home"]
+    },
+    {
+      "unit_id": "region.agent-status-view",
+      "difference": "none",
+      "summary": "Agent 页以 Codex 原始额度与刷新时间、本机会话边界和一个主控制台替代任务状态卡，并持续显示任务链隔离说明。",
+      "evidence_ids": ["chrome-headless-quick-agent-v4-1440x900", "real-codex-read-only-capacity-probe"]
+    },
+    {
+      "unit_id": "region.control-view",
+      "difference": "none",
+      "summary": "总控页从同一后端投影全部任务、当前 backlog 和最多六条最近事件，任务切换不制造本地权威 revision。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-control", "chrome-headless-calm-700x900-control"]
+    },
+    {
+      "unit_id": "region.orchestration-view",
+      "difference": "none",
+      "summary": "任务编排保留左侧主要 DAG、右侧节点详情与 Agent 对话，同时放大节点、详情、消息和输入文字。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-orchestration", "chrome-headless-calm-700x900-orchestration"]
+    },
+    {
+      "unit_id": "region.execution-view",
+      "difference": "none",
+      "summary": "真实 Life Game run 显示三个摘要、持久 coordinator、完整人工验收指导和节点序列；指导自然延长页面而不挤压首屏状态。",
+      "evidence_ids": ["chrome-headless-human-guidance-v7-execution", "source-review-calm-execution-summary"]
+    },
+    {
+      "unit_id": "requirement.navigation-accessibility",
+      "difference": "none",
+      "summary": "五个入口均为原生 button，具有 aria-label、title、aria-current 和非颜色单一的活动位置条/边框/背景。",
+      "evidence_ids": ["ui-framework-calm-production-build-1954-modules", "source-review-task-manager-rail"]
+    },
+    {
+      "unit_id": "requirement.deep-linked-view",
+      "difference": "none",
+      "summary": "五个稳定 hash 均由 headless Chrome 直接加载到对应版面，旧 hash 兼容逻辑保留在纯映射函数中。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-five-views", "source-review-task-manager-rail"]
+    },
+    {
+      "unit_id": "requirement.honest-status",
+      "difference": "none",
+      "summary": "Quick Agent 的额度、会话与任务执行页的 run/Kernel 状态完全分开；无 run 和 provider 读取失败均有明确空状态。",
+      "evidence_ids": ["chrome-headless-quick-agent-v4-1440x900", "tests.test_orchestration_web", "chrome-headless-calm-1440x900-execution"]
+    },
+    {
+      "unit_id": "region.app-shell",
+      "difference": "none",
+      "summary": "同一个 TaskManager component 持有 session、任务列表和当前任务，并在一个 view host 内互斥装配版面。",
+      "evidence_ids": ["source-review-task-manager-shell", "chrome-headless-calm-1440x900-five-views"]
+    },
+    {
+      "unit_id": "relation.shell-rail",
+      "difference": "none",
+      "summary": "应用壳持续装配左侧导航栏。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-five-views"]
+    },
+    {
+      "unit_id": "relation.shell-home",
+      "difference": "none",
+      "summary": "首页在共享 view host 中互斥显示。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-home"]
+    },
+    {
+      "unit_id": "relation.shell-agent",
+      "difference": "none",
+      "summary": "Agent 状态页在共享 view host 中互斥显示。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-agent"]
+    },
+    {
+      "unit_id": "relation.shell-control",
+      "difference": "none",
+      "summary": "任务总控页在共享 view host 中互斥显示。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-control"]
+    },
+    {
+      "unit_id": "relation.shell-orchestration",
+      "difference": "none",
+      "summary": "任务编排页在共享 view host 中互斥显示。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-orchestration"]
+    },
+    {
+      "unit_id": "relation.shell-execution",
+      "difference": "none",
+      "summary": "具体执行页在共享 view host 中互斥显示。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-execution"]
+    },
+    {
+      "unit_id": "relation.orchestration-graph",
+      "difference": "none",
+      "summary": "任务编排版面持续包含主要任务图。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-orchestration"]
+    },
+    {
+      "unit_id": "relation.orchestration-context",
+      "difference": "none",
+      "summary": "任务编排版面持续包含节点详情和 Agent 对话上下文列。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-orchestration"]
+    },
+    {
+      "unit_id": "relation.rail-home",
+      "difference": "none",
+      "summary": "导航栏位于首页左侧，未覆盖内容。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-home"]
+    },
+    {
+      "unit_id": "relation.rail-agent",
+      "difference": "none",
+      "summary": "导航栏位于 Agent 状态页左侧，未覆盖内容。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-agent"]
+    },
+    {
+      "unit_id": "relation.rail-control",
+      "difference": "none",
+      "summary": "导航栏位于总控页左侧，关注徽标不改变栏宽。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-control", "chrome-headless-calm-700x900-control"]
+    },
+    {
+      "unit_id": "relation.rail-orchestration",
+      "difference": "none",
+      "summary": "导航栏位于任务编排页左侧，DAG 仍占主要内容比例。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-orchestration"]
+    },
+    {
+      "unit_id": "relation.rail-execution",
+      "difference": "none",
+      "summary": "导航栏位于执行页左侧，执行内容保留独立空间。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-execution"]
+    },
+    {
+      "unit_id": "journey.switch-view",
+      "difference": "none",
+      "summary": "五个 hash 均直接加载对应版面，活动按钮随路径更新。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-five-views", "source-review-task-manager-rail"]
+    },
+    {
+      "unit_id": "journey.inspect-execution",
+      "difference": "none",
+      "summary": "总控和执行页复用同一当前任务；无 run 时给出明确空状态和返回编排入口。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-control", "chrome-headless-calm-1440x900-execution"]
+    },
+    {
+      "unit_id": "requirement.design-status-projection",
+      "difference": "none",
+      "summary": "首页和任务编排页从后端读取 focused-task-graph V7 与状态计数。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-home", "chrome-headless-calm-1440x900-orchestration", "tests.test_orchestration_web"]
+    },
+    {
+      "unit_id": "requirement.calm-ops-style",
+      "difference": "none",
+      "summary": "五个版面使用深炭灰、三级表面和低饱和绿色；没有扫描线、故障动画、渐变或大面积发光。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-five-views", "source-review-calm-ops-css"]
+    },
+    {
+      "unit_id": "requirement.readable-type",
+      "difference": "none",
+      "summary": "正文、任务、节点、日志、详情、对话和输入区已按语义层级放大，Calm Ops 作用域内的机器元数据不低于 10px。",
+      "evidence_ids": ["chrome-headless-calm-1440x900-five-views", "chrome-headless-calm-700x900-three-views", "source-review-calm-ops-css"]
+    },
+    {
+      "unit_id": "requirement.information-restraint",
+      "difference": "none",
+      "summary": "首页和执行页保留三个摘要、总控只取最近六条事件；Agent 只保留额度、运行边界和一个控制台，不再复制任务状态卡。",
+      "evidence_ids": ["source-review-task-manager-views", "chrome-headless-quick-agent-v4-1440x900"]
+    },
+    {
+      "unit_id": "region.quick-agent-capacity",
+      "difference": "none",
+      "summary": "侧栏显示 Codex bucket 的剩余百分比、相对倒计时、绝对刷新时间和 provider 观测时间。",
+      "evidence_ids": ["chrome-headless-quick-agent-v4-1440x900", "real-codex-read-only-capacity-probe"]
+    },
+    {
+      "unit_id": "region.quick-agent-console",
+      "difference": "none",
+      "summary": "宽屏主区域只装配一个大字号事件控制台和输入区；窄屏按单列保留完整内容。",
+      "evidence_ids": ["chrome-headless-quick-agent-v4-1440x900", "chrome-headless-quick-agent-v4-700x900", "ui-framework-production-build"]
+    },
+    {
+      "unit_id": "region.quick-agent-mode",
+      "difference": "none",
+      "summary": "输入区持续显示讨论/只读与快速执行/仓库可写两个原生按钮及当前安全说明。",
+      "evidence_ids": ["chrome-headless-quick-agent-v4-1440x900", "source-review-quick-agent-mode"]
+    },
+    {
+      "unit_id": "relation.agent-capacity",
+      "difference": "none",
+      "summary": "Agent 页包含左侧容量摘要。",
+      "evidence_ids": ["chrome-headless-quick-agent-v4-1440x900"]
+    },
+    {
+      "unit_id": "relation.agent-console",
+      "difference": "none",
+      "summary": "Agent 页包含占主要宽度的独立控制台。",
+      "evidence_ids": ["chrome-headless-quick-agent-v4-1440x900"]
+    },
+    {
+      "unit_id": "relation.console-mode",
+      "difference": "none",
+      "summary": "权限模式位于控制台输入区并在运行时禁用切换。",
+      "evidence_ids": ["source-review-quick-agent-mode", "ui-framework-production-build"]
+    },
+    {
+      "unit_id": "relation.capacity-console",
+      "difference": "none",
+      "summary": "1440px 宽屏容量侧栏与主控制台接近 1:3，700px 窄屏转换为可滚动单列。",
+      "evidence_ids": ["chrome-headless-quick-agent-v4-1440x900", "chrome-headless-quick-agent-v4-700x900"]
+    },
+    {
+      "unit_id": "journey.quick-agent-turn",
+      "difference": "none",
+      "summary": "fake App Server 回归覆盖容量、权限模式、流式 delta、终态、busy 拒绝和中断；真实浏览器确认所有操作与状态入口可见。",
+      "evidence_ids": ["tests.test_quick_agent", "tests.test_orchestration_web", "chrome-headless-quick-agent-v4-1440x900"]
+    },
+    {
+      "unit_id": "requirement.quick-agent-independence",
+      "difference": "none",
+      "summary": "Quick Agent 端口、API 和页面均无 task/plan/run revision 参数，独立 adapter 测试不触发任务 store 或 Kernel。",
+      "evidence_ids": ["tests.test_quick_agent", "tests.test_orchestration_web", "adr-0054"]
+    },
+    {
+      "unit_id": "requirement.provider-capacity-truth",
+      "difference": "none",
+      "summary": "fake 与真实只读探针均通过 account/rateLimits/read 返回窗口；非法/缺失响应走 unavailable，页面不估算美元或 token。",
+      "evidence_ids": ["tests.test_quick_agent", "real-codex-read-only-capacity-probe"]
+    },
+    {
+      "unit_id": "requirement.quick-agent-permission-mode",
+      "difference": "none",
+      "summary": "捕获的 turn/start 请求证明 readOnly/workspaceWrite、当前仓库 writableRoots、禁网与 never approval；独立 RBAC 覆盖允许和拒绝。",
+      "evidence_ids": ["tests.test_quick_agent", "tests.test_identity", "tests.test_orchestration_web"]
+    },
+    {
+      "unit_id": "requirement.quick-agent-streaming",
+      "difference": "none",
+      "summary": "adapter 合并 Agent delta、保留 token usage、拒绝并发 turn 并发送 turn/interrupt；页面 750ms 投影且提供运行/中断反馈。",
+      "evidence_ids": ["tests.test_quick_agent", "ui-framework-production-build", "source-review-quick-agent-polling"]
+    },
+    {
+      "unit_id": "region.quick-agent-model-controls",
+      "difference": "none",
+      "summary": "控制台输入区在消息和权限模式之前显示模型/版本、effort 与响应速度选择，并投影输入能力、Agent runtime 和当前选项说明。",
+      "evidence_ids": ["chrome-headless-quick-agent-v5-1440x900", "chrome-headless-quick-agent-v5-700x900", "real-codex-model-list-probe"]
+    },
+    {
+      "unit_id": "relation.console-model-controls",
+      "difference": "none",
+      "summary": "模型选单属于控制台输入区，桌面横向三列、窄屏单列，并在活动 turn 中锁定。",
+      "evidence_ids": ["chrome-headless-quick-agent-v5-1440x900", "chrome-headless-quick-agent-v5-700x900", "source-review-quick-agent-model-controls"]
+    },
+    {
+      "unit_id": "requirement.provider-model-catalog-truth",
+      "difference": "none",
+      "summary": "模型、effort、service tier、输入模态和 runtime 版本来自 model/list；后端测试拒绝未公布组合，真实 Luna/low/standard turn 完成。",
+      "evidence_ids": ["tests.test_quick_agent", "tests.test_orchestration_web", "real-codex-model-list-probe", "quick-agent-real-session-smoke-2026-09-03"]
+    },
+    {
+      "unit_id": "region.human-action-guidance",
+      "difference": "none",
+      "summary": "任务图为 node-level 停顿显示人工标记；节点详情显示紧凑步骤，执行页显示完整要求、证据、决定与禁止项。",
+      "evidence_ids": ["source-review-human-action-guidance", "ui-framework-production-build", "chrome-headless-human-guidance-v7-execution"]
+    },
+    {
+      "unit_id": "relation.execution-human-guidance",
+      "difference": "none",
+      "summary": "执行页在 coordinator 摘要之后、节点序列之前显示当前 run 的完整人工指导卡。",
+      "evidence_ids": ["chrome-headless-human-guidance-v7-execution", "source-review-human-action-guidance"]
+    },
+    {
+      "unit_id": "relation.node-human-guidance",
+      "difference": "none",
+      "summary": "任务图节点人工标记和右侧紧凑指导均按 node_id 消费后端同一 guidance，不由前端猜测状态。",
+      "evidence_ids": ["source-review-human-action-guidance", "tests.test_task_manager_coordinator"]
+    },
+    {
+      "unit_id": "journey.resolve-human-action",
+      "difference": "none",
+      "summary": "真实最终门从当前任务、run 和节点投影到授权主体、处理要求、六步验收、证据、两个决定与禁止动作；刷新后的修订检查仍由后端契约约束。",
+      "evidence_ids": ["chrome-headless-human-guidance-v7-execution", "tests.test_task_manager_coordinator", "tests.test_orchestration_web"]
+    },
+    {
+      "unit_id": "requirement.human-action-guidance",
+      "difference": "none",
+      "summary": "后端对 proposal、final gate、source review/checkpoint 和 failure 状态生成同一结构化契约，指导严格绑定 plan/run revision 且不执行状态转换。",
+      "evidence_ids": ["tests.test_task_manager", "tests.test_task_manager_coordinator", "tests.test_orchestration_web"]
+    },
+    {
+      "unit_id": "region.human-decision-control",
+      "difference": "none",
+      "summary": "执行页在指导之后显示证据核对、决定、理由、边界确认与正式/反馈按钮，禁用条件均有文字说明。",
+      "evidence_ids": ["source-review-human-decision-controls", "ui-framework-production-build-v8"]
+    },
+    {
+      "unit_id": "region.human-action-assistant",
+      "difference": "none",
+      "summary": "任务绑定 Agent 区显示只读/不可批准边界、追加式对话线程和当前 revision。",
+      "evidence_ids": ["source-review-human-action-assistant", "tests.test_human_action_assistant", "ui-framework-production-build-v8"]
+    },
+    {
+      "unit_id": "relation.guidance-decision-control",
+      "difference": "none",
+      "summary": "决定区直接消费当前 guidance 的证据、决定和 revision，不从 UI 状态推测后端命令。",
+      "evidence_ids": ["source-review-human-decision-controls", "tests.test_orchestration_web"]
+    },
+    {
+      "unit_id": "relation.guidance-assistant",
+      "difference": "none",
+      "summary": "Agent 辅助在视觉上独立于正式人类决定，并且使用单独 capability。",
+      "evidence_ids": ["source-review-human-action-assistant", "tests.test_identity"]
+    },
+    {
+      "unit_id": "journey.submit-formal-human-decision",
+      "difference": "none",
+      "summary": "选择、证据、理由和边界检查完成后才允许调用既有正式命令；成功或拒绝均返回明确 revision 反馈。",
+      "evidence_ids": ["tests.test_task_manager_execution", "tests.test_orchestration_web", "ui-framework-production-build-v8"]
+    },
+    {
+      "unit_id": "journey.record-human-feedback",
+      "difference": "none",
+      "summary": "无正式 command 的选项只追加带 artifact 的反馈，节点继续等待人工。",
+      "evidence_ids": ["tests.test_task_manager_coordinator", "tests.test_orchestration_web"]
+    },
+    {
+      "unit_id": "journey.assist-human-decision",
+      "difference": "none",
+      "summary": "人类问题先写入 run，再追加 Agent 回答或失败；整个过程不执行决定。",
+      "evidence_ids": ["tests.test_human_action_assistant", "tests.test_task_manager_coordinator"]
+    },
+    {
+      "unit_id": "requirement.formal-human-decision-gate",
+      "difference": "none",
+      "summary": "正式按钮保持 RBAC、revision、evidence 和 WorkflowKernel 约束，前端没有直写状态。",
+      "evidence_ids": ["tests.test_task_manager_execution", "tests.test_orchestration_web", "source-review-human-decision-controls"]
+    },
+    {
+      "unit_id": "requirement.human-feedback-append-only",
+      "difference": "none",
+      "summary": "反馈 artifact、interaction prefix 和 run hash chain 均由本地持久层验证，stale guidance 被拒绝。",
+      "evidence_ids": ["tests.test_task_manager_coordinator", "tests.test_orchestration_web"]
+    },
+    {
+      "unit_id": "requirement.human-assistant-non-authority",
+      "difference": "none",
+      "summary": "fake Codex 捕获 read-only sandbox、结构化 schema、凭据隔离和原始 artifacts；回答不带 decision_id。",
+      "evidence_ids": ["tests.test_human_action_assistant", "tests.test_identity", "tests.test_orchestration_web"]
+    }
+  ]
+}

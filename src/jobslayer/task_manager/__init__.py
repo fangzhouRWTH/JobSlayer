@@ -41,6 +41,25 @@ from jobslayer.task_manager.binding import (
     TaskManagerExecutionTargetRegistry,
     TaskManagerSourceDigest,
 )
+from jobslayer.task_manager.coordinator import (
+    SIDE_EFFECTING_COORDINATOR_ACTIONS,
+    TaskManagerCoordinatorAction,
+    TaskManagerCoordinatorIntent,
+    TaskManagerCoordinatorRevisionRecord,
+    TaskManagerCoordinatorSnapshot,
+    TaskManagerCoordinatorStage,
+    TaskManagerCoordinatorStore,
+    TaskManagerCoordinatorTickResult,
+)
+from jobslayer.task_manager.guidance import (
+    TaskManagerHumanActionAssistant,
+    TaskManagerHumanActionAssistantReply,
+    TaskManagerHumanActionGuidance,
+    TaskManagerHumanActionKind,
+    TaskManagerHumanDecisionOption,
+    TaskManagerHumanInteraction,
+    TaskManagerHumanInteractionKind,
+)
 
 
 class ManagedTaskStage(str, Enum):
@@ -155,6 +174,8 @@ class ManagedTaskDetail(DomainModel):
     execution_target: TaskManagerExecutionTarget | None = None
     execution_target_assessment: TaskManagerExecutionTargetAssessment | None = None
     execution_run: TaskManagerRunSnapshot | None = None
+    coordinator: TaskManagerCoordinatorSnapshot | None = None
+    human_actions: tuple[TaskManagerHumanActionGuidance, ...] = ()
     run_assembly_available: bool = False
     execution_available: bool = False
     execution_blockers: tuple[str, ...] = ()
@@ -186,6 +207,18 @@ class ManagedTaskDetail(DomainModel):
                 or self.execution_target_assessment.revision != self.plan.revision
             ):
                 raise ValueError("execution-target assessment is not revision-bound")
+        node_ids = {item.node.node_id for item in self.nodes}
+        for guidance in self.human_actions:
+            if guidance.expected_plan_revision != self.plan.revision:
+                raise ValueError("human-action guidance is not plan-revision-bound")
+            if guidance.node_id is not None and guidance.node_id not in node_ids:
+                raise ValueError("human-action guidance names an unknown node")
+            if guidance.expected_run_revision is not None:
+                if (
+                    self.execution_run is None
+                    or guidance.expected_run_revision != self.execution_run.revision
+                ):
+                    raise ValueError("human-action guidance is not run-revision-bound")
         return self
 
 
@@ -221,4 +254,19 @@ __all__ = [
     "TaskManagerRunStage",
     "TaskManagerRunStore",
     "TaskManagerSourceDigest",
+    "SIDE_EFFECTING_COORDINATOR_ACTIONS",
+    "TaskManagerCoordinatorAction",
+    "TaskManagerCoordinatorIntent",
+    "TaskManagerCoordinatorRevisionRecord",
+    "TaskManagerCoordinatorSnapshot",
+    "TaskManagerCoordinatorStage",
+    "TaskManagerCoordinatorStore",
+    "TaskManagerCoordinatorTickResult",
+    "TaskManagerHumanActionGuidance",
+    "TaskManagerHumanActionAssistant",
+    "TaskManagerHumanActionAssistantReply",
+    "TaskManagerHumanActionKind",
+    "TaskManagerHumanDecisionOption",
+    "TaskManagerHumanInteraction",
+    "TaskManagerHumanInteractionKind",
 ]
