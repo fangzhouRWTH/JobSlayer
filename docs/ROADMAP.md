@@ -68,16 +68,16 @@
 - [x] 本地认证项目仪表板、证据面板和审批状态视图；
 - [~] TaskManager 聚焦 UI（当前 App 以左缘垂直栏切换首页、Quick Agent、Backlog/总控、任务编排和
   具体执行；编排仍保持左 2/3 DAG、右 1/3 节点详情/Agent 对话，其他版面只投影真实 read model；
-  当前 v9 在 Calm Ops、动态 Codex Quick Agent、持久 coordinator 和受治理人工处理上加入单一下一步、
-  Run 后规划锁定与终态优先投影，并移除不可操作的逐 evidence ID 勾选；下一步补充 artifact 直接打开
-  与人工停顿通知）；
+  当前 v12 在 Calm Ops、动态 Codex Quick Agent、持久 coordinator 和受治理人工处理上加入单一下一步、
+  Run 后规划锁定、终态优先投影、可操作的 target 重绑、默认受治理执行连接与部分执行提交恢复，并移除不可操作的逐 evidence ID 勾选；
+  下一步补充 artifact 直接打开与人工停顿通知）；
 - [x] 建立版本化语义弹性 UI 描述：逐单元 dirty/planned/stable、内容 hash、stable 保护、后端唯一
-  活动方案、Agent request/draft 和确定性差异处置已落地；当前 TaskManager v9 已登记并绑定外部
-  advice、真实模型目录/会话 smoke、串行 coordinator、受治理人工确认与单任务闭环；在线编辑与
+  活动方案、Agent request/draft 和确定性差异处置已落地；当前 TaskManager v12 已登记并绑定外部
+  advice、真实模型目录/会话 smoke、串行 coordinator、受治理人工确认、单任务闭环与固化恢复；在线编辑与
   认证 activation command 继续后置；
 - [x] 隔离接入固定版本 UI/UX Pro Max 核心知识：只读 provider adapter、整树内容锁、原始/规范化
   制品和 SUID/Agent evidence 约束已落地；自动查询进入 TaskManager DAG 前仍需三组人工接受试验；
-- [~] 协作式任务编排与执行（计划讨论/固化、source-pinned target、run 装配、持久 Codex、确定性 validation、源码 review/checkpoint、最终 evidence-bound human gate、真实 11-node 完成证据、Anygine source/toolchain 内容绑定和持久单步 coordinator 已具备；默认 target 为 `brave-new-world-anygine-app-v1`；Life Game 已经最终人类批准、coordinator 归档并发布到 BraveNewWorld `main`；自动 repair/取消与机器重启恢复继续后置）；
+- [~] 协作式任务编排与执行（计划讨论/固化、source-pinned target、run 装配、持久 Codex、确定性 validation、源码 review/checkpoint、最终 evidence-bound human gate、真实 11-node 完成证据、Anygine source/toolchain 内容绑定和持久单步 coordinator 已具备；普通桌面入口已连接受治理 executor/validator/checkpoint，默认 target 为 `brave-new-world-anygine-app-v1`；Life Game 已经最终人类批准、coordinator 归档并发布到 BraveNewWorld `main`；自动 repair/取消与机器重启恢复继续后置）；
 - [x] 跨平台开发环境初始化入口（仓库 venv、固定校验的用户级 Node LTS、lockfile UI install、只读 JSON 检测与离线/分组件模式）；
 - [ ] OpenHands 适配器的有界 PoC。
 

@@ -60,5 +60,8 @@
 | [ADR-0056](0056-revision-bound-human-action-guidance.md) | Accepted | 用绑定精确 plan/run revision 的结构化指导，在任务图和反馈中明确人工要求、步骤、证据、决定与禁止动作 |
 | [ADR-0057](0057-governed-human-decision-controls-and-assistance.md) | Accepted | 在执行页以既有治理命令提交正式人工决定，并用 run 哈希链保留非转换反馈和只读 Agent 辅助对话 |
 | [ADR-0058](0058-one-task-one-run-and-terminal-projection.md) | Accepted | 先以一任务一 Run、终态优先投影和单一下一步消除 TaskManager 计划/执行双重真相 |
+| [ADR-0059](0059-actionable-finalization-and-profile-owned-validation.md) | Accepted | 以显式 target 重绑恢复固化路径，并让锁定 validation profile 而非自然语言字符串拥有验证命令 |
+| [ADR-0060](0060-default-governed-desktop-execution.md) | Accepted | 普通桌面入口默认连接受治理执行、验证和 checkpoint 能力，并正确表达首次 cursor 状态 |
+| [ADR-0061](0061-recover-partial-execution-command.md) | Accepted | 统一 milestone 执行路由，失败后刷新权威 revision，并以 pending intent 恢复部分写入的 provider start |
 
 新增或取代 ADR 时，同时更新本索引和 `docs/DEVELOPMENT_LOG.md`。Accepted ADR 不通过静默编辑改变原决定；需要改变方向时新增 superseding ADR。

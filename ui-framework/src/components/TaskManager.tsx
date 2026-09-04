@@ -341,7 +341,18 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
       onNotice(successMessage);
       return next;
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      const message = cause instanceof Error ? cause.message : String(cause);
+      setError(message);
+      if (detail) {
+        try {
+          await Promise.all([
+            loadTask(detail.task.task_id, session),
+            refreshTasks(session),
+          ]);
+        } catch {
+          // Keep the original command failure visible; explicit refresh remains available.
+        }
+      }
       return null;
     } finally {
       setBusy(false);
@@ -391,6 +402,15 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
   const proposal = detail?.execution_run ? null : detail?.plan.pending_proposal ?? null;
   const terminalRun = detail?.execution_run?.stage === "completed"
     || detail?.execution_run?.stage === "cancelled";
+  const targetBindingNeedsRefresh = detail?.execution_target_assessment?.issues.some(
+    (issue) => issue.code === "target.source_binding_missing"
+      || issue.code === "target.source_binding_drift",
+  ) ?? false;
+  const needsTargetBinding = detail?.plan.execution_target_id === null
+    || targetBindingNeedsRefresh;
+  const targetToBind = detail?.execution_targets.find(
+    (target) => target.target_id === detail.plan.execution_target_id,
+  )?.target_id ?? detail?.execution_targets[0]?.target_id ?? "";
 
   const bindExecutionTarget = (targetId: string) => {
     if (!detail || !targetId) return;
@@ -694,10 +714,10 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
             <section className="task-closure-next">
               <div>
                 <span>NEXT REQUIRED ACTION</span>
-                {detail.plan.execution_target_id === null ? (
+                {needsTargetBinding ? (
                   <>
-                    <strong>1. 绑定执行目标</strong>
-                    <small>选择目标只固定仓库、基线和执行约束，不会启动 Agent。</small>
+                    <strong>1. {targetBindingNeedsRefresh ? "更新执行目标绑定" : "绑定执行目标"}</strong>
+                    <small>{targetBindingNeedsRefresh ? "目标基线或验证契约已经更新；重新绑定会形成新 Plan revision，但不会启动 Agent。" : "选择目标只固定仓库、基线和执行约束，不会启动 Agent。"}</small>
                   </>
                 ) : detail.plan.status === "draft" ? (
                   <>
@@ -710,18 +730,18 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
                     <small>Run 会绑定当前 Plan revision/hash；装配完成后再到执行页逐步推进。</small>
                   </>
                 )}
-                {detail.execution_blockers.length > 0 && detail.plan.execution_target_id !== null && (
+                {detail.execution_blockers.length > 0 && !needsTargetBinding && (
                   <ul>{detail.execution_blockers.map((item) => <li key={item}>{item}</li>)}</ul>
                 )}
               </div>
-              {detail.plan.execution_target_id === null ? (
+              {needsTargetBinding ? (
                 <button
                   className="button button-primary"
                   type="button"
-                  disabled={busy || !detail.execution_targets[0]}
-                  onClick={() => bindExecutionTarget(detail.execution_targets[0]?.target_id ?? "")}
+                  disabled={busy || !targetToBind}
+                  onClick={() => bindExecutionTarget(targetToBind)}
                 >
-                  <Network size={14} /> 绑定默认目标
+                  <Network size={14} /> {targetBindingNeedsRefresh ? "更新目标绑定" : "绑定默认目标"}
                 </button>
               ) : detail.plan.status === "draft" ? (
                 <button

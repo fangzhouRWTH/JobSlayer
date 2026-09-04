@@ -2,8 +2,8 @@
   "schema_version": "1.0",
   "page_id": "task-manager",
   "scheme_id": "focused-task-graph",
-  "revision": 9,
-  "descriptor_sha256": "0f353819a2f71470fc33d77d0398e5957d6c5648dc66e2714d923ccfa970c6e1",
+  "revision": 12,
+  "descriptor_sha256": "6a0b1ef4a3309740039eca3858e57f1541204dc92ea3820951ca489562f46d33",
   "observations": [
     {
       "unit_id": "requirement.design-status-projection",
@@ -71,6 +71,44 @@
         "tests.test_task_manager_execution",
         "life-game-run-r17",
         "ui-framework-production-build-v9"
+      ]
+    },
+    {
+      "unit_id": "requirement.actionable-target-recovery",
+      "difference": "none",
+      "summary": "编排页识别 source binding drift 并显示可用的更新绑定动作；HTTP 回归证明同 target 重绑形成新 revision 并恢复 ready。",
+      "evidence_ids": [
+        "tests.test_orchestration_web",
+        "ui-framework-production-build-v10"
+      ]
+    },
+    {
+      "unit_id": "requirement.default-governed-execution-capability",
+      "difference": "none",
+      "summary": "统一桌面身份包含 executor，启动参数显式连接 durable Codex、确定性 validation 和隔离 checkpoint adapter；执行页对已连接但未初始化 cursor 显示 READY 与单步操作说明。",
+      "evidence_ids": [
+        "tests.test_desktop_app",
+        "desktop-startup-smoke",
+        "ui-framework-production-build-v11"
+      ]
+    },
+    {
+      "unit_id": "requirement.recoverable-execution-command",
+      "difference": "none",
+      "summary": "Codex adapter 接受 task/milestone 并拒绝 validation/human gate；coordinator 对 partial dispatch 恢复原 pending intent，命令失败后 UI 重读最新 task/run revision。",
+      "evidence_ids": [
+        "tests.test_task_manager_codex",
+        "tests.test_task_manager_coordinator",
+        "ui-framework-production-build-v12"
+      ]
+    },
+    {
+      "unit_id": "requirement.profile-owned-validation-commands",
+      "difference": "none",
+      "summary": "目标评估把自然语言 DAG 缺少命令文本降为 warning，同时继续把跨项目指令判为 blocker；Run 仍绑定完整 source-controlled validation profile。",
+      "evidence_ids": [
+        "tests.test_task_manager_targets",
+        "tests.test_task_manager_execution"
       ]
     }
   ]

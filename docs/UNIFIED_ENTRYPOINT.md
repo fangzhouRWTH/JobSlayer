@@ -13,19 +13,27 @@ python3 start.py
 ```
 
 `start.py` 先复用 manifest 初始化器检测并准备 `.venv`、Node/npm、UI 和 desktop extra，再以
-`planner + quick-agent + reviewer + approver` 角色的临时本地身份启动 TaskManager API 与 Vite UI。
-这些角色让用户在执行页提交受治理的人工 review/approval、追加反馈并调用只读辅助；源码
-Reviewer/Approver 同主体禁止仍由后端执行，durable execution/validation/integration adapter 也不会
-因角色存在而自动启用。Quick Agent adapter
-随桌面入口连接本机 Codex，并从 `model/list` 获取当前账户可用的模型、effort 与速度层，但只有用户发送
-消息才产生模型 turn。只有 API 本身和 Vite same-origin
+`planner + executor + quick-agent + reviewer + approver` 角色的临时本地身份启动 TaskManager API 与
+Vite UI。入口显式连接 durable Codex executor、source-controlled validation 和隔离 checkpoint adapter；
+这些能力让用户在执行页单步推进并提交受治理的人工 review/approval、追加反馈和调用只读辅助。源码
+Reviewer/Approver 同主体禁止仍由后端执行，adapter 连接也不会自动启动节点。规划 adapter 和 Quick Agent
+随桌面入口连接本机 Codex；规划固定使用
+`gpt-5.6-sol` / `xhigh` 生成仍需用户应用的 proposal，Quick Agent 从 `model/list` 获取当前账户可用的
+模型、effort 与速度层，二者都只有用户发送消息才产生模型 turn。启动器还会在标准项目布局中发现
+内容校验后的 Anygine source/toolchain；环境变量 `JOBSLAYER_ANYGINE_SOURCE_ROOT` 和
+`JOBSLAYER_ANYGINE_TOOLCHAIN_ROOT` 可显式覆盖。只有 API 本身和 Vite same-origin
 proxy 都健康后，才打开独立 WebView2/Qt 窗口。关闭窗口会回收本次拥有的两个进程树和临时 session；
-它不会自动启用任务 planning、durable execution、验证、审批或集成能力；Quick Agent 的仓库写入仍需
+它不会自动应用 planning proposal、推进 Run、批准或集成；Quick Agent 的仓库写入仍需
 用户在 Agent 页显式选择“快速执行”，且不具备任务链完成语义。
 
 只读环境检查、服务烟测和显式无窗口模式分别为 `python start.py --check`、
 `python start.py --smoke-test` 和 `python start.py --headless`。高级治理操作仍使用下述 `jobslayer`
 CLI，不把便利启动器当成权限旁路。
+
+执行页命令采用 optimistic concurrency。命令可能在外部 provider 报错前已经合法追加 Run revision；
+前端会保留错误并重读最新状态，持久 coordinator 再依据 pending intent 判断恢复未完成的同一动作还是
+只对账已完成动作。不要删除 JSONL 或手工把 revision 改回旧值。可执行 `task`/`milestone` 进入 durable
+Codex，`validation`/`human_gate` 仍分别保留给确定性 runner 和人工门。
 
 Linux 只有真正创建 Qt 窗口时才要求 `DISPLAY` 或 `WAYLAND_DISPLAY`；检查、smoke 与 headless 可在
 无图形会话主机运行。启动器对其固定的 `127.0.0.1` 健康检查禁用外部代理，并允许已关闭连接处于

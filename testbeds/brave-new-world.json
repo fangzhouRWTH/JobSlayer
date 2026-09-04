@@ -12,9 +12,9 @@
     "default_branch": "main"
   },
   "baseline": {
-    "commit": "e7bff4aceca5dee998d0db1dc1c50e4b935fabda",
-    "tag": "bnw-anygine-0",
-    "published": true,
+    "commit": "d4947e7fdca4f70970c04fcf61221b55afddfb25",
+    "tag": "bnw-life-game-1",
+    "published": false,
     "verification_command": [
       "./bnw",
       "contract"

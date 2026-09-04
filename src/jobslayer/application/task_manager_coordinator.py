@@ -167,6 +167,29 @@ class TaskManagerSerialCoordinator:
 
         if cursor.pending_intent is not None and run.sequence != cursor.run_revision:
             decision = self._decide(run.snapshot)
+            if (
+                decision.action is cursor.pending_intent.action
+                and decision.node_id == cursor.pending_intent.node_id
+            ):
+                updated_run = self._execute(cursor.pending_intent, run)
+                next_decision = self._decide(updated_run.snapshot)
+                resumed = self._append_projection(
+                    cursor,
+                    updated_run,
+                    next_decision,
+                    operation=(
+                        "coordinator.intent_resumed_from_partial_run:"
+                        f"{cursor.pending_intent.action.value}"
+                    ),
+                    last_completed_intent_id=cursor.pending_intent.intent_id,
+                )
+                return TaskManagerCoordinatorTickResult(
+                    coordinator=resumed,
+                    run=updated_run.snapshot,
+                    performed_action=cursor.pending_intent.action,
+                    side_effect_performed=True,
+                    recovered_intent=True,
+                )
             reconciled = self._append_projection(
                 cursor,
                 run,

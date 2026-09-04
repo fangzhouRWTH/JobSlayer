@@ -84,7 +84,7 @@ class DesktopAppTests(unittest.TestCase):
             self.assertEqual(principal.subject_id, "desktop-planner")
             self.assertEqual(
                 principal.roles,
-                ("planner", "quick-agent", "reviewer", "approver"),
+                ("planner", "executor", "quick-agent", "reviewer", "approver"),
             )
             self.assertLessEqual(
                 (principal.valid_until - principal.authenticated_at).total_seconds(),
@@ -106,9 +106,47 @@ class DesktopAppTests(unittest.TestCase):
             self.assertEqual(backend[:4], (sys.executable, "-m", "jobslayer", "task-manager-api"))
             self.assertIn(str(config.api_port), backend)
             self.assertIn(str(identity.key_path), backend)
+            self.assertIn("--planning-agent", backend)
+            self.assertIn("codex", backend)
+            self.assertIn("--allow-external-planning-agent", backend)
+            self.assertIn("--allow-external-task-execution", backend)
+            self.assertIn("--allow-task-manager-local-validation", backend)
+            self.assertIn("--allow-task-manager-checkpoint-integration", backend)
             self.assertIn("--allow-quick-agent", backend)
             self.assertEqual(frontend[0], str(config.npm_executable))
             self.assertEqual(frontend[-5:], ("--host", "127.0.0.1", "--port", "14173", "--strictPort"))
+
+    def test_desktop_backend_auto_binds_explicit_anygine_overrides(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "anygine-source"
+            toolchain = root / "anygine-toolchain"
+            source.mkdir()
+            toolchain.mkdir()
+            config = self._config(root)
+            identity = _prepare_identity(root)
+
+            with patch.dict(
+                os.environ,
+                {
+                    "JOBSLAYER_ANYGINE_SOURCE_ROOT": str(source),
+                    "JOBSLAYER_ANYGINE_TOOLCHAIN_ROOT": str(toolchain),
+                },
+            ):
+                backend = _backend_argv(config, identity)
+
+            attachments = tuple(
+                backend[index + 1]
+                for index, value in enumerate(backend[:-1])
+                if value == "--task-manager-dependency-attachment"
+            )
+            self.assertEqual(
+                attachments,
+                (
+                    f"anygine-source={source.resolve()}",
+                    f"anygine-conan-toolchain={toolchain.resolve()}",
+                ),
+            )
 
     def test_health_wait_returns_json_and_reports_early_process_exit(self) -> None:
         with TemporaryDirectory() as directory:

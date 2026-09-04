@@ -117,8 +117,13 @@ class DurableTaskManagerCodexExecutor:
     ) -> ManagedExecutionReference:
         if request.execution_binding.executor_adapter != self.adapter_id:
             raise TaskManagerCodexError("request target is not bound to codex_cli")
-        if request.node.kind is not TaskPlanNodeKind.TASK:
-            raise TaskManagerCodexError("Codex adapter accepts task nodes only")
+        if request.node.kind not in {
+            TaskPlanNodeKind.TASK,
+            TaskPlanNodeKind.MILESTONE,
+        }:
+            raise TaskManagerCodexError(
+                "Codex adapter accepts executable task and milestone nodes only"
+            )
 
         with self._lock:
             workspace = self._workspace_for(request)

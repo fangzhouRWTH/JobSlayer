@@ -218,17 +218,39 @@ print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 120, 'outp
             ["started"],
         )
 
-    def test_adapter_rejects_non_task_nodes_before_workspace_or_process(self) -> None:
+    def test_adapter_accepts_an_executable_milestone_node(self) -> None:
         request = self.request.model_copy(
             update={
                 "node": self.request.node.model_copy(
-                    update={"kind": TaskPlanNodeKind.VALIDATION}
+                    update={"kind": TaskPlanNodeKind.MILESTONE}
                 )
             }
         )
+        executor = self._executor()
+        reference = executor.start_or_locate(request)
+        observation = self._terminal_observation(executor, reference)
 
-        with self.assertRaises(TaskManagerCodexError):
-            self._executor().start_or_locate(request)
+        self.assertEqual(observation.status, ManagedExecutionStatus.SUCCEEDED)
+        self.assertEqual(
+            self.counter.read_text(encoding="utf-8").splitlines(),
+            ["started"],
+        )
+
+    def test_adapter_rejects_non_executable_nodes_before_workspace_or_process(self) -> None:
+        executor = self._executor()
+        for kind in (
+            TaskPlanNodeKind.VALIDATION,
+            TaskPlanNodeKind.HUMAN_GATE,
+        ):
+            with self.subTest(kind=kind):
+                request = self.request.model_copy(
+                    update={
+                        "node": self.request.node.model_copy(update={"kind": kind})
+                    }
+                )
+
+                with self.assertRaises(TaskManagerCodexError):
+                    executor.start_or_locate(request)
 
         self.assertFalse(self.counter.exists())
         self.assertEqual(

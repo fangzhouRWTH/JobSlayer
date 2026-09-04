@@ -26,10 +26,10 @@ class TestbedRegistryTests(unittest.TestCase):
         self.assertIsNotNone(testbed.baseline)
         self.assertEqual(
             testbed.baseline.commit,
-            "e7bff4aceca5dee998d0db1dc1c50e4b935fabda",
+            "d4947e7fdca4f70970c04fcf61221b55afddfb25",
         )
-        self.assertEqual(testbed.baseline.tag, "bnw-anygine-0")
-        self.assertTrue(testbed.baseline.published)
+        self.assertEqual(testbed.baseline.tag, "bnw-life-game-1")
+        self.assertFalse(testbed.baseline.published)
         self.assertEqual(testbed.baseline.verification_command, ("./bnw", "contract"))
 
 

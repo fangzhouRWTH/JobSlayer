@@ -63,23 +63,44 @@
       "revision": 9,
       "path": "task-manager/focused-task-graph/v9.json",
       "descriptor_sha256": "0f353819a2f71470fc33d77d0398e5957d6c5648dc66e2714d923ccfa970c6e1"
+    },
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 10,
+      "path": "task-manager/focused-task-graph/v10.json",
+      "descriptor_sha256": "434cefcd0a22ea0e00af0c94461db07466c78b50c52a9fbb803c59c1a3a2df6a"
+    },
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 11,
+      "path": "task-manager/focused-task-graph/v11.json",
+      "descriptor_sha256": "1d77bf35ee3b252ec6404a8d9e8e9eb469184e37d7cdc8529c141e7beb6baed7"
+    },
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 12,
+      "path": "task-manager/focused-task-graph/v12.json",
+      "descriptor_sha256": "6a0b1ef4a3309740039eca3858e57f1541204dc92ea3820951ca489562f46d33"
     }
   ],
   "active_bindings": [
     {
       "page_id": "task-manager",
       "scheme_id": "focused-task-graph",
-      "revision": 9,
-      "descriptor_sha256": "0f353819a2f71470fc33d77d0398e5957d6c5648dc66e2714d923ccfa970c6e1",
+      "revision": 12,
+      "descriptor_sha256": "6a0b1ef4a3309740039eca3858e57f1541204dc92ea3820951ca489562f46d33",
       "activated_by_actor_type": "human",
       "activated_by": "product-owner",
-      "activated_at": "2026-09-04T16:40:11+08:00",
-      "decision": "按产品负责人要求先验证并收紧单任务闭环：Run 装配后锁定规划，终态 Run 优先投影，编排页只给一个下一步，执行页不再把已完成 Run 误报为未连接 coordinator；人工确认减少不可操作的逐 ID 勾选但不改变后端治理门禁。",
+      "activated_at": "2026-09-04T18:01:57+08:00",
+      "decision": "修复执行提交部分写入后的 stale revision 死路：可执行 milestone 与 task 统一交给 durable Codex，命令失败后 UI 重读最新 Run，coordinator 以原 pending intent 恢复未完成 provider start。",
       "evidence_ids": [
-        "adr-0058",
-        "task-manager-terminal-projection-tests",
-        "ui-task-manager-production-build-v9",
-        "user-direction-2026-09-04-closure-first"
+        "adr-0061",
+        "task-manager-partial-intent-recovery-tests",
+        "ui-task-manager-production-build-v12",
+        "user-direction-2026-09-04-stale-run-revision"
       ]
     }
   ]

@@ -631,6 +631,7 @@ export function TaskManagerExecution({
   const run = detail?.execution_run;
   const terminalRun = run?.stage === "completed" || run?.stage === "cancelled";
   const coordinator = detail?.coordinator;
+  const coordinatorConnected = Boolean(session?.capabilities.serial_coordinator);
   const advanceableActions = new Set([
     "start_node",
     "run_validation",
@@ -690,13 +691,17 @@ export function TaskManagerExecution({
             <section className="task-view-card execution-coordinator">
               <div>
                 <span>SERIAL COORDINATOR</span>
-                <strong>{coordinator?.stage.toUpperCase() ?? "NOT CONNECTED"}</strong>
+                <strong>{coordinator?.stage.toUpperCase() ?? (coordinatorConnected ? "READY" : "NOT CONNECTED")}</strong>
                 <small>
                   {coordinator
                     ? `${coordinator.cursor_node_id ?? "run"} · ${coordinator.next_action} · cursor R${coordinator.revision}`
-                    : "当前启动没有连接串行执行能力；本页不会提供无效推进。"}
+                    : coordinatorConnected
+                      ? "执行、验证与 checkpoint 能力已连接；首次推进会从 Run 真相创建持久 cursor。"
+                      : "当前启动没有连接串行执行能力；本页不会提供无效推进。"}
                 </small>
-                <p>{coordinator?.reason ?? "请按页面显示的能力缺口重新启动，或只读查看现有 Run。"}</p>
+                <p>{coordinator?.reason ?? (coordinatorConnected
+                  ? "点击“推进一步”只执行当前 DAG 的下一项受治理动作，不会跳过 review 或人工门。"
+                  : "请关闭当前实例，从仓库根运行 python3 start.py（Windows：py -3 start.py），再返回本页；Run 与证据会保留。")}</p>
               </div>
               <button
                 className="button button-primary"

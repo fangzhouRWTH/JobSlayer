@@ -46,7 +46,9 @@ JobSlayer 是一个面向复杂工程项目的 AI 协同开发控制平面。它
   effort、速度和能力选单，并提供与任务链隔离的只读讨论/受限仓库写入。后台以源包哈希锁定
   BraveNewWorld target，并把 finalized revision
   装配为 hash-chained、Kernel-owned 的节点运行；显式启用的 durable 本机 Codex worker 支持 API
-  重启后 start-or-locate、运行级隔离 worktree 和原始证据，默认仍禁用 dispatch，且不伪造完成；
+  重启后 start-or-locate、运行级隔离 worktree 和原始证据；普通桌面入口已显式连接执行、确定性验证
+  和隔离 checkpoint adapter，但只在用户单步推进后动作，且不伪造完成。可执行 task/milestone 使用
+  同一 Codex adapter；命令部分写入时由 pending intent 恢复，失败后的 UI 会重读权威 revision；
 - 内容绑定的本地 dependency attachment：将 operator 提供的 Anygine Git checkout/Conan toolchain
   路径与源控 revision/SHA-256 核对，只向受治理 validation 注入显式环境，并以前后漂移证据
   支持隔离 BraveNewWorld C++ build、CTest 和 GPU smoke；
@@ -69,9 +71,14 @@ python3 start.py
 关闭桌面窗口会同时停止本次入口拥有的 API/Vite 进程。只读检查使用
 `python start.py --check`，无窗口服务模式使用 `python start.py --headless`；Windows 强制 WebView2，
 Linux 使用 Qt 且需要 `DISPLAY` 或 `WAYLAND_DISPLAY`。入口自动签发的临时身份包含
-`planner + quick-agent + reviewer + approver`，使本机执行页可显示人工 review/approval、反馈与只读
-辅助入口；它仍不启用 durable task execution、validation 或 source integration。Quick Agent 和任务
-绑定辅助只有用户发送消息才调用本机 Codex，源码 Reviewer/Approver 独立性仍由后端强制。
+`planner + executor + quick-agent + reviewer + approver`，使本机执行页可推进受治理 Agent、validation、
+checkpoint、人工 review/approval、反馈与只读
+辅助入口；它默认以本机 Codex Sol/xhigh 生成规划 proposal，并自动发现经过源控 pin 校验的本机
+Anygine source/toolchain。能力连接不会自动开始任务；每次“推进一步”最多执行一个持久 coordinator
+动作。
+Quick Agent、规划和任务绑定辅助都只有用户发送消息才调用本机 Codex，源码 Reviewer/Approver
+独立性仍由后端强制。自动发现失败时可用 `JOBSLAYER_ANYGINE_SOURCE_ROOT` 和
+`JOBSLAYER_ANYGINE_TOOLCHAIN_ROOT` 显式覆盖路径。
 
 `python start.py --smoke-test` 只启动并健康检查 API/Vite 后立即清理，不创建窗口，因此 Linux 无图形
 会话也可使用。固定的 loopback 健康检查不经过用户配置的 HTTP 代理。
@@ -202,9 +209,10 @@ TaskManager 会在任务图/详情/执行反馈中给出绑定当前 revision �
 当前主路径采用“一任务一 Run”：装配后规划输入锁定，需求变化新建任务；终态 Run 优先决定任务、
 DAG 和 Backlog 投影。编排页只给出一个下一步，已完成任务不会再显示未装配或 coordinator 故障。
 
-BraveNewWorld 已重置为基于 Anygine 公共 build-tree contract 的小 App 测试床。固定基线为
-`e7bff4aceca5dee998d0db1dc1c50e4b935fabda` / `bnw-anygine-0`，已发布到远端；旧网页端机电模拟内容
-不再属于当前主干目标。登记与验证入口见 [`testbeds/brave-new-world.json`](testbeds/brave-new-world.json)。
+BraveNewWorld 已重置为基于 Anygine 公共 build-tree contract 的小 App 测试床。当前本机开发基线为
+`d4947e7fdca4f70970c04fcf61221b55afddfb25` / `bnw-life-game-1`；该 tag 尚未发布到远端。初始
+`bnw-anygine-0` 仍保留为历史基线，旧网页端机电模拟内容不再属于当前主干目标。登记与验证入口见
+[`testbeds/brave-new-world.json`](testbeds/brave-new-world.json)。
 
 ```bash
 git clone https://github.com/fangzhouRWTH/BraveNewWorld.git

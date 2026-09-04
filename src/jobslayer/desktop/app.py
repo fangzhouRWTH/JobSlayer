@@ -135,8 +135,8 @@ def _prepare_identity(root: Path) -> DesktopIdentity:
     session_path = identity_root / f"planner-session-{os.getpid()}-{uuid4().hex}.json"
     session = provider.issue(
         subject_id="desktop-planner",
-        display_name="JobSlayer desktop planner",
-        roles=("planner", "quick-agent", "reviewer", "approver"),
+        display_name="JobSlayer desktop operator",
+        roles=("planner", "executor", "quick-agent", "reviewer", "approver"),
         lifetime=timedelta(hours=24),
     )
     provider.create_session_file(session_path, session)
@@ -144,7 +144,7 @@ def _prepare_identity(root: Path) -> DesktopIdentity:
 
 
 def _backend_argv(config: DesktopAppConfig, identity: DesktopIdentity) -> tuple[str, ...]:
-    return (
+    arguments = [
         sys.executable,
         "-m",
         "jobslayer",
@@ -157,10 +157,64 @@ def _backend_argv(config: DesktopAppConfig, identity: DesktopIdentity) -> tuple[
         str(identity.session_path),
         "--identity-key",
         str(identity.key_path),
+        "--planning-agent",
+        "codex",
+        "--allow-external-planning-agent",
+        "--codex-model",
+        "gpt-5.6-sol",
+        "--codex-reasoning-effort",
+        "xhigh",
+        "--allow-external-task-execution",
+        "--allow-task-manager-local-validation",
+        "--allow-task-manager-checkpoint-integration",
         "--allow-quick-agent",
         "--port",
         str(config.api_port),
+    ]
+    projects_root = config.repository_root.parents[1]
+    anygine_root = projects_root / "Anygine"
+    source = _first_existing_directory(
+        os.environ.get("JOBSLAYER_ANYGINE_SOURCE_ROOT"),
+        anygine_root / "Anygine_JobSlayer",
+        anygine_root / "Anygine",
     )
+    toolchain = _first_existing_directory(
+        os.environ.get("JOBSLAYER_ANYGINE_TOOLCHAIN_ROOT"),
+        anygine_root / "Anygine_JobSlayer" / "build" / (
+            "conan-windows-debug" if os.name == "nt" else "conan"
+        ),
+        anygine_root / "Anygine" / "build" / (
+            "conan-windows-debug" if os.name == "nt" else "conan"
+        ),
+    )
+    for attachment_id, path in (
+        ("anygine-source", source),
+        ("anygine-conan-toolchain", toolchain),
+    ):
+        if path is not None:
+            arguments.extend(
+                (
+                    "--task-manager-dependency-attachment",
+                    f"{attachment_id}={path}",
+                )
+            )
+    for name in ("DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"):
+        value = os.environ.get(name)
+        if value:
+            arguments.extend(
+                ("--task-manager-validation-environment", f"{name}={value}")
+            )
+    return tuple(arguments)
+
+
+def _first_existing_directory(*candidates: str | Path | None) -> Path | None:
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        path = Path(candidate).expanduser().resolve(strict=False)
+        if path.is_dir():
+            return path
+    return None
 
 
 def _frontend_argv(config: DesktopAppConfig) -> tuple[str, ...]:
@@ -369,8 +423,8 @@ def run_desktop_app(config: DesktopAppConfig) -> int:
             subject = principal.get("subject_id") if isinstance(principal, dict) else "unknown"
             print(f"[ready] {config.ui_url}", flush=True)
             print(
-                f"[ready] least-privilege identity: {subject} "
-                "(planner + quick-agent + reviewer + approver)",
+                f"[ready] governed local identity: {subject} "
+                "(planner + executor + quick-agent + reviewer + approver)",
                 flush=True,
             )
             print(f"[logs] {log_root}", flush=True)

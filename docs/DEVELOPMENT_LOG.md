@@ -4477,3 +4477,221 @@ ADR-0035 的 lease/checkpoint/recovery 控制面。随后接 verifier/reviewer/h
    `OK (skipped=5)`；Python compile、dependency consistency、SUID v1–v9、固定 UI advisor、UI
    production build（1955 modules，103 ms）、BraveNewWorld testbed、Anygine runbook 与 Git diff 门禁
    全部通过。三份修改过的前端文件只有未来 LF→CRLF 提示，没有 whitespace/conflict error。
+
+## DEV-2026-09-04-02 — 新任务固化死路修复与可恢复 target 预检
+
+- 状态：完成（实现、真实 R3 页面复核与统一门禁均通过）
+- 类型：finalization recovery、target preflight、desktop bootstrap、baseline rotation、SUID revision
+- 关联决策：[ADR-0059](adr/0059-actionable-finalization-and-profile-owned-validation.md)
+
+### 复现与根因
+
+1. 用户新建任务 `plan-2fd82d72f55a4c36a79ade4939eb5e82`，内容为把现有 Life Game 从文本视觉
+   模仿扩展为基于 Anygine 的实时、可交互 3D 动态模拟。当前 plan R3 已应用五节点 DAG，无 pending
+   proposal，结构 assessment `ready_to_finalize=true`，但 UI 的“固化任务流”不可点击。
+2. target assessment 有六个 blocker：BraveNewWorld 登记仍固定首次 `bnw-anygine-0` 而本地 main 已为
+   Life Game 发布提交；普通 `start.py` 没有传入 `anygine-source` 与 `anygine-conan-toolchain`；通用本地
+   planning fixture 没在 DAG 文本中逐字写入三条 `./bnw contract/test/run` 命令。
+3. 前端只把六条错误列在禁用按钮旁。它没有 source binding refresh 动作，也不能在启动后补入
+   attachment，因此虽然 plan-finalization guidance 存在，用户没有任何能解除 blocker 的交互路径。
+4. 三条命令已经由 source-controlled validation profile 和 source bundle hash 拥有；再把自然语言字符串
+   包含作为 blocker 是重复而脆弱的门禁。真正必须失败关闭的是 profile/source drift、错误 baseline、
+   attachment 不就绪和跨项目指令。
+
+### 决定与落实
+
+1. `assess_plan_for_target` 将 `target.validation_command_missing` 降为 warning，并明确说明 Run 装配仍会
+   从锁定 profile 强制附加命令。跨项目指令等安全问题保持 blocker；finalize 和 assembly 仍只接受
+   `assessment.ready=true`。
+2. 编排页识别 `target.source_binding_missing/drift`，把唯一主动作切换为可点击“更新目标绑定”。它复用
+   revision-bound `/target` API；成功后 source hash 与 plan revision 一起更新，再显示“固化任务流”。
+   不在浏览器自动改 hash 或替人固化。
+3. 默认 `start.py` 规划 adapter 改为本机 Codex `gpt-5.6-sol` / `xhigh`，仍只生成 proposal。启动器从
+   标准项目布局发现 Anygine 固定 source checkout 与 Conan toolchain，也接受
+   `JOBSLAYER_ANYGINE_SOURCE_ROOT` / `JOBSLAYER_ANYGINE_TOOLCHAIN_ROOT` 覆盖；路径传给后端后仍逐项执行
+   revision、origin、cleanliness 和内容 hash 检查。
+4. BraveNewWorld 本机开发 baseline 推进到
+   `d4947e7fdca4f70970c04fcf61221b55afddfb25`，创建本地 annotated tag `bnw-life-game-1`；testbed 登记
+   `published=false`，task contract 升到 version 2。没有推送 tag，也没有改写目标仓库工作树或 main。
+5. 发布并激活 SUID `focused-task-graph@10`，canonical SHA-256 为
+   `434cefcd0a22ea0e00af0c94461db07466c78b50c52a9fbb803c59c1a3a2df6a`；保留 v9 全部 13 个 stable
+   单元，71 个 planned 单元记录 target 恢复动作和 profile-owned validation command。
+
+### 真实状态复核
+
+1. 使用统一桌面入口实际装配的 backend argv 已确认：planning=`codex`、model=`gpt-5.6-sol`、
+   effort=`xhigh`；自动发现 source `/home/fangzhou/projects/Anygine/Anygine_JobSlayer` 和 toolchain
+   `/home/fangzhou/projects/Anygine/Anygine/build/conan`，并传入当前 `DISPLAY`/`XDG_RUNTIME_DIR`。
+2. `inspect-task-manager-target` 对新 baseline、tag、origin、clean working tree、Anygine revision/tree hash
+   和 toolchain directory hash 全部通过，返回 `local_baseline_ready=true`、`dependencies_ready=true`、
+   `ready=true`，新 source bundle 为 `a6cf8f4d...efa24f82a`。
+3. 重启真实 API 后，R3 的六个 blocker 收敛为唯一预期的 `target.source_binding_drift`；三条缺失命令
+   均为 warning。SUID v10 的 1440×900 浏览器检查显示可用“更新目标绑定”，没有再显示不可操作的
+   固化按钮。由于目标重绑会产生 plan R4，本轮没有代替用户点击或提交固化决定。
+
+### 变更文件与验证
+
+- 运行与契约：`src/jobslayer/task_manager/binding.py`、`src/jobslayer/desktop/app.py`、
+  `testbeds/brave-new-world.json`、`tasks/bnw-anygine-small-app-001.json`；
+- UI/SUID：`ui-framework/src/components/TaskManager.tsx`、SUID v10、catalog 和 observations；
+- 测试：desktop、target、HTTP target rebind、testbed registry 与 SUID 回归；
+- 文档：ADR-0059、README、TaskManager、统一入口、最小闭环、roadmap、semantic UI 与 BNW testbed。
+1. 定向命令 `python -m unittest tests.test_desktop_app tests.test_task_manager_targets
+   tests.test_orchestration_web tests.test_ui_design tests.test_runbook tests.test_testbed_registry`：50 项通过，
+   用时 1.276 秒。允许路径覆盖缺命令文本仍 ready/warning 和 source drift 后同 target 重绑恢复 ready；
+   拒绝路径继续覆盖跨项目指令 blocker。
+2. UI `check` 退出码 0，Vite 8.2.1 转换 1955 modules，用时 127 ms。
+3. `./jobslayer validate-ui-design ui-designs/catalog.json` 退出码 0，v1–v10 hash chain 和活动 binding 有效。
+
+### 限制与下一步
+
+1. 当前页面已经恢复可操作路径，但 target 重绑和 plan 固化是用户决定，不能由修复脚本自动提交。用户
+   应先点“更新目标绑定”，确认下一 read model 后再点“固化任务流”。
+2. 默认桌面入口仍不启用 durable task execution、local validation 或 checkpoint integration；Run 装配
+   后的身份切换/独立 review 流程仍需单独收敛，不能用一个高权限主体绕过。
+3. `bnw-life-game-1` 目前只存在本机。远端发布与 `published=true` 必须获得明确 push 授权；在此之前
+   其他机器不能按该基线启动新 Run。
+4. 写入本条后运行统一 `./jobslayer check`，退出码 0、9/9 通过：362 项 unittest 用时
+   36.973 秒；SUID v1–v10、外部 UI advisor、BraveNewWorld testbed 与 Anygine App runbook 均通过；
+   UI 生产构建转换 1955 modules，用时 132 ms；Git diff 检查通过。唯一提示是当前工作副本里的
+   `TaskManager.tsx` 将在 Git 下次写入时按仓库规则从 LF 转为 CRLF，不影响检查结果。
+
+## DEV-2026-09-04-03 — 默认执行能力接入与首次 coordinator 状态修复
+
+- 状态：完成（实现、真实只读恢复检查与统一门禁均通过）
+- 类型：desktop execution deployment、coordinator UX、SUID revision
+- 关联决策：[ADR-0060](adr/0060-default-governed-desktop-execution.md)
+- 更正：DEV-2026-09-04-02 限制 2 中“不启用三类 adapter”是当时的阶段性决定；本条在用户明确报告
+  执行死路后将其取代，不改写旧记录。
+
+### 复现与根因
+
+1. 用户按修复后的路径完成 target 重绑和固化；真实计划
+   `plan-2fd82d72f55a4c36a79ade4939eb5e82` 已到 R5，Run
+   `tmrun-1f722535d9aa45fea0394ad798f2f1b6` 已装配为 R1/ready，五个节点与 source-bound execution
+   binding 完整，首节点保持 `planned`。任务 journal 和 Run hash chain 没有损坏。
+2. `start.py` 的身份没有 `executor` role，backend argv 也未包含 external execution/local validation/
+   checkpoint integration 三个显式开关，因此 Run 可装配但 `TaskManagerExecutionService.adapter_available`
+   为 false，执行页正确失败关闭并报告“没有绑定执行能力”。
+3. 即使重启并连接 coordinator，既有 Run 尚无 coordinator journal 时只读 `snapshot` 合法返回 null；UI
+   之前把“已连接、首次 cursor 尚未初始化”与“能力未连接”都显示为 `NOT CONNECTED`，会再次误导用户。
+
+### 决定与落实
+
+1. 桌面临时身份增加 `executor`，backend argv 默认显式包含
+   `--allow-external-task-execution`、`--allow-task-manager-local-validation` 和
+   `--allow-task-manager-checkpoint-integration`。现有 durable Codex、policy-constrained validator、run-branch
+   integrator 和 SQLite lease coordinator 原样复用，没有新增直连 Codex 或前端状态写入路径。
+2. 能力连接不自动推进。用户点击“推进一步”后，revision-bound coordinator tick 才会先持久化 intent，
+   再调用唯一 application command；review、独立 source approval、最终人类门和 Kernel 转换保持不变。
+3. 执行页用认证 session 的 `serial_coordinator` capability 判断连接状态：能力已连接但 cursor 为空显示
+   `READY`，解释首次推进会从 Run 真相创建 cursor；真正未连接才显示 `NOT CONNECTED` 和 Windows/Linux
+   的精确重启命令。
+4. 发布并激活 SUID `focused-task-graph@11`，canonical SHA-256 为
+   `1d77bf35ee3b252ec6404a8d9e8e9eb469184e37d7cdc8529c141e7beb6baed7`；保留 v10 全部 13 个 stable
+   单元，72 个 planned 单元新增默认受治理执行能力要求。
+
+### 真实恢复检查
+
+1. `python3 start.py --smoke-test` 退出码 0，API、Vite 与 same-origin 认证检查通过且正常回收。
+2. 使用真实 `python3 start.py --headless` 重启后，认证 session 同时返回
+   `task_execution=true`、`node_validation=true`、`source_checkpoint_integration=true` 和
+   `serial_coordinator=true`。当前任务 read model 为 plan R5、run R1/ready、`coordinator=null`、
+   `execution_available=true`、零 execution blocker。
+3. Chrome headless 打开真实 `#/execution` 后，DOM 显示 `SERIAL COORDINATOR`、`READY`、
+   “执行、验证与 checkpoint 能力已连接”和可用“推进一步”，不再出现“没有绑定执行能力”或误报
+   `NOT CONNECTED`。本轮没有提交 tick，因此没有启动 Codex、创建 provider workspace 或改变 Run R1。
+
+### 变更文件与验证
+
+- 启动与测试：`src/jobslayer/desktop/app.py`、`tests/test_desktop_app.py`；
+- UI/SUID：`TaskManagerViews.tsx`、SUID v11、catalog、observations 与 UI design/HTTP tests；
+- 决策与文档：ADR-0060、README、TaskManager、统一入口、roadmap、semantic UI 与本追加记录。
+1. 定向执行/协调/HTTP 命令运行 49 项 unittest，全部通过，用时 12.398 秒。
+2. SUID v1–v11 hash chain 和 active binding 校验通过；相关 desktop/UI/HTTP 定向命令运行 42 项
+   unittest，全部通过，用时 1.427 秒。
+3. UI production build 两次通过，均转换 1955 modules，最后一次用时 97 ms。
+4. 统一 `./jobslayer check` 退出码 0、9/9 通过：363 项 unittest 用时 36.829 秒；SUID v1–v11、
+   外部 UI advisor、BraveNewWorld testbed 与 Anygine App runbook 全部通过；UI production build 转换
+   1955 modules，用时 92 ms；Git diff 检查通过。两个 TypeScript 工作副本文件仅提示下次 Git 写入时
+   按仓库规则从 LF 转为 CRLF，不影响门禁结果。
+
+### 限制与下一步
+
+1. 当前 Run 可以开始真实 Codex 节点；一次“推进一步”会产生外部模型调用和隔离 BraveNewWorld
+   worktree 副作用，因此只由用户触发，本轮检查没有代点。
+2. 同一 `desktop-planner` 虽有 reviewer/approver roles，仍不能既审查又批准同一个源码 patch；到达源码
+   review/checkpoint 人工停顿时必须按页面 guidance 使用独立 actor，不能为一键闭环削弱该门禁。
+3. `bnw-life-game-1` 仍只存在本机且 testbed `published=false`；本轮不包含 push、main merge 或部署。
+
+## DEV-2026-09-04-04 — stale Run revision 与 partial provider start 恢复
+
+- 状态：完成（实现、真实 R2 只读复核与统一门禁均通过）
+- 类型：execution recovery、adapter routing、UI revision refresh、SUID revision
+- 关联决策：[ADR-0061](adr/0061-recover-partial-execution-command.md)
+
+### 复现与根因
+
+1. 用户在新 3D Life Game Run R1 点击“推进一步”。后端按 write-ahead 规则先追加 Run R2
+   `node.dispatch_authorized`：`scope` 从 `planned` 进入 `implementing`，稳定 start key 为
+   `tmstart-a66d139c1905018afd5e33c122e007d6`；coordinator 同时保留 revision 2 的
+   `start_node` pending intent，cursor 仍绑定 Run R1。
+2. provider reference 没有产生、没有新 provider state/worktree。直接原因是 `scope` 是
+   `milestone`：coordinator 将一切非 validation/human-gate 节点路由到 Agent，而 durable Codex adapter
+   只接受 `task`，在 workspace/process 前拒绝。两个受治理层对“可执行节点”的集合不一致。
+3. 首次 POST 返回 provider error 后，UI catch 只显示错误，没有重新 GET；页面继续持有 Run R1。再次
+   点击便正确触发 optimistic-concurrency 拒绝：`expected ... revision 1, current revision is 2`。R2 是已发生
+   的授权事实，不是损坏记录，不能删除或改回 R1。
+
+### 决定与落实
+
+1. durable Codex adapter 接受 `task` 与 `milestone`，继续在 workspace/process 前拒绝 `validation` 和
+   `human_gate`。测试同时覆盖两条允许与两条拒绝路径。
+2. pending intent 遇到更高 Run revision 时，coordinator 不再一律视为完成：若权威 next action/node
+   仍等于 pending intent，使用原 intent/start key 恢复缺失 side effect；若已经前进为 observe 等下一
+   action，只追加 reconcile，保留不重复 provider 的既有行为。
+3. TaskManager UI 的通用写命令 catch 保留原始错误，并并行重读当前 task 与 task list。这样部分成功、
+   stale、provider 或其他失败后，本地 revision 立即回到后端真相；前端不自行重放 POST。
+4. 发布并激活 SUID `focused-task-graph@12`，canonical SHA-256 为
+   `6a0b1ef4a3309740039eca3858e57f1541204dc92ea3820951ca489562f46d33`；v11 的 13 个 stable 单元全部
+   保留，73 个 planned 单元增加可恢复执行命令要求。
+
+### 真实状态与恢复入口
+
+1. 当前真实 Run 是 R2/running，`scope=implementing`、provider null；coordinator R2/advancing，
+   `run_revision=1` 且 pending `start_node`；`execution_available=true`、零 blocker。Run/协调器哈希链均能
+   正常读取，没有进行手工修复。
+2. 初查时用户启动的旧 backend 进程仍加载 v11 代码，fresh Chrome DOM 已从权威状态显示
+   `ADVANCING`、`IMPLEMENTING` 和“同步并推进”，不再持有浏览器旧 R1。旧进程正常结束后，本轮以新版
+   `python3 start.py --headless` 再启动并确认 SUID v12、相同 R2/pending intent 和零 blocker；没有调用
+   tick，随后正常关闭并释放 4173/8780。
+3. 重启新版后，点击一次“同步并推进”会依据已有 pending intent 恢复原 provider start；这会真实调用
+   Codex，因此本轮自动检查不代替用户点击，也不消费模型预算。
+
+### 变更文件与验证
+
+- 恢复与 adapter：`src/jobslayer/application/task_manager_coordinator.py`、
+  `src/jobslayer/adapters/task_manager_codex.py`；
+- UI：`ui-framework/src/components/TaskManager.tsx`；
+- 回归：`tests/test_task_manager_codex.py`、`tests/test_task_manager_coordinator.py`、SUID/HTTP tests；
+- 决策与说明：ADR-0061、SUID v12、catalog、observations、README、TaskManager、统一入口、roadmap、
+  semantic UI 与本追加记录。
+1. executor/coordinator/execution/HTTP 定向命令运行 41 项 unittest，全部通过，用时 13.605 秒。
+2. 加入 SUID 回归后的定向命令运行 60 项 unittest，全部通过，用时 14.074 秒；允许路径覆盖
+   milestone provider 成功和 partial intent 恢复，拒绝路径覆盖 validation/human gate 与已绑定 provider
+   不重复启动。
+3. SUID v1–v12 hash chain、stable 保护和 active binding 校验通过；UI production build 转换 1955
+   modules，用时 93 ms。
+4. 统一 `./jobslayer check` 退出码 0、9/9 通过：366 项 unittest 用时 37.463 秒；SUID v1–v12、
+   外部 UI advisor、BraveNewWorld testbed 与 Anygine App runbook 全部通过；UI production build 转换
+   1955 modules，用时 95 ms；Git diff 检查通过。两个 TypeScript 工作副本文件仅提示下次 Git 写入时
+   按仓库规则从 LF 转为 CRLF，不影响门禁结果。
+
+### 限制与下一步
+
+1. 热更新只替换 Vite 前端，已运行的 Python backend 不会热载入恢复逻辑；必须关闭当前窗口并重新运行
+   `python3 start.py`（Windows：`py -3 start.py`）。
+2. 恢复点击将继续用户此前已经授权但未完成的 start intent，并可能创建隔离 worktree/启动付费 Codex；
+   它不回滚 R2，不自动执行后继节点。
+3. 当前任务源自旧 local planning fixture，DAG 较粗；本修复只保证已固化节点按其类型执行，不替用户
+   重写已经被 Run 锁定的计划。

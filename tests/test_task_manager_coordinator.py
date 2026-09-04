@@ -457,6 +457,48 @@ class TaskManagerSerialCoordinatorTests(unittest.TestCase):
             TaskManagerCoordinatorAction.OBSERVE_NODE,
         )
 
+    def test_partial_dispatch_resumes_the_same_pending_start_intent(self) -> None:
+        self.executor.fail_start_once = True
+        with self.assertRaises(RuntimeError):
+            self.tick()
+
+        partially_authorized = self.execution.get(self.run.run_id)
+        node = next(
+            item
+            for item in partially_authorized.snapshot.nodes
+            if item.node.node_id == "scope"
+        )
+        self.assertEqual(node.workflow_state, TaskState.IMPLEMENTING)
+        self.assertIsNone(node.provider_reference)
+        pending = self.coordinator.snapshot(self.run.run_id)
+        assert pending is not None
+        self.assertIsNotNone(pending.pending_intent)
+        self.assertEqual(len(self.executor.start_requests), 1)
+
+        recovered = self.coordinator.tick(
+            self.run.run_id,
+            expected_run_revision=partially_authorized.sequence,
+        )
+
+        self.assertTrue(recovered.recovered_intent)
+        self.assertTrue(recovered.side_effect_performed)
+        self.assertEqual(
+            recovered.performed_action,
+            TaskManagerCoordinatorAction.START_NODE,
+        )
+        self.assertIsNone(recovered.coordinator.pending_intent)
+        self.assertEqual(
+            recovered.coordinator.next_action,
+            TaskManagerCoordinatorAction.OBSERVE_NODE,
+        )
+        self.assertEqual(len(self.executor.start_requests), 2)
+        recovered_node = next(
+            item
+            for item in recovered.run.nodes
+            if item.node.node_id == "scope"
+        )
+        self.assertIsNotNone(recovered_node.provider_reference)
+
     def test_cursor_hash_chain_rejects_tampering(self) -> None:
         self.tick()
         path = (

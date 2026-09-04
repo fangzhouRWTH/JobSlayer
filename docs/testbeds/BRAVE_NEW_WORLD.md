@@ -17,11 +17,11 @@ BraveNewWorld 只消费其 public CMake targets。
 | 项目 | 当前值 |
 |---|---|
 | 仓库 | `https://github.com/fangzhouRWTH/BraveNewWorld.git` |
-| 当前基线 | `e7bff4aceca5dee998d0db1dc1c50e4b935fabda` |
-| 标签 | `bnw-anygine-0`（已发布） |
+| 当前基线 | `d4947e7fdca4f70970c04fcf61221b55afddfb25` |
+| 标签 | `bnw-life-game-1`（仅本机，待发布） |
 | Anygine 仓库 | `https://github.com/fangzhouRWTH/Anygine.git` |
 | Anygine pin | `28b4934c24fdad6b8f45b945a89a6ada51703f5d` |
-| 当前 App | `hello-task` |
+| 当前 App | `hello-task`、`life-game` |
 | portable baseline gate | `./bnw contract` |
 | 完整测试床 gate | `./bnw check --engine-root <pinned-worktree>` |
 

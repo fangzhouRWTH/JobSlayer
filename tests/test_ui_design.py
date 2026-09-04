@@ -64,11 +64,11 @@ class SemanticUIDesignTests(unittest.TestCase):
         return payload
 
     def test_source_catalog_resolves_one_exact_active_revision(self) -> None:
-        self.assertEqual(len(self.registry.list_references()), 9)
+        self.assertEqual(len(self.registry.list_references()), 12)
         self.assertEqual(self.active.binding.scheme_id, "focused-task-graph")
-        self.assertEqual(self.active.binding.revision, 9)
+        self.assertEqual(self.active.binding.revision, 12)
         self.assertEqual(self.active.state_counts.dirty, 0)
-        self.assertEqual(self.active.state_counts.planned, 69)
+        self.assertEqual(self.active.state_counts.planned, 73)
         self.assertEqual(self.active.state_counts.stable, 13)
         self.assertTrue(
             {
@@ -90,7 +90,7 @@ class SemanticUIDesignTests(unittest.TestCase):
             }.issubset({item.unit_id for item in self.active.description.regions})
         )
         self.assertIn(
-            "adr-0058",
+            "adr-0061",
             self.active.binding.evidence_ids,
         )
         self.assertTrue(
@@ -110,6 +110,10 @@ class SemanticUIDesignTests(unittest.TestCase):
                 "requirement.human-assistant-non-authority",
                 "requirement.one-task-one-run",
                 "requirement.terminal-run-projection",
+                "requirement.actionable-target-recovery",
+                "requirement.default-governed-execution-capability",
+                "requirement.profile-owned-validation-commands",
+                "requirement.recoverable-execution-command",
             }.issubset(
                 {item.unit_id for item in self.active.description.requirements}
             )
@@ -344,6 +348,75 @@ class SemanticUIDesignTests(unittest.TestCase):
         )
         current = SemanticUIDesign.model_validate_json(
             (root / "v9.json").read_text(encoding="utf-8")
+        )
+
+        validate_ui_design_revision(previous, current)
+        self.assertEqual(current.stable_change_authorizations, ())
+        previous_stable = {
+            item.unit_id: item.model_dump(mode="json")
+            for item in previous.units()
+            if item.state == UIDesignIntentState.STABLE
+        }
+        current_stable = {
+            item.unit_id: item.model_dump(mode="json")
+            for item in current.units()
+            if item.state == UIDesignIntentState.STABLE
+        }
+        self.assertEqual(current_stable, previous_stable)
+
+    def test_active_v10_finalization_recovery_preserves_all_stable_units(self) -> None:
+        root = REPOSITORY_ROOT / "ui-designs" / "task-manager" / "focused-task-graph"
+        previous = SemanticUIDesign.model_validate_json(
+            (root / "v9.json").read_text(encoding="utf-8")
+        )
+        current = SemanticUIDesign.model_validate_json(
+            (root / "v10.json").read_text(encoding="utf-8")
+        )
+
+        validate_ui_design_revision(previous, current)
+        self.assertEqual(current.stable_change_authorizations, ())
+        previous_stable = {
+            item.unit_id: item.model_dump(mode="json")
+            for item in previous.units()
+            if item.state == UIDesignIntentState.STABLE
+        }
+        current_stable = {
+            item.unit_id: item.model_dump(mode="json")
+            for item in current.units()
+            if item.state == UIDesignIntentState.STABLE
+        }
+        self.assertEqual(current_stable, previous_stable)
+
+    def test_active_v11_execution_recovery_preserves_all_stable_units(self) -> None:
+        root = REPOSITORY_ROOT / "ui-designs" / "task-manager" / "focused-task-graph"
+        previous = SemanticUIDesign.model_validate_json(
+            (root / "v10.json").read_text(encoding="utf-8")
+        )
+        current = SemanticUIDesign.model_validate_json(
+            (root / "v11.json").read_text(encoding="utf-8")
+        )
+
+        validate_ui_design_revision(previous, current)
+        self.assertEqual(current.stable_change_authorizations, ())
+        previous_stable = {
+            item.unit_id: item.model_dump(mode="json")
+            for item in previous.units()
+            if item.state == UIDesignIntentState.STABLE
+        }
+        current_stable = {
+            item.unit_id: item.model_dump(mode="json")
+            for item in current.units()
+            if item.state == UIDesignIntentState.STABLE
+        }
+        self.assertEqual(current_stable, previous_stable)
+
+    def test_active_v12_partial_command_recovery_preserves_all_stable_units(self) -> None:
+        root = REPOSITORY_ROOT / "ui-designs" / "task-manager" / "focused-task-graph"
+        previous = SemanticUIDesign.model_validate_json(
+            (root / "v11.json").read_text(encoding="utf-8")
+        )
+        current = SemanticUIDesign.model_validate_json(
+            (root / "v12.json").read_text(encoding="utf-8")
         )
 
         validate_ui_design_revision(previous, current)

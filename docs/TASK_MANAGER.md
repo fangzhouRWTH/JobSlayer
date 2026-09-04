@@ -21,15 +21,16 @@ cancelled Run 不会被后写入的草稿计划重新显示为“规划中”。
 显式派生或多 Run；相关能力必须在闭环稳定后以新的状态模型引入。
 
 当前实现已经闭合到“固化精确 revision → 运行装配 → 持久串行单步推进 → Kernel 节点状态/反馈
-投影”，并提供显式启用的本机 Codex durable executor。默认 CLI 只启用本地追加式 run store；没有
+投影”，并提供显式启用的本机 Codex durable executor。底层 CLI 不带开关时只启用本地追加式 run store；没有
 执行开关和 `executor` 身份时不会接入外部进程。即使 provider success，也只进入 `Verifying`，
 不会伪装成完成。
 
 默认 TaskManager 现在显式登记 `brave-new-world-anygine-app-v1`。目标解析器把 runbook、testbed、
 task 和 validation profile 四个源文件合成 SHA-256 source bundle，并只读检查本地
-`bnw-anygine-0` Git 基线。任务图包含 JobSlayer 内部命令或遗漏 `./bnw contract` 时，目标预检会
-阻止固化和 run 装配。现在 runbook 还声明固定 Anygine Git archive 与 Conan toolchain 目录
-SHA-256；operator 在部署时绑定本机路径。两项 attachment 就绪后，source-controlled profile
+`bnw-life-game-1` Git 基线。任务图包含 JobSlayer 内部命令时，目标预检会阻止固化和 run 装配；
+没有在自然语言节点中逐字重复 `./bnw` 命令只产生 warning，因为 Run 装配始终强制绑定源控
+validation profile。现在 runbook 还声明固定 Anygine Git archive 与 Conan toolchain 目录 SHA-256；
+普通 `start.py` 会从标准本机布局自动发现并校验两项 attachment，也支持环境变量显式覆盖。两项就绪后，source-controlled profile
 要求 `./bnw contract`、`./bnw test --jobs 4` 和 `./bnw run --jobs 4`，不再以
 portable contract 冒充真实 C++ build/Vulkan 证据。
 
@@ -52,8 +53,9 @@ portable contract 冒充真实 C++ build/Vulkan 证据。
 节点详情和执行反馈中。ADR-0057 在执行页补齐正式决定、追加式反馈与任务绑定只读 Agent；正式按钮
 只调用既有治理命令，反馈和 Agent 对话不产生状态转换。ADR-0058 再把主路径收敛为单一下一步、
 Run 后规划锁定和终态 Run 优先投影；机器 evidence ID 折叠保留，人类确认实际核对交付物和验证摘要，
-后端门禁不变。ADR-0053 形成 Calm Ops 的深炭灰三级表面、正文 13–17px 与信息收敛；当前活动 SUID
-`focused-task-graph@9` 保留全部 stable 决定并固化单任务闭环。ADR-0054 把 Agent 页改为与任务
+后端门禁不变。ADR-0059 又为 source binding drift 提供显式更新入口，并让锁定 validation profile
+拥有命令真相。ADR-0053 形成 Calm Ops 的深炭灰三级表面、正文 13–17px 与信息收敛；当前活动 SUID
+`focused-task-graph@10` 保留全部 stable 决定并固化可恢复路径。ADR-0054 把 Agent 页改为与任务
 链无关的 Codex Quick Agent：显示 provider 原始额度窗口与刷新时间，并由本机 `model/list` 驱动模型、
 effort、速度和能力信息。
 
@@ -69,9 +71,10 @@ py -3 start.py
 python3 start.py
 ```
 
-入口会检查并按需初始化 Python/Node/UI/桌面依赖，创建或复用受保护的本地 key，签发仅含
-`planner + quick-agent + reviewer + approver` 角色的临时 session，连接本机已登录 Codex 的 Quick
-Agent 与任务绑定只读辅助，依次启动并健康检查 TaskManager API 与 Vite proxy，再把入口
+入口会检查并按需初始化 Python/Node/UI/桌面依赖，创建或复用受保护的本地 key，签发包含
+`planner + executor + quick-agent + reviewer + approver` 角色的临时 session，连接本机已登录 Codex
+的规划、durable 执行、确定性验证、隔离 checkpoint、Quick Agent 与任务绑定只读辅助，并自动发现
+标准目录中的 Anygine source/toolchain。随后依次启动并健康检查 TaskManager API 与 Vite proxy，再把入口
 `http://127.0.0.1:4173/#/home` 装入独立 WebView2（Windows）或 Qt（Linux）窗口。关闭窗口会回收两个
 后台进程树并删除本次临时 session；日志保留在 `.jobslayer/desktop/logs/`。
 
@@ -85,10 +88,10 @@ python3 start.py --headless
 
 Linux 桌面模式需要 `DISPLAY` 或 `WAYLAND_DISPLAY`；`--smoke-test` 与 headless 模式不创建窗口，
 也不要求图形会话。API/Vite 的固定 loopback 健康检查显式绕过外部 HTTP 代理，避免代理环境中的
-宽泛 `NO_PROXY` 写法造成误判。默认便捷入口会连接 Quick Agent adapter，但只有用户在 Agent 页发送
-消息或在人工指导卡主动询问时才调用模型；它不会打开 durable task execution、validation 或
-integration adapter。默认同一桌面主体即使兼有 reviewer/approver role，也不能绕过后端的源码
-Reviewer/Approver 独立性校验。
+宽泛 `NO_PROXY` 写法造成误判。默认便捷入口固定以 Codex Sol/xhigh 生成待决定规划 proposal，并连接
+durable task execution、source-controlled validation 与隔离 checkpoint adapter；规划、Quick Agent、
+任务执行和人工辅助都只有用户显式发送消息或点击单步推进时才调用模型/产生副作用。默认同一桌面主体
+即使兼有 reviewer/approver role，也不能绕过后端的源码 Reviewer/Approver 独立性校验。
 
 需要显式选择身份、adapter、模型或 dependency attachment 时，继续使用高级手工入口。首先创建
 一个本地 planner 身份：
@@ -154,8 +157,8 @@ sh ./init.sh -- npm --prefix ui-framework run task-manager
 该调用只生成待用户决定的规划 proposal。它不自动应用、不执行任务，也不从 ChatGPT 月订阅推断
 虚假的美元余额。长任务预算与恢复口径见[长任务执行与恢复](LONG_RUNNING_EXECUTION.md)。
 
-固化后的 task node 执行还需要一个同时具备 `planner` 与 `executor` 角色的短期 session，并在启动
-API 时单独启用 durable executor：
+普通 `start.py` 已完成上述执行部署。需要定制身份、模型、附件或只连接部分 adapter 时，可手工签发
+同时具备 `planner` 与 `executor` 角色的短期 session，并显式启动 durable executor：
 
 ```bash
 ./jobslayer issue-local-identity-session \
@@ -188,6 +191,10 @@ executor 会从目标固定基线创建 run 级独立 worktree，并以持久 st
 可定位同一个 provider run；原始 JSONL、stderr 与 terminal result 都注册为证据。连接 executor、
 validator 或 integrator 时，API 同时装配持久串行 coordinator；具体执行页的“推进一步”按当前 run
 revision 调用一次 tick。这个开关仍不会自动固化计划、在后台无限循环或绕过逐节点授权。
+`task` 与非人工、非 validation 的 `milestone` 都走该 executor；validation 和 human gate 分别只走
+确定性 runner 与人工决定。若 dispatch authorization 已追加、provider start 尚未完成，Run 会保留为
+`implementing`，coordinator 以同一 pending intent/start key 恢复；provider 已绑定时只对账而不重复。
+任何 UI 写命令失败后都会立即重读当前 task/run，所以页面不会继续拿旧 revision 重试。
 
 `--allow-task-manager-local-validation` 是与外部 Agent 执行分离的显式开关。它只读取 finalized target
 中的 validation profile，在当前 clean 隔离 run worktree 上通过命令策略运行检查；不会把 validation

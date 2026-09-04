@@ -295,8 +295,8 @@ class TaskOrchestrationWebTests(unittest.TestCase):
             "/ui-design", token=token, base=self.task_manager_base
         )
         self.assertEqual(ui_design["binding"]["scheme_id"], "focused-task-graph")
-        self.assertEqual(ui_design["binding"]["revision"], 9)
-        self.assertEqual(ui_design["state_counts"]["planned"], 69)
+        self.assertEqual(ui_design["binding"]["revision"], 12)
+        self.assertEqual(ui_design["state_counts"]["planned"], 73)
 
         targets = self.get_json(
             "/targets", token=token, base=self.task_manager_base
@@ -343,6 +343,39 @@ class TaskOrchestrationWebTests(unittest.TestCase):
             base=self.task_manager_base,
         )
         self.assertTrue(targeted["execution_target_assessment"]["ready"])
+        registry = self.task_manager_execution.targets
+        self.assertIsInstance(registry, FixtureExecutionTargetRegistry)
+        assert isinstance(registry, FixtureExecutionTargetRegistry)
+        registry.binding = registry.binding.model_copy(
+            update={"source_bundle_sha256": "c" * 64}
+        )
+        drifted = self.get_json(
+            "/tasks/task-manager-web",
+            token=token,
+            base=self.task_manager_base,
+        )
+        self.assertFalse(drifted["execution_target_assessment"]["ready"])
+        self.assertIn(
+            "target.source_binding_drift",
+            {
+                issue["code"]
+                for issue in drifted["execution_target_assessment"]["issues"]
+            },
+        )
+        targeted = self.mutate(
+            "POST",
+            "/tasks/task-manager-web/target",
+            {
+                "target_id": "fixture-project-target-v1",
+                "expected_revision": targeted["task"]["revision"],
+            },
+            token=token,
+            base=self.task_manager_base,
+        )
+        self.assertTrue(targeted["execution_target_assessment"]["ready"])
+        self.assertEqual(
+            targeted["plan"]["execution_target_source_sha256"], "c" * 64
+        )
         finalized = self.mutate(
             "POST",
             "/tasks/task-manager-web/finalize",

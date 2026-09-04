@@ -137,6 +137,27 @@ class TaskManagerExecutionTargetTests(unittest.TestCase):
         )
         self.assertTrue(assess_plan_for_target(good, binding).ready)
 
+        profile_bound = good.model_copy(
+            update={
+                "nodes": (
+                    good.nodes[0],
+                    good.nodes[1].model_copy(
+                        update={"verification_requirements": ()}
+                    ),
+                )
+            }
+        )
+        profile_bound_assessment = assess_plan_for_target(profile_bound, binding)
+        self.assertTrue(profile_bound_assessment.ready)
+        self.assertEqual(
+            {
+                issue.severity.value
+                for issue in profile_bound_assessment.issues
+                if issue.code == "target.validation_command_missing"
+            },
+            {"warning"},
+        )
+
         bad_node = good.nodes[0].model_copy(
             update={
                 "constraints": (

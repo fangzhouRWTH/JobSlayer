@@ -437,8 +437,11 @@ def assess_plan_for_target(
         if command not in all_text:
             add(
                 "target.validation_command_missing",
-                TaskPlanIssueSeverity.BLOCKER,
-                f"任务图尚未明确包含目标门禁命令：{command}。",
+                TaskPlanIssueSeverity.WARNING,
+                (
+                    f"任务图未逐字列出目标门禁命令：{command}；"
+                    "Run 装配时仍会从已锁定 validation profile 强制附加并执行该命令。"
+                ),
             )
 
     ready = not any(

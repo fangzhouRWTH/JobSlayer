@@ -2,11 +2,11 @@
   "schema_version": "1.0",
   "task_id": "bnw-anygine-small-app-001",
   "project_id": "brave-new-world",
-  "version": 1,
+  "version": 2,
   "title": "在固定 Anygine 基线上开发一个小规模验证 App",
   "objective": "按照用户固化的 TaskManager DAG，在 BraveNewWorld 中实现一个边界清晰的原生小 App，以快速验证任务规划、串行执行、确定性检查和反馈闭环。",
   "repository": "https://github.com/fangzhouRWTH/BraveNewWorld.git",
-  "base_commit": "e7bff4aceca5dee998d0db1dc1c50e4b935fabda",
+  "base_commit": "d4947e7fdca4f70970c04fcf61221b55afddfb25",
   "allowed_paths": [
     "CMakeLists.txt",
     "Config/Apps/",

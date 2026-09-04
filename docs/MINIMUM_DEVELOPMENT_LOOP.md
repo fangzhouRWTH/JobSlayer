@@ -88,7 +88,7 @@ issuer、session、actor、decision kind、策略版本和有效期。key/sessio
 - 本地仓库：仓库根相对路径 `../TestProjects/BraveNewWorld`；当前 Windows 部署为
   `D:\projects\JobSlayer\TestProjects\BraveNewWorld`
 - Git 地址：`https://github.com/fangzhouRWTH/BraveNewWorld.git`
-- 当前固定基线：`e7bff4aceca5dee998d0db1dc1c50e4b935fabda` / `bnw-anygine-0`
+- 当前固定基线：`d4947e7fdca4f70970c04fcf61221b55afddfb25` / `bnw-life-game-1`（本机待发布）
 - 当前 target：`brave-new-world-anygine-app-v1`
 - 当前 validation gates：POSIX 为 `./bnw contract/test/run`，Windows 为对应
   `.\bnw.cmd contract/test/run` 显式变体
