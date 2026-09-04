@@ -381,6 +381,11 @@
 .task-control-log article strong { overflow: hidden; color: var(--text-soft); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .task-control-log article small, .task-control-log time { color: #86919c; font: 10px "SFMono-Regular", Consolas, monospace; }
 
+.execution-complete-banner { min-height: 74px; display: flex; align-items: center; gap: 13px; margin-bottom: 12px; padding: 14px 16px; border: 1px solid #526d3d; color: var(--lime); background: #12190f; box-shadow: inset 3px 0 0 var(--lime); }
+.execution-complete-banner > div { display: grid; gap: 5px; }
+.execution-complete-banner strong { color: #e6eadf; font-size: 16px; }
+.execution-complete-banner span { color: #a8b49e; font-size: 12px; line-height: 1.5; }
+.execution-complete-banner.run-cancelled { border-color: #745a36; color: #d5ad71; background: #19150f; box-shadow: inset 3px 0 0 #c48b43; }
 .execution-summary { display: grid; grid-template-columns: 1.6fr repeat(2, 1fr); gap: 12px; margin-bottom: 12px; }
 .execution-summary article { min-height: 93px; display: grid; align-content: center; gap: 6px; padding: 14px; border: 1px solid #292f38; background: #101318; }
 .execution-summary span { color: #8b95a0; font-size: 10px; font-weight: 750; letter-spacing: .1em; }
@@ -432,6 +437,23 @@
 .task-manager-workspace .task-manager-proposal { min-height: 62px; gap: 12px; padding: 10px 13px; }
 .task-manager-workspace .task-manager-proposal strong { font-size: 12px; }
 .task-manager-workspace .task-manager-proposal span { color: #a39a82; font-size: 11px; }
+.task-closure-next {
+  min-height: 78px;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 13px 15px;
+  border: 1px solid #3b4634;
+  background: #11150f;
+}
+.task-closure-next > div { min-width: 0; display: grid; gap: 5px; margin-right: auto; }
+.task-closure-next > div > span { color: #a9bc82; font: 10px var(--font-mono); letter-spacing: .1em; }
+.task-closure-next strong { color: #e6eadf; font-size: 15px; }
+.task-closure-next small { color: #9ca795; font-size: 11px; line-height: 1.5; }
+.task-closure-next ul { display: grid; gap: 3px; margin: 4px 0 0; padding-left: 18px; color: #c1a06d; font-size: 10px; line-height: 1.45; }
+.task-closure-next.run-completed { border-color: #526d3d; background: #12190f; box-shadow: inset 3px 0 0 var(--lime); }
+.task-closure-next.run-completed > div > span { color: var(--lime); }
+.task-closure-next.run-cancelled { border-color: #745a36; background: #19150f; box-shadow: inset 3px 0 0 #c48b43; }
 .task-manager-workspace .task-manager-layout { gap: 10px; }
 .task-manager-workspace .task-manager-panel-title { flex-basis: 48px; padding-inline: 14px; border-color: var(--line); background: var(--surface-2); }
 .task-manager-workspace .task-manager-panel-title span { font-size: 12px; letter-spacing: .07em; }
@@ -463,6 +485,10 @@
 .task-manager-workspace .task-manager-agent textarea { min-height: 92px; padding: 12px; border-color: var(--line); color: var(--text-soft); background: #11161b; font-size: 13px; }
 .task-manager-workspace .task-manager-agent form > div:last-child small { color: #89939e; font-size: 10px; }
 .task-manager-workspace .agent-node-context { min-height: 34px; font-size: 11px; }
+.agent-plan-locked { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 13px; border-top: 1px solid var(--line); color: var(--lime); background: #11160f; }
+.agent-plan-locked > div { display: grid; gap: 4px; }
+.agent-plan-locked strong { color: #dce4d4; font-size: 12px; }
+.agent-plan-locked span { color: #919d8a; font-size: 10px; line-height: 1.45; }
 
 .task-node-human-action {
   width: max-content;
@@ -512,7 +538,10 @@
 .human-action-guide li svg { flex: 0 0 auto; margin-top: 3px; color: #9bb273; }
 .human-action-guide li b { width: 21px; height: 21px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid #665536; color: #ddc486; background: #14120e; font: 10px var(--font-mono); }
 .human-action-evidence { margin-top: 18px !important; }
-.human-action-evidence > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.human-action-evidence details { border: 1px solid #403822; background: #12110d; }
+.human-action-evidence summary { display: flex; align-items: center; gap: 7px; padding: 9px 10px; color: #c3b58f; cursor: pointer; font-size: 11px; }
+.human-action-evidence details > p { margin: 0; padding: 0 10px 9px; color: #948b78; font-size: 10px; line-height: 1.5; }
+.human-action-evidence details > div { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 10px 10px; }
 .human-action-evidence label {
   display: flex;
   min-width: 0;
@@ -608,6 +637,8 @@
 }
 
 @media (max-width: 760px) {
+  .task-closure-next { align-items: stretch; flex-direction: column; }
+  .task-closure-next .button { width: 100%; }
   .task-manager-workspace { min-height: 100vh; grid-template-columns: 54px minmax(0, 1fr); }
   .task-view-rail { width: 54px; padding: 8px 5px; }
   .task-view-brand { width: 38px; height: 38px; }

@@ -199,6 +199,9 @@ Draft -> Planned -> Implementing -> Verifying -> Reviewing
 TaskManager 会在任务图/详情/执行反馈中给出绑定当前 revision 的角色要求、详细步骤、待审证据、允许
 决定及禁止动作。它只解释现有治理路径，不替代 RBAC、`WorkflowKernel` 或人工批准。
 
+当前主路径采用“一任务一 Run”：装配后规划输入锁定，需求变化新建任务；终态 Run 优先决定任务、
+DAG 和 Backlog 投影。编排页只给出一个下一步，已完成任务不会再显示未装配或 coordinator 故障。
+
 BraveNewWorld 已重置为基于 Anygine 公共 build-tree contract 的小 App 测试床。固定基线为
 `e7bff4aceca5dee998d0db1dc1c50e4b935fabda` / `bnw-anygine-0`，已发布到远端；旧网页端机电模拟内容
 不再属于当前主干目标。登记与验证入口见 [`testbeds/brave-new-world.json`](testbeds/brave-new-world.json)。

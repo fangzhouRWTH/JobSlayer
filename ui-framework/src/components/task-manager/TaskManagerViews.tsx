@@ -50,6 +50,12 @@ const stageLabels: Record<ManagedTaskSummary["stage"], string> = {
   archived: "已归档",
 };
 
+const satisfiedWorkflowStates = new Set([
+  "completed",
+  "gate_approved",
+  "deliverable_accepted",
+]);
+
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat("zh-CN", {
     month: "2-digit",
@@ -623,6 +629,7 @@ export function TaskManagerExecution({
   isFormalHumanDecision,
 }: CommonViewProps) {
   const run = detail?.execution_run;
+  const terminalRun = run?.stage === "completed" || run?.stage === "cancelled";
   const coordinator = detail?.coordinator;
   const advanceableActions = new Set([
     "start_node",
@@ -665,32 +672,43 @@ export function TaskManagerExecution({
 
       {run ? (
         <>
+          {terminalRun && (
+            <section className={`execution-complete-banner run-${run.stage}`}>
+              {run.stage === "completed" ? <CheckCircle2 size={24} /> : <AlertTriangle size={24} />}
+              <div>
+                <strong>{run.stage === "completed" ? "任务闭环已经完成" : "执行 Run 已取消"}</strong>
+                <span>{run.stage === "completed" ? "全部节点满足，最终人工门已通过；当前页面只读保留执行与证据记录。" : "该 Run 已进入终态，不再允许推进；当前页面只读保留已发生的执行与证据记录。"}</span>
+              </div>
+            </section>
+          )}
           <div className="execution-summary">
             <article><span>RUN / STAGE</span><strong>{run.run_id}</strong><small>{run.stage.toUpperCase()} · 计划 R{run.plan_revision} · Run R{run.revision}</small></article>
-            <article><span>NODES</span><strong>{run.nodes.length}</strong><small>{run.nodes.filter((node) => node.workflow_state === "completed").length} completed</small></article>
+            <article><span>NODES</span><strong>{run.nodes.length}</strong><small>{run.nodes.filter((node) => satisfiedWorkflowStates.has(node.workflow_state)).length} satisfied</small></article>
             <article><span>UPDATED</span><strong>{formatTime(run.updated_at)}</strong><small>append-only projection</small></article>
           </div>
-          <section className="task-view-card execution-coordinator">
-            <div>
-              <span>SERIAL COORDINATOR</span>
-              <strong>{coordinator?.stage.toUpperCase() ?? "NOT INITIALIZED"}</strong>
-              <small>
-                {coordinator
-                  ? `${coordinator.cursor_node_id ?? "run"} · ${coordinator.next_action} · cursor R${coordinator.revision}`
-                  : "首次推进会创建持久 cursor；每次只允许一个受治理动作。"}
-              </small>
-              <p>{coordinator?.reason ?? "等待操作者显式启动串行推进。"}</p>
-            </div>
-            <button
-              className="button button-primary"
-              type="button"
-              disabled={!canAdvance || busy}
-              onClick={onAdvanceRun}
-            >
-              {busy ? <LoaderCircle size={14} /> : <ArrowRight size={14} />}
-              {coordinatorNeedsReconciliation ? "同步并推进" : "推进一步"}
-            </button>
-          </section>
+          {!terminalRun && (
+            <section className="task-view-card execution-coordinator">
+              <div>
+                <span>SERIAL COORDINATOR</span>
+                <strong>{coordinator?.stage.toUpperCase() ?? "NOT CONNECTED"}</strong>
+                <small>
+                  {coordinator
+                    ? `${coordinator.cursor_node_id ?? "run"} · ${coordinator.next_action} · cursor R${coordinator.revision}`
+                    : "当前启动没有连接串行执行能力；本页不会提供无效推进。"}
+                </small>
+                <p>{coordinator?.reason ?? "请按页面显示的能力缺口重新启动，或只读查看现有 Run。"}</p>
+              </div>
+              <button
+                className="button button-primary"
+                type="button"
+                disabled={!canAdvance || busy}
+                onClick={onAdvanceRun}
+              >
+                {busy ? <LoaderCircle size={14} /> : <ArrowRight size={14} />}
+                {coordinatorNeedsReconciliation ? "同步并推进" : "推进一步"}
+              </button>
+            </section>
+          )}
           {detail.human_actions.length > 0 && (
             <div className="execution-human-actions" aria-live="polite">
               {detail.human_actions.map((guidance) => (
@@ -722,12 +740,18 @@ export function TaskManagerExecution({
                   ...(node.provider_reference?.evidence_artifact_ids ?? []),
                   ...(node.latest_observation?.evidence_artifact_ids ?? []),
                   ...(node.verification_evidence?.evidence_artifact_ids ?? []),
+                  ...node.transition_history.flatMap((item) => item.evidence_ids),
+                  ...node.human_interactions.flatMap((item) => item.evidence_artifact_ids),
+                  ...(node.review_artifact_id ? [node.review_artifact_id] : []),
+                  ...(node.source_review_artifact_id ? [node.source_review_artifact_id] : []),
+                  ...(node.source_approval_artifact_id ? [node.source_approval_artifact_id] : []),
+                  ...(node.integration_artifact_id ? [node.integration_artifact_id] : []),
                 ]).size;
                 return (
                   <article key={node.node.node_id}>
                     <b>{String(index + 1).padStart(2, "0")}</b>
                     <span className="execution-node-state"><i /> {node.workflow_state.toUpperCase()}</span>
-                    <div><strong>{node.node.title}</strong><small>{node.latest_observation?.summary ?? "暂无 Agent 反馈"}</small></div>
+                    <div><strong>{node.node.title}</strong><small>{node.latest_observation?.summary ?? (satisfiedWorkflowStates.has(node.workflow_state) ? "节点已由受治理流程满足" : "暂无 Agent 反馈")}</small></div>
                     <span className="execution-node-evidence"><ShieldCheck size={12} /> {evidenceCount} evidence</span>
                     <time>{node.transition_history.length} transitions</time>
                   </article>
@@ -740,7 +764,7 @@ export function TaskManagerExecution({
         <div className="task-execution-empty task-view-card">
           <Activity size={38} />
           <h2>{detail ? "该任务尚未装配执行 Run" : "选择一个任务"}</h2>
-          <p>{detail ? "计划固化与 run assembly 仍由受认证后端命令负责。本页不会虚构执行状态。" : "从总控或这里的任务选择器定位具体任务。"}</p>
+          <p>{detail ? detail.execution_blockers[0] ?? "请先在编排页完成当前唯一的下一步。" : "从总控或这里的任务选择器定位具体任务。"}</p>
           <button type="button" className="button button-primary" onClick={() => onNavigate("orchestration")}><Network size={14} /> 返回任务编排</button>
         </div>
       )}

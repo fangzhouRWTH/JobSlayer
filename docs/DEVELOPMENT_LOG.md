@@ -4395,3 +4395,85 @@ ADR-0035 的 lease/checkpoint/recovery 控制面。随后接 verifier/reviewer/h
    `OK (skipped=5)`；Python compile、dependency consistency、SUID v1–v8、固定 UI advisor、
    UI production build（1955 modules，93 ms）、BraveNewWorld testbed、Anygine runbook 与 Git diff 门禁
    全部通过。两份既有前端文件只有未来 LF→CRLF 提示，没有 whitespace/conflict error。
+
+## DEV-2026-09-04-01 — TaskManager 状态错投影审计与单任务闭环收敛
+
+- 状态：完成（实现、真实数据/UI 复核与统一门禁均通过）
+- 类型：state projection repair、workflow guard、focused UI、SUID revision、real-run audit
+- 关联决策：[ADR-0058](adr/0058-one-task-one-run-and-terminal-projection.md)
+
+### 故障事实与根因
+
+1. 真实 Life Game 运行 `tmrun-life-game-20260903` 已在 Run R17 达到 `completed`，三个节点分别以
+   `completed`、`deliverable_accepted`、`gate_approved` 满足，最终人工门和 coordinator 对账都已完成。
+2. 完成后的 2026-09-04 规划讨论经旧入口追加了 plan R18 proposal，随后 R19 reject。规划快照因此为
+   `draft`，但仍保留 `latest_finalized_revision=17`。追加日志没有损坏；问题是 TaskManager 只按最新
+   plan revision/hash 查 Run，并让 planning/proposal 状态先于终态 Run 决定页面。
+3. 结果是已完成 Run 从 read model 消失，任务被显示为规划中、三个 Backlog、四个 blocker，执行页又
+   错称“尚未装配 Run”。精简 UI 同时移除了 target/finalize/assemble 主路径，只保留规划 composer；
+   人工确认还要求逐项勾选页面无法打开的 opaque evidence ID，进一步造成无明确出口的交互卡死。
+4. 默认桌面入口只连接 planning、Quick Agent 和人工辅助，不连接 durable executor/validator/
+   integrator。旧执行页仍显示 `NOT INITIALIZED` coordinator 和不可用“推进一步”，把明确能力缺失误报成
+   运行故障。节点计数只识别字符串 `completed`，又漏掉两个受治理满足终态。
+
+### 决定与落实
+
+1. `TaskManagerService` 在 discuss、proposal apply/reject、target select 和 finalize 前检查同 plan_id 的
+   已有 Run；存在即拒绝且不追加 plan revision。HTTP 映射为 409，并明确要求在执行页处理当前 Run或
+   新建任务。Run 装配自身仍以精确 finalized revision/hash 为唯一写边界。
+2. read projection 先精确查找 plan-bound Run；仅为兼容既有异常记录，再只读回接同 plan_id 最新
+   completed/cancelled Run。archived 仍优先，其后终态 Run 决定 task stage；DAG/依赖来自冻结 Run，
+   terminal summary 的 pending proposal、Backlog、blocker 和 human actions 不再由 R19 草稿重开。
+3. 编排页新增唯一“闭环下一步”。无 Run 时按目标绑定、计划固化、Run 装配顺序显示一个主动作和真实
+   blocker；有 Run 时显示其冻结 plan/run revision、锁定规划 composer，并只保留执行/证据入口和
+   新任务入口。后写 plan R19 仍作为审计事实可见，但明确不覆盖 Run R17。
+4. 执行页对 completed/cancelled Run 显示只读终态横幅并隐藏 coordinator；非终态而能力未连接时改为
+   `NOT CONNECTED` 和真实启动缺口。满足计数覆盖 `completed`、`deliverable_accepted`、
+   `gate_approved`，evidence 数量纳入 transition、interaction、review、approval 和 integration artifacts。
+5. 人工卡折叠 evidence references 并声明 ID 不是批准依据；正式按钮改为要求一次“已核对可见验证摘要
+   与实际交付物”的明确确认、理由、边界和 capability。后端 artifact/verification、RBAC、独立 actor、
+   revision 和 `WorkflowKernel.transition` 门禁未变。
+6. 发布并激活 SUID `focused-task-graph@9`，canonical SHA-256 为
+   `0f353819a2f71470fc33d77d0398e5957d6c5648dc66e2714d923ccfa970c6e1`；v8 的 13 个 stable 单元逐字
+   保留，新增/修订 69 个 planned 单元中的单一下一步、一任务一 Run、终态投影和精简人工核对语义。
+
+### 变更文件
+
+- 应用/API：`src/jobslayer/application/task_manager.py`、
+  `src/jobslayer/application/task_manager_execution.py`、
+  `src/jobslayer/application/task_manager_guidance.py`、`src/jobslayer/orchestration/web.py`；
+- UI：`ui-framework/src/components/TaskManager.tsx`、
+  `ui-framework/src/components/task-manager/TaskManagerViews.tsx`、
+  `ui-framework/src/components/task-manager/HumanActionGuidanceCard.tsx`、
+  `ui-framework/src/components/task-manager/taskManagerShell.css`；
+- 契约/测试/文档：SUID v9、catalog、observations、`tests/test_task_manager_execution.py`、
+  `tests/test_orchestration_web.py`、`tests/test_ui_design.py`、ADR-0058、README、TaskManager、roadmap 与
+  semantic UI 文档。
+
+### 验证、限制与下一步
+
+1. `sh ./init.sh -- python -m unittest tests.test_ui_design tests.test_task_manager
+   tests.test_task_manager_execution tests.test_orchestration_web`：46 项测试通过，用时 7.156 秒。
+   允许路径由既有 Run 前规划/固化测试覆盖，拒绝路径新增 application 与 HTTP 409 回归并验证 plan
+   record hash 不变；legacy 完成后规划夹具验证终态恢复。
+2. `sh ./init.sh -- npm --prefix ui-framework run check` 与 `... run build`：两次均退出 0；Vite 8.2.1
+   转换 1955 modules，分别 114 ms、110 ms。
+3. 重启默认入口后真实 API 返回 SUID v9；Life Game task R19 投影为 `completed`、3 nodes、0 backlog、
+   0 blocker、无 pending proposal，且重新关联 `tmrun-life-game-20260903` 的 plan R17/Run R17 completed。
+   1440×900 浏览器检查确认编排页显示 `RUN PLAN R17`、三个终态节点、规划锁与执行入口；执行页显示
+   3 satisfied 和真实 evidence/transition 数量，不再显示 coordinator 故障或推进按钮。
+4. 为保留审计事实，plan R18/R19 没有删除或改写；底层兼容 `/api/orchestration` 暂仍可绕过 TaskManager
+   规划锁，正常产品 UI/API 不再使用该路径。非终态孤儿 Run 不猜测回接。
+5. 默认桌面身份/入口仍未启用 durable execution、validation 和 checkpoint integration；同一主体也
+   不能绕过源码 reviewer/approver 独立性。这些是下一次新 Run 的诚实能力边界，不应通过 UI 自动放宽。
+6. BraveNewWorld `main` 已在上一任务推进到 `d4947e7f...`，但 source-controlled 默认 target 仍固定
+   初始 `e7bff4ac...` / `bnw-anygine-0`。当前完成 Run 不受影响；下一真实任务前必须由人类决定并发布
+   新 baseline tag，再同步 target/task/runbook 绑定，不能在本次只读闭环修复中静默移动基线。
+7. 下一步只做一个全新最小任务的端到端重放；在它通过前，不加入计划回开、多 Run、自动循环或更多
+   页面功能。
+8. `./jobslayer validate-ui-design ui-designs/catalog.json` 退出码 0，v1–v9 hash chain、v9 canonical hash
+   和唯一活动 binding 有效；随后最新 UI `check` 退出码 0，1955 modules、151 ms。
+9. 最终 `./jobslayer check` 退出码 0、9/9 通过：360 项 unittest 用时 36.184 秒，
+   `OK (skipped=5)`；Python compile、dependency consistency、SUID v1–v9、固定 UI advisor、UI
+   production build（1955 modules，103 ms）、BraveNewWorld testbed、Anygine runbook 与 Git diff 门禁
+   全部通过。三份修改过的前端文件只有未来 LF→CRLF 提示，没有 whitespace/conflict error。

@@ -51,7 +51,8 @@ ui-designs/task-manager/focused-task-graph/v4.json  # 历史 Quick Agent revisio
 ui-designs/task-manager/focused-task-graph/v5.json  # 历史动态模型目录 revision
 ui-designs/task-manager/focused-task-graph/v6.json  # 历史持久 coordinator revision
 ui-designs/task-manager/focused-task-graph/v7.json  # 历史人工交互指导 revision
-ui-designs/task-manager/focused-task-graph/v8.json  # 当前受治理人工确认/反馈 revision
+ui-designs/task-manager/focused-task-graph/v8.json  # 历史受治理人工确认/反馈 revision
+ui-designs/task-manager/focused-task-graph/v9.json  # 当前单任务闭环与终态投影 revision
 ```
 
 ## 3. 三种设计状态

@@ -42,6 +42,7 @@ from jobslayer.application.task_orchestration import (
 )
 from jobslayer.application.task_manager import (
     TaskManagerCapabilityUnavailableError,
+    TaskManagerPlanLockedByRunError,
     TaskManagerService,
 )
 from jobslayer.application.task_manager_execution import (
@@ -886,6 +887,7 @@ class TaskOrchestrationRequestHandler(BaseHTTPRequestHandler):
             TaskManagerExecutionNodeNotReadyError,
             TaskManagerRunRevisionConflictError,
             TaskManagerCoordinatorBusyError,
+            TaskManagerPlanLockedByRunError,
         ) as exc:
             self._send_error_json(HTTPStatus.CONFLICT, str(exc))
             return

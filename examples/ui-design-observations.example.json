@@ -2,8 +2,8 @@
   "schema_version": "1.0",
   "page_id": "task-manager",
   "scheme_id": "focused-task-graph",
-  "revision": 8,
-  "descriptor_sha256": "d10e3be4b56de0813521d197fa656bb1ac22d9ffce2a5fa8548a7acbd90e8ed2",
+  "revision": 9,
+  "descriptor_sha256": "0f353819a2f71470fc33d77d0398e5957d6c5648dc66e2714d923ccfa970c6e1",
   "observations": [
     {
       "unit_id": "requirement.design-status-projection",
@@ -28,11 +28,11 @@
     {
       "unit_id": "requirement.formal-human-decision-gate",
       "difference": "none",
-      "summary": "执行页正式按钮要求证据核对、理由、边界确认和 capability，后端仍调用现有 revision-bound governance command。",
+      "summary": "执行页把机器 evidence ID 折叠为审计引用，正式按钮要求人类确认已实际核对验证摘要与交付物、填写理由并确认边界；后端仍调用现有 revision-bound governance command。",
       "evidence_ids": [
         "tests.test_task_manager_execution",
         "tests.test_orchestration_web",
-        "ui-framework-production-build-v8"
+        "ui-framework-production-build-v9"
       ]
     },
     {
@@ -52,6 +52,25 @@
         "tests.test_human_action_assistant",
         "tests.test_identity",
         "tests.test_orchestration_web"
+      ]
+    },
+    {
+      "unit_id": "requirement.one-task-one-run",
+      "difference": "none",
+      "summary": "TaskManager application 与 HTTP API 在 Run 装配后拒绝所有规划入口，并证明拒绝不会追加 plan revision。",
+      "evidence_ids": [
+        "tests.test_task_manager_execution",
+        "tests.test_orchestration_web"
+      ]
+    },
+    {
+      "unit_id": "requirement.terminal-run-projection",
+      "difference": "none",
+      "summary": "兼容夹具复现完成后出现 legacy 规划 revision，TaskManager 仍投影终态 Run、零 Backlog、零 blocker 和冻结 Run DAG；真实 Life Game 任务用于 UI/API 核对。",
+      "evidence_ids": [
+        "tests.test_task_manager_execution",
+        "life-game-run-r17",
+        "ui-framework-production-build-v9"
       ]
     }
   ]

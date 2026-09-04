@@ -295,8 +295,8 @@ class TaskOrchestrationWebTests(unittest.TestCase):
             "/ui-design", token=token, base=self.task_manager_base
         )
         self.assertEqual(ui_design["binding"]["scheme_id"], "focused-task-graph")
-        self.assertEqual(ui_design["binding"]["revision"], 8)
-        self.assertEqual(ui_design["state_counts"]["planned"], 63)
+        self.assertEqual(ui_design["binding"]["revision"], 9)
+        self.assertEqual(ui_design["state_counts"]["planned"], 69)
 
         targets = self.get_json(
             "/targets", token=token, base=self.task_manager_base
@@ -372,6 +372,28 @@ class TaskOrchestrationWebTests(unittest.TestCase):
         )
         self.assertFalse(assembled["run_assembly_available"])
         self.assertFalse(assembled["execution_available"])
+
+        with self.assertRaises(HTTPError) as assembled_run_locks_planning:
+            self.mutate(
+                "POST",
+                "/tasks/task-manager-web/messages",
+                {
+                    "content": "this must become a separate task",
+                    "expected_revision": finalized["task"]["revision"],
+                },
+                token=token,
+                base=self.task_manager_base,
+            )
+        self.assertEqual(assembled_run_locks_planning.exception.code, 409)
+        locked_detail = self.get_json(
+            "/tasks/task-manager-web",
+            token=token,
+            base=self.task_manager_base,
+        )
+        self.assertEqual(
+            locked_detail["task"]["record_hash"], finalized["task"]["record_hash"]
+        )
+        self.assertEqual(locked_detail["execution_run"]["run_id"], "tmrun-manager-web")
 
         with self.assertRaises(HTTPError) as planner_cannot_execute:
             self.mutate(

@@ -56,23 +56,30 @@
       "revision": 8,
       "path": "task-manager/focused-task-graph/v8.json",
       "descriptor_sha256": "d10e3be4b56de0813521d197fa656bb1ac22d9ffce2a5fa8548a7acbd90e8ed2"
+    },
+    {
+      "page_id": "task-manager",
+      "scheme_id": "focused-task-graph",
+      "revision": 9,
+      "path": "task-manager/focused-task-graph/v9.json",
+      "descriptor_sha256": "0f353819a2f71470fc33d77d0398e5957d6c5648dc66e2714d923ccfa970c6e1"
     }
   ],
   "active_bindings": [
     {
       "page_id": "task-manager",
       "scheme_id": "focused-task-graph",
-      "revision": 8,
-      "descriptor_sha256": "d10e3be4b56de0813521d197fa656bb1ac22d9ffce2a5fa8548a7acbd90e8ed2",
+      "revision": 9,
+      "descriptor_sha256": "0f353819a2f71470fc33d77d0398e5957d6c5648dc66e2714d923ccfa970c6e1",
       "activated_by_actor_type": "human",
       "activated_by": "product-owner",
-      "activated_at": "2026-09-03T18:27:36+08:00",
-      "decision": "按产品负责人要求，在执行页补齐人工核对后的确认、否决/修改反馈和任务绑定 Agent 交互入口；正式决定仍走既有治理命令，反馈与只读 Agent 只追加审计事实，不改变权限或工作流所有权。",
+      "activated_at": "2026-09-04T16:40:11+08:00",
+      "decision": "按产品负责人要求先验证并收紧单任务闭环：Run 装配后锁定规划，终态 Run 优先投影，编排页只给一个下一步，执行页不再把已完成 Run 误报为未连接 coordinator；人工确认减少不可操作的逐 ID 勾选但不改变后端治理门禁。",
       "evidence_ids": [
-        "adr-0057",
-        "task-manager-human-interaction-tests",
-        "ui-task-manager-production-build-v8",
-        "user-direction-2026-09-03-human-confirmation-entry"
+        "adr-0058",
+        "task-manager-terminal-projection-tests",
+        "ui-task-manager-production-build-v9",
+        "user-direction-2026-09-04-closure-first"
       ]
     }
   ]

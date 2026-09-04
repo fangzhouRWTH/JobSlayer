@@ -15,6 +15,11 @@ TaskManager 是 JobSlayer 当前主产品面，先收紧到一个可验证闭环
   -> 确定性验证、Reviewer 接受或源码集成、最终完成决定
 ```
 
+当前产品面明确采用“一任务一 Run”：Run 装配后，规划输入、proposal 决定、target 重绑与再次固化均
+锁定；需求变化通过“新建任务”进入新闭环。读取时执行 binding 是 DAG 与状态的权威边界，completed/
+cancelled Run 不会被后写入的草稿计划重新显示为“规划中”。这是当前收敛策略，不代表底层永远不支持
+显式派生或多 Run；相关能力必须在闭环稳定后以新的状态模型引入。
+
 当前实现已经闭合到“固化精确 revision → 运行装配 → 持久串行单步推进 → Kernel 节点状态/反馈
 投影”，并提供显式启用的本机 Codex durable executor。默认 CLI 只启用本地追加式 run store；没有
 执行开关和 `executor` 身份时不会接入外部进程。即使 provider success，也只进入 `Verifying`，
@@ -44,10 +49,11 @@ portable contract 冒充真实 C++ build/Vulkan 证据。
 持久单步 coordinator。它拥有 append-only intent/cursor 与 run-scoped lease，每次 tick 最多调用一个
 既有 application command；人工门禁、审查、失败、阻塞和修复态停止。ADR-0056 又为每个当前人工
 停顿投影 revision-bound 的处理要求、详细步骤、待审证据、允许决定和禁止动作，并同时呈现在任务图、
-节点详情和执行反馈中。ADR-0057 在执行页补齐证据核对、正式决定、追加式反馈与任务绑定只读 Agent；
-正式按钮只调用既有治理命令，反馈和 Agent 对话不产生状态转换。ADR-0053 形成 Calm Ops 的深炭灰
-三级表面、正文 13–17px 与信息收敛；当前活动 SUID `focused-task-graph@8` 保留全部 stable 决定并
-固化人工确认闭环。ADR-0054 把 Agent 页改为与任务
+节点详情和执行反馈中。ADR-0057 在执行页补齐正式决定、追加式反馈与任务绑定只读 Agent；正式按钮
+只调用既有治理命令，反馈和 Agent 对话不产生状态转换。ADR-0058 再把主路径收敛为单一下一步、
+Run 后规划锁定和终态 Run 优先投影；机器 evidence ID 折叠保留，人类确认实际核对交付物和验证摘要，
+后端门禁不变。ADR-0053 形成 Calm Ops 的深炭灰三级表面、正文 13–17px 与信息收敛；当前活动 SUID
+`focused-task-graph@9` 保留全部 stable 决定并固化单任务闭环。ADR-0054 把 Agent 页改为与任务
 链无关的 Codex Quick Agent：显示 provider 原始额度窗口与刷新时间，并由本机 `model/list` 驱动模型、
 effort、速度和能力信息。
 

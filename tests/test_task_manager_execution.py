@@ -25,6 +25,10 @@ from jobslayer.application.task_manager_execution import (
     TaskManagerPlanNotFinalizedError,
     TaskManagerRunAlreadyExistsError,
 )
+from jobslayer.application.task_manager import (
+    TaskManagerPlanLockedByRunError,
+    TaskManagerService,
+)
 from jobslayer.application.task_orchestration import TaskOrchestrationService
 from jobslayer.domain.models import (
     ActorType,
@@ -37,6 +41,7 @@ from jobslayer.domain.models import (
 )
 from jobslayer.orchestration import TaskPlanNodeKind
 from jobslayer.task_manager import (
+    ManagedTaskStage,
     ManagedExecutionObservation,
     ManagedExecutionReference,
     ManagedExecutionRequest,
@@ -1127,6 +1132,85 @@ class TaskManagerExecutionServiceTests(unittest.TestCase):
         self.assertGreaterEqual(len(decision_artifacts), 3)
         for artifact_id in decision_artifacts:
             self.assertTrue(self.artifacts.verify(self.artifacts.get(artifact_id)))
+
+    def test_terminal_run_stays_visible_and_locks_later_plan_discussion(self) -> None:
+        ready = self._ready_validation_run(
+            plan_id="task-terminal-projection",
+            run_id="tmrun-terminal-projection",
+        )
+        started = self.execution.run_validation_node(
+            ready.run_id,
+            "verify",
+            expected_run_revision=ready.sequence,
+        )
+        verifying = self.execution.observe_node(
+            ready.run_id,
+            "verify",
+            expected_run_revision=started.sequence,
+        )
+        reviewed = self.execution.verify_node(
+            ready.run_id,
+            "verify",
+            expected_run_revision=verifying.sequence,
+        )
+        accepted = self.execution.accept_node_review(
+            ready.run_id,
+            "verify",
+            expected_run_revision=reviewed.sequence,
+            rationale="Accepted the final deterministic fixture evidence.",
+        )
+        approver = TaskManagerExecutionService(
+            self.store,
+            self.artifacts,
+            actor_id="terminal-approver@example.invalid",
+            targets=FixtureExecutionTargetRegistry(),
+        )
+        completed = approver.approve_completion_gate(
+            ready.run_id,
+            "finalize",
+            expected_run_revision=accepted.sequence,
+            rationale="Independently accepted all satisfied dependencies.",
+        )
+        manager = TaskManagerService(self.planning, approver)
+        plan_before = self.planning.get("task-terminal-projection")
+
+        with self.assertRaises(TaskManagerPlanLockedByRunError):
+            manager.discuss(
+                plan_before.plan_id,
+                "do not reopen a task that already owns a run",
+                expected_revision=plan_before.sequence,
+            )
+        self.assertEqual(self.planning.get(plan_before.plan_id), plan_before)
+
+        # Reproduce records written by an older TaskManager client before the
+        # application-level plan lock existed.
+        legacy_discussion = self.planning.discuss(
+            plan_before.plan_id,
+            "legacy planning chatter after completion",
+            expected_revision=plan_before.sequence,
+        )
+        proposal = legacy_discussion.snapshot.pending_proposal
+        assert proposal is not None
+        legacy_latest = self.planning.reject_proposal(
+            plan_before.plan_id,
+            proposal.proposal_id,
+            expected_revision=legacy_discussion.sequence,
+        )
+
+        detail = manager.get(plan_before.plan_id)
+        self.assertEqual(detail.task.stage, ManagedTaskStage.COMPLETED)
+        self.assertEqual(detail.task.blocker_count, 0)
+        self.assertEqual(detail.backlog, ())
+        self.assertEqual(detail.human_actions, ())
+        self.assertIsNotNone(detail.execution_run)
+        assert detail.execution_run is not None
+        self.assertEqual(detail.execution_run.run_id, completed.run_id)
+        self.assertEqual(detail.execution_run.stage, TaskManagerRunStage.COMPLETED)
+        self.assertEqual(detail.plan.revision, legacy_latest.sequence)
+        self.assertEqual(
+            approver.latest_for_plan(plan_before.plan_id, terminal_only=True),
+            completed,
+        )
 
     def test_root_scope_gate_uses_kernel_evidence_and_unlocks_dependency(self) -> None:
         applied = self._applied_plan("task-run-scope-gate")

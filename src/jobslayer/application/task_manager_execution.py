@@ -40,6 +40,7 @@ from jobslayer.task_manager.execution import (
     TaskManagerNodeExecution,
     TaskManagerRunRevisionRecord,
     TaskManagerRunSnapshot,
+    TaskManagerRunStage,
     TaskManagerRunStore,
     TaskManagerSourceIntegrator,
     TaskManagerValidator,
@@ -254,6 +255,31 @@ class TaskManagerExecutionService:
                 "finalized plan revision is bound to multiple TaskManager runs"
             )
         return matches[0] if matches else None
+
+    def latest_for_plan(
+        self,
+        plan_id: str,
+        *,
+        terminal_only: bool = False,
+    ) -> TaskManagerRunRevisionRecord | None:
+        """Return the newest trustworthy run projection for one task plan.
+
+        Exact plan-record binding remains mandatory for every write command.  This
+        lookup exists only so TaskManager can keep a completed/cancelled run visible
+        if a legacy client appended planning chatter after run assembly.
+        """
+
+        matches = tuple(
+            item
+            for item in self.list_latest()
+            if item.snapshot.plan_id == plan_id
+            and (
+                not terminal_only
+                or item.snapshot.stage
+                in {TaskManagerRunStage.COMPLETED, TaskManagerRunStage.CANCELLED}
+            )
+        )
+        return max(matches, key=lambda item: item.occurred_at) if matches else None
 
     def assemble(
         self,

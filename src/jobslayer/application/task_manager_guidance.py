@@ -31,19 +31,21 @@ def project_human_actions(
     """Return only current, revision-bound interaction instructions."""
 
     snapshot = plan.snapshot
-    if snapshot.pending_proposal is not None:
-        return (_proposal_guidance(plan),)
     if snapshot.is_archived:
         return ()
+    if run is not None and run.snapshot.stage in {
+        TaskManagerRunStage.COMPLETED,
+        TaskManagerRunStage.CANCELLED,
+    }:
+        return ()
+    if snapshot.pending_proposal is not None:
+        return (_proposal_guidance(plan),)
     if run is None:
         if snapshot.status is TaskPlanStatus.FINALIZED:
             return (_run_assembly_guidance(plan, assessment),)
         if assessment.ready_to_finalize:
             return (_plan_finalization_guidance(plan),)
         return (_plan_refinement_guidance(plan, assessment),)
-    if run.snapshot.stage in {TaskManagerRunStage.COMPLETED, TaskManagerRunStage.CANCELLED}:
-        return ()
-
     actions: list[TaskManagerHumanActionGuidance] = []
     for node in run.snapshot.nodes:
         if node.workflow_state is TaskState.REVIEWING:

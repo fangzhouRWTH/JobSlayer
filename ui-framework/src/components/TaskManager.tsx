@@ -296,7 +296,19 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
     return () => { cancelled = true; };
   }, []);
 
-  const effectiveEdges = detail?.plan.pending_proposal?.edges ?? detail?.plan.edges ?? [];
+  const runEdges: TaskPlanEdge[] = detail?.execution_run?.nodes.flatMap((node) => (
+    node.dependency_node_ids.map((dependencyNodeId) => ({
+      schema_version: "1.0" as const,
+      edge_id: `run-${dependencyNodeId}-${node.node.node_id}`,
+      source_node_id: dependencyNodeId,
+      target_node_id: node.node.node_id,
+      relation: "dependency" as const,
+      label: null,
+    }))
+  )) ?? [];
+  const effectiveEdges = detail?.execution_run
+    ? runEdges
+    : detail?.plan.pending_proposal?.edges ?? detail?.plan.edges ?? [];
   const graph = useMemo(
     () => layoutGraph(detail?.nodes ?? [], effectiveEdges, detail?.human_actions ?? []),
     [detail, effectiveEdges],
@@ -314,8 +326,8 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
     path: string,
     body: unknown,
     successMessage: string,
-  ) => {
-    if (!session) return;
+  ): Promise<ManagedTaskDetail | null> => {
+    if (!session) return null;
     setBusy(true);
     setError(null);
     try {
@@ -327,8 +339,10 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
       setDetail(next);
       await refreshTasks(session);
       onNotice(successMessage);
+      return next;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
+      return null;
     } finally {
       setBusy(false);
     }
@@ -360,7 +374,7 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
 
   const sendMessage = async (event: FormEvent) => {
     event.preventDefault();
-    if (!detail || !message.trim()) return;
+    if (!detail || detail.execution_run || !message.trim()) return;
     const content = message.trim();
     setMessage("");
     await commit(
@@ -374,7 +388,38 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
     );
   };
 
-  const proposal = detail?.plan.pending_proposal ?? null;
+  const proposal = detail?.execution_run ? null : detail?.plan.pending_proposal ?? null;
+  const terminalRun = detail?.execution_run?.stage === "completed"
+    || detail?.execution_run?.stage === "cancelled";
+
+  const bindExecutionTarget = (targetId: string) => {
+    if (!detail || !targetId) return;
+    void commit(
+      `/tasks/${encodeURIComponent(detail.task.task_id)}/target`,
+      { target_id: targetId, expected_revision: detail.task.revision },
+      "执行目标已绑定；请核对预检结果后固化任务流。",
+    );
+  };
+
+  const finalizePlan = () => {
+    if (!detail) return;
+    void commit(
+      `/tasks/${encodeURIComponent(detail.task.task_id)}/finalize`,
+      { expected_revision: detail.task.revision },
+      "任务流已固化；下一步装配执行 Run。",
+    );
+  };
+
+  const assembleRun = () => {
+    if (!detail) return;
+    void commit(
+      `/tasks/${encodeURIComponent(detail.task.task_id)}/runs`,
+      { expected_revision: detail.task.revision },
+      "执行 Run 已装配；请在执行页推进。",
+    ).then((next) => {
+      if (next?.execution_run) navigate("execution");
+    });
+  };
 
   const refreshCurrent = () => {
     if (!session) return;
@@ -629,11 +674,86 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
             </div>
           )}
 
+          {detail.execution_run ? (
+            <section className={`task-closure-next run-${detail.execution_run.stage}`}>
+              <div>
+                <span>{detail.execution_run.stage === "completed" ? "CLOSED LOOP" : terminalRun ? "TERMINAL RUN" : "ACTIVE RUN"}</span>
+                <strong>{detail.execution_run.stage === "completed" ? "任务闭环已完成" : detail.execution_run.stage === "cancelled" ? "执行 Run 已取消" : "执行 Run 已装配，规划输入已锁定"}</strong>
+                <small>
+                  Run {detail.execution_run.run_id} · 绑定 Plan R{detail.execution_run.plan_revision} · Run R{detail.execution_run.revision}
+                  {detail.task.revision !== detail.execution_run.plan_revision
+                    ? `；后续规划记录 R${detail.task.revision} 不会覆盖该 Run`
+                    : ""}
+                </small>
+              </div>
+              <button className="button button-primary" type="button" onClick={() => navigate("execution")}>
+                <ShieldCheck size={14} /> {terminalRun ? "查看执行记录" : "进入执行页"}
+              </button>
+            </section>
+          ) : !proposal && (
+            <section className="task-closure-next">
+              <div>
+                <span>NEXT REQUIRED ACTION</span>
+                {detail.plan.execution_target_id === null ? (
+                  <>
+                    <strong>1. 绑定执行目标</strong>
+                    <small>选择目标只固定仓库、基线和执行约束，不会启动 Agent。</small>
+                  </>
+                ) : detail.plan.status === "draft" ? (
+                  <>
+                    <strong>2. 固化当前任务流</strong>
+                    <small>固化前必须消除目标预检阻塞；固化本身不会启动执行。</small>
+                  </>
+                ) : (
+                  <>
+                    <strong>3. 装配执行 Run</strong>
+                    <small>Run 会绑定当前 Plan revision/hash；装配完成后再到执行页逐步推进。</small>
+                  </>
+                )}
+                {detail.execution_blockers.length > 0 && detail.plan.execution_target_id !== null && (
+                  <ul>{detail.execution_blockers.map((item) => <li key={item}>{item}</li>)}</ul>
+                )}
+              </div>
+              {detail.plan.execution_target_id === null ? (
+                <button
+                  className="button button-primary"
+                  type="button"
+                  disabled={busy || !detail.execution_targets[0]}
+                  onClick={() => bindExecutionTarget(detail.execution_targets[0]?.target_id ?? "")}
+                >
+                  <Network size={14} /> 绑定默认目标
+                </button>
+              ) : detail.plan.status === "draft" ? (
+                <button
+                  className="button button-primary"
+                  type="button"
+                  disabled={busy || !detail.assessment.ready_to_finalize || !detail.execution_target_assessment?.ready}
+                  onClick={finalizePlan}
+                >
+                  <Check size={14} /> 固化任务流
+                </button>
+              ) : (
+                <button
+                  className="button button-primary"
+                  type="button"
+                  disabled={busy || !detail.run_assembly_available}
+                  onClick={assembleRun}
+                >
+                  <CirclePlus size={14} /> 装配执行 Run
+                </button>
+              )}
+            </section>
+          )}
+
           <div className="task-manager-layout">
             <section className="task-manager-main panel-surface">
               <header className="task-manager-panel-title">
                 <span><Network size={14} /> TASK GRAPH</span>
-                <small>{proposal ? "PREVIEW · NOT APPLIED" : detail.plan.status.toUpperCase()}</small>
+                <small>{proposal
+                  ? "PREVIEW · NOT APPLIED"
+                  : detail.execution_run
+                    ? `RUN PLAN R${detail.execution_run.plan_revision}`
+                    : detail.plan.status.toUpperCase()}</small>
               </header>
               <div className="task-manager-graph">
                 <ReactFlow
@@ -701,11 +821,26 @@ export function TaskManager({ onNotice }: TaskManagerProps) {
                       </article>
                     ))}
                   </div>
-                  <form onSubmit={sendMessage}>
-                    {selectedNode && <div className="agent-node-context"><GitBranch size={13} /> 正在讨论：{selectedNode.node.title}<button type="button" onClick={() => setSelectedNodeId(null)}><X size={12} /></button></div>}
-                    <textarea value={message} onChange={(event) => setMessage(event.target.value)} placeholder={proposal ? "可以继续说明修改要求；当前候选图仍需先决定。" : "描述调整、拆分、支线、约束或验收要求…"} />
-                    <div><small>每轮对话和候选图都会进入 revision 日志。</small><button className="button button-primary" disabled={busy || !message.trim()}>{busy ? <LoaderCircle size={14} /> : <Send size={14} />} 发送</button></div>
-                  </form>
+                  {detail.execution_run ? (
+                    <div className="agent-plan-locked">
+                      <ShieldCheck size={18} />
+                      <div><strong>规划输入已锁定</strong><span>执行反馈请到执行页处理；新目标或修改应创建新任务，不能覆盖既有 Run。</span></div>
+                      <button className="button button-quiet" type="button" onClick={() => setShowCreate(true)}><CirclePlus size={13} /> 新任务</button>
+                    </div>
+                  ) : (
+                    <form onSubmit={sendMessage}>
+                      {selectedNode && <div className="agent-node-context"><GitBranch size={13} /> 正在讨论：{selectedNode.node.title}<button type="button" onClick={() => setSelectedNodeId(null)}><X size={12} /></button></div>}
+                      <textarea
+                        value={message}
+                        onChange={(event) => setMessage(event.target.value)}
+                        placeholder={proposal ? "可以继续说明修改要求；当前候选图仍需先决定。" : "描述调整、拆分、支线、约束或验收要求…"}
+                      />
+                      <div>
+                        <small>每轮对话和候选图都会进入 revision 日志。</small>
+                        <button className="button button-primary" disabled={busy || !message.trim()}>{busy ? <LoaderCircle size={14} /> : <Send size={14} />} 发送</button>
+                      </div>
+                    </form>
+                  )}
                 </div>
               </section>
             </aside>

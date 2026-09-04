@@ -60,7 +60,6 @@ export function HumanActionGuidanceCard({
   );
   const [rationale, setRationale] = useState("");
   const [agentMessage, setAgentMessage] = useState("");
-  const [confirmedEvidence, setConfirmedEvidence] = useState<string[]>([]);
   const [confirmedBoundary, setConfirmedBoundary] = useState(false);
   const selectedDecision = useMemo(
     () => guidance.decisions.find((item) => item.decision_id === selectedDecisionId)
@@ -70,15 +69,10 @@ export function HumanActionGuidanceCard({
   const formal = Boolean(
     selectedDecision && interactive?.isFormalDecision(selectedDecision),
   );
-  const allEvidenceConfirmed = guidance.evidence_to_review.every(
-    (item) => confirmedEvidence.includes(item),
-  );
-
   useEffect(() => {
     setSelectedDecisionId(guidance.decisions[0]?.decision_id ?? "");
     setRationale("");
     setAgentMessage("");
-    setConfirmedEvidence([]);
     setConfirmedBoundary(false);
   }, [guidance.guidance_id, guidance.decisions]);
 
@@ -109,23 +103,11 @@ export function HumanActionGuidanceCard({
 
       {!compact && guidance.evidence_to_review.length > 0 && (
         <section className="human-action-evidence">
-          <h4><FileSearch size={13} /> 必须审阅的证据</h4>
-          <div>{guidance.evidence_to_review.map((item) => (
-            interactive ? (
-              <label key={item}>
-                <input
-                  type="checkbox"
-                  checked={confirmedEvidence.includes(item)}
-                  onChange={(event) => setConfirmedEvidence((current) => (
-                    event.target.checked
-                      ? [...current, item]
-                      : current.filter((value) => value !== item)
-                  ))}
-                />
-                <code>{item}</code>
-              </label>
-            ) : <code key={item}>{item}</code>
-          ))}</div>
+          <details>
+            <summary><FileSearch size={13} /> 验收证据引用（{guidance.evidence_to_review.length}）</summary>
+            <p>这些引用用于绑定服务端验证与审计记录；请结合节点验证摘要和实际交付物核对，不要仅凭 ID 批准。</p>
+            <div>{guidance.evidence_to_review.map((item) => <code key={item}>{item}</code>)}</div>
+          </details>
         </section>
       )}
 
@@ -178,7 +160,7 @@ export function HumanActionGuidanceCard({
                 checked={confirmedBoundary}
                 onChange={(event) => setConfirmedBoundary(event.target.checked)}
               />
-              <span>我已核对全部列明证据、处理要求和禁止动作，并确认该决定只作用于所示 Plan/Run revision。</span>
+              <span>我已核对可见的验证摘要与实际交付物，并确认该决定只作用于所示 Plan/Run revision，不扩大到未列明的外部动作。</span>
             </label>
           )}
           <div className="human-action-control-footer">
@@ -195,7 +177,6 @@ export function HumanActionGuidanceCard({
                 || rationale.trim().length < 8
                 || (formal && (
                   !interactive.canSubmitDecision(guidance, selectedDecision)
-                  || !allEvidenceConfirmed
                   || !confirmedBoundary
                 ))
                 || (!formal && !interactive.canRecordFeedback)

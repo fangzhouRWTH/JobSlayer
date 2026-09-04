@@ -62,6 +62,10 @@ class TaskManagerCapabilityUnavailableError(RuntimeError):
     """Raised when a command targets a deliberately unconfigured capability."""
 
 
+class TaskManagerPlanLockedByRunError(RuntimeError):
+    """Raised when planning input is changed after immutable run assembly."""
+
+
 class TaskManagerService:
     """Expose one task product surface without creating a second state owner."""
 
@@ -125,6 +129,7 @@ class TaskManagerService:
         expected_revision: int,
         selected_node_id: str | None = None,
     ) -> ManagedTaskDetail:
+        self._require_plan_without_run(task_id)
         self.planning.discuss(
             task_id,
             content,
@@ -147,6 +152,7 @@ class TaskManagerService:
             raise TaskManagerCapabilityUnavailableError(
                 "TaskManager execution-target registry is not configured"
             )
+        self._require_plan_without_run(task_id)
         binding = self.execution.resolve_target(target_id)
         self.planning.set_execution_target(
             task_id,
@@ -163,6 +169,7 @@ class TaskManagerService:
         *,
         expected_revision: int,
     ) -> ManagedTaskDetail:
+        self._require_plan_without_run(task_id)
         self.planning.apply_proposal(
             task_id,
             proposal_id,
@@ -177,6 +184,7 @@ class TaskManagerService:
         *,
         expected_revision: int,
     ) -> ManagedTaskDetail:
+        self._require_plan_without_run(task_id)
         self.planning.reject_proposal(
             task_id,
             proposal_id,
@@ -190,6 +198,7 @@ class TaskManagerService:
         *,
         expected_revision: int,
     ) -> ManagedTaskDetail:
+        self._require_plan_without_run(task_id)
         if self.execution is not None:
             record = self.planning.get(task_id)
             if record.sequence != expected_revision:
@@ -586,14 +595,25 @@ class TaskManagerService:
             else snapshot.nodes
         )
         projected_nodes = self._nodes(record, assessment, run)
+        terminal_run = run is not None and run.snapshot.stage in {
+            TaskManagerRunStage.COMPLETED,
+            TaskManagerRunStage.CANCELLED,
+        }
         target_blockers = 0
         if self.execution is not None:
-            if snapshot.execution_target_id is None:
+            if terminal_run:
+                target_blockers = 0
+            elif snapshot.execution_target_id is None:
                 target_blockers = 1
             else:
+                binding = (
+                    run.snapshot.execution_binding
+                    if run is not None
+                    else self.execution.resolve_target(snapshot.execution_target_id)
+                )
                 target_blockers = sum(
                     issue.severity.value == "blocker"
-                    for issue in self.execution.assess_target(record).issues
+                    for issue in assess_plan_for_target(snapshot, binding).issues
                 )
         return ManagedTaskSummary(
             task_id=record.plan_id,
@@ -601,16 +621,23 @@ class TaskManagerService:
             task_description=snapshot.task_description,
             revision=record.sequence,
             stage=self._stage(record, run),
-            pending_proposal=snapshot.pending_proposal is not None,
-            node_count=len(effective_nodes),
+            pending_proposal=(
+                snapshot.pending_proposal is not None and not terminal_run
+            ),
+            node_count=(len(projected_nodes) if run is not None else len(effective_nodes)),
             backlog_count=(
                 sum(item.state is not ManagedNodeState.COMPLETED for item in projected_nodes)
                 if backlog_count is None
                 else backlog_count
             ),
-            blocker_count=sum(
-                issue.severity.value == "blocker" for issue in assessment.issues
-            ) + target_blockers,
+            blocker_count=(
+                0
+                if terminal_run
+                else sum(
+                    issue.severity.value == "blocker" for issue in assessment.issues
+                )
+                + target_blockers
+            ),
             is_archived=snapshot.is_archived,
             updated_at=(
                 max(snapshot.updated_at, run.snapshot.updated_at)
@@ -628,6 +655,14 @@ class TaskManagerService:
         snapshot = record.snapshot
         if snapshot.is_archived:
             return ManagedTaskStage.ARCHIVED
+        if run is not None and run.snapshot.stage in {
+            TaskManagerRunStage.COMPLETED,
+            TaskManagerRunStage.CANCELLED,
+        }:
+            return {
+                TaskManagerRunStage.COMPLETED: ManagedTaskStage.COMPLETED,
+                TaskManagerRunStage.CANCELLED: ManagedTaskStage.CANCELLED,
+            }[run.snapshot.stage]
         if snapshot.pending_proposal is not None:
             return ManagedTaskStage.PROPOSAL_PENDING
         if run is not None:
@@ -790,6 +825,11 @@ class TaskManagerService:
     ) -> tuple[str, ...]:
         if self.execution is None:
             return (RUN_ASSEMBLY_NOT_CONFIGURED,)
+        if run is not None and run.snapshot.stage in {
+            TaskManagerRunStage.COMPLETED,
+            TaskManagerRunStage.CANCELLED,
+        }:
+            return (f"执行运行已进入终态：{run.snapshot.stage.value}。",)
         target_id = record.snapshot.execution_target_id
         if target_id is None:
             return (TARGET_NOT_SELECTED,)
@@ -810,11 +850,6 @@ class TaskManagerService:
             return (PLAN_NOT_FINALIZED,)
         if run is None:
             return (RUN_NOT_ASSEMBLED,)
-        if run.snapshot.stage in {
-            TaskManagerRunStage.COMPLETED,
-            TaskManagerRunStage.CANCELLED,
-        }:
-            return (f"执行运行已进入终态：{run.snapshot.stage.value}。",)
         workflow_states = {node.workflow_state for node in run.snapshot.nodes}
         if TaskState.REVIEWING in workflow_states:
             return ()
@@ -876,10 +911,22 @@ class TaskManagerService:
         self,
         record: TaskPlanRevisionRecord,
     ) -> TaskManagerRunRevisionRecord | None:
-        return (
-            self.execution.for_plan_record(record)
-            if self.execution is not None
-            else None
+        if self.execution is None:
+            return None
+        exact = self.execution.for_plan_record(record)
+        if exact is not None:
+            return exact
+        return self.execution.latest_for_plan(record.plan_id, terminal_only=True)
+
+    def _require_plan_without_run(self, task_id: str) -> None:
+        if self.execution is None:
+            return
+        run = self.execution.latest_for_plan(task_id)
+        if run is None:
+            return
+        raise TaskManagerPlanLockedByRunError(
+            "任务已装配执行 Run，规划输入已锁定；请在执行页处理当前 Run，"
+            "新的目标或修改请创建新任务。"
         )
 
     def _require_execution_run(
@@ -1053,5 +1100,6 @@ __all__ = [
     "RUN_NOT_ASSEMBLED",
     "TARGET_NOT_SELECTED",
     "TaskManagerCapabilityUnavailableError",
+    "TaskManagerPlanLockedByRunError",
     "TaskManagerService",
 ]

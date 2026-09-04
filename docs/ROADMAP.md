@@ -15,6 +15,9 @@
 3. Agent/命令/验证/审查/人工门禁反馈统一回写 DAG、Backlog、总 Log 与制品；
 4. BraveNewWorld + 固定 Anygine 公共 consumer 上的真实小 App 闭环。
 
+当前先执行“一任务一 Run”：Run 装配后锁定规划，终态 Run 优先于后写草稿决定任务投影；编排页只
+突出一个下一步。计划回开、多 Run 和更多并行动作在该闭环通过回归前不进入主线。
+
 退出条件是同一任务可在进程重启后继续，从 finalized DAG 串行到真实 Anygine build/Vulkan smoke
 证据和最终人工门禁，且没有第二个状态所有者。Dagger、第二执行器、远程多租户、分布式调度和广义
 仿真验证全部后置。
@@ -65,12 +68,12 @@
 - [x] 本地认证项目仪表板、证据面板和审批状态视图；
 - [~] TaskManager 聚焦 UI（当前 App 以左缘垂直栏切换首页、Quick Agent、Backlog/总控、任务编排和
   具体执行；编排仍保持左 2/3 DAG、右 1/3 节点详情/Agent 对话，其他版面只投影真实 read model；
-  当前 v8 在 Calm Ops、动态 Codex Quick Agent 和持久 coordinator 上加入 revision-bound 人工处理
-  指导、证据核对、正式治理按钮、追加式反馈和任务绑定只读 Agent；下一步补充 artifact 直接打开与
-  人工停顿通知）；
+  当前 v9 在 Calm Ops、动态 Codex Quick Agent、持久 coordinator 和受治理人工处理上加入单一下一步、
+  Run 后规划锁定与终态优先投影，并移除不可操作的逐 evidence ID 勾选；下一步补充 artifact 直接打开
+  与人工停顿通知）；
 - [x] 建立版本化语义弹性 UI 描述：逐单元 dirty/planned/stable、内容 hash、stable 保护、后端唯一
-  活动方案、Agent request/draft 和确定性差异处置已落地；当前 TaskManager v8 已登记并绑定外部
-  advice、真实模型目录/会话 smoke、串行 coordinator 与受治理人工确认闭环；在线编辑与
+  活动方案、Agent request/draft 和确定性差异处置已落地；当前 TaskManager v9 已登记并绑定外部
+  advice、真实模型目录/会话 smoke、串行 coordinator、受治理人工确认与单任务闭环；在线编辑与
   认证 activation command 继续后置；
 - [x] 隔离接入固定版本 UI/UX Pro Max 核心知识：只读 provider adapter、整树内容锁、原始/规范化
   制品和 SUID/Agent evidence 约束已落地；自动查询进入 TaskManager DAG 前仍需三组人工接受试验；
@@ -138,6 +141,7 @@
 5. [x] 保留所有权限、verification、独立 review/approval 与最终 completion gate。
 6. [x] 对所有当前人工计划/run 停顿投影 revision-bound 的要求、详细步骤、证据、决定和禁止动作。
 7. [x] 在执行页接入证据核对后的正式命令、append-only 人工反馈与无决定权的任务 Agent 辅助。
+8. [x] Run 装配后锁定 TaskManager 规划入口，并让终态 Run 决定任务、DAG、Backlog 与执行页投影。
 
 ### 迭代 C：Anygine 小 App 真实闭环
 

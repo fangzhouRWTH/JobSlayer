@@ -59,5 +59,6 @@
 | [ADR-0055](0055-persistent-single-step-task-manager-coordinator.md) | Accepted | 用持久 intent/cursor、单 run lease 和单步 tick 串行调用既有命令，并在审查、人工门禁与故障态停止 |
 | [ADR-0056](0056-revision-bound-human-action-guidance.md) | Accepted | 用绑定精确 plan/run revision 的结构化指导，在任务图和反馈中明确人工要求、步骤、证据、决定与禁止动作 |
 | [ADR-0057](0057-governed-human-decision-controls-and-assistance.md) | Accepted | 在执行页以既有治理命令提交正式人工决定，并用 run 哈希链保留非转换反馈和只读 Agent 辅助对话 |
+| [ADR-0058](0058-one-task-one-run-and-terminal-projection.md) | Accepted | 先以一任务一 Run、终态优先投影和单一下一步消除 TaskManager 计划/执行双重真相 |
 
 新增或取代 ADR 时，同时更新本索引和 `docs/DEVELOPMENT_LOG.md`。Accepted ADR 不通过静默编辑改变原决定；需要改变方向时新增 superseding ADR。
